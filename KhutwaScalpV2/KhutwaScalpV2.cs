@@ -5,7 +5,7 @@ using cAlgo.API.Indicators;
 namespace cAlgo.Robots
 {
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
-    public class KhutwaScalpV2 : Robot
+    public class KhutwaScalpV21 : Robot
     {
         // =========================
         // Signal engine (M1 default)
@@ -128,7 +128,7 @@ namespace cAlgo.Robots
         [Parameter("Allow Sell", DefaultValue = true)]
         public bool AllowSell { get; set; }
 
-        [Parameter("Bot Label", DefaultValue = "Khutwa-Scalp-V2")]
+        [Parameter("Bot Label", DefaultValue = "Khutwa-Scalp-V21")]
         public string BotLabel { get; set; }
 
 
@@ -143,6 +143,28 @@ namespace cAlgo.Robots
         private int _consecutiveLosses;
         private DateTime _lastEntryTime = DateTime.MinValue;
         private bool _dayBlocked;
+
+        [Parameter("Show Diagnostic Logs", DefaultValue = true)]
+        public bool ShowDiagnosticLogs { get; set; }
+
+        [Parameter("Log Every N Bars", DefaultValue = 5, MinValue = 1, MaxValue = 60)]
+        public int DiagnosticIntervalBars { get; set; }
+
+        private int _diagBars;
+        private int _lastDiagBar = -1000;
+        private string _lastDiagReason = "";
+
+        private void LogWait(string reason)
+        {
+            if (!ShowDiagnosticLogs) return;
+            if (reason != _lastDiagReason ||
+                _diagBars - _lastDiagBar >= DiagnosticIntervalBars)
+            {
+                Print("WAIT: {0}", reason);
+                _lastDiagBar = _diagBars;
+                _lastDiagReason = reason;
+            }
+        }
 
 
         protected override void OnStart()
@@ -174,7 +196,8 @@ namespace cAlgo.Robots
 
             Positions.Closed += OnPositionClosed;
 
-            Print("KhutwaScalpV2 started.");
+            Print("KhutwaScalpV21 diagnostic build started.");
+            Print("Live spread limit={0:F2} pips; estimated extra cost={1:F2} pips; max cost/stop={2:F2}. Verify actual Fiper commission.", MaxSpreadPips, ExtraRoundTurnCostPips, MaxCostToStopRatio);
             Print("Symbol={0}, TimeFrame={1}", SymbolName, TimeFrame);
             Print("Recommended first profile: EURUSD / M1 / DEMO.");
             Print("Risk={0}% | MaxTrades={1} | DailyLossLimit={2}%",
@@ -185,19 +208,20 @@ namespace cAlgo.Robots
         protected override void OnBarClosed()
         {
             ResetDayIfNeeded();
+            _diagBars++;
 
             if (_dayBlocked)
+            {
+                LogWait("Daily trading blocked.");
                 return;
+            }
 
-            if (!Symbol.MarketHours.IsOpened())
-                return;
+            if (!Symbol.MarketHours.IsOpened()) { LogWait("Market is closed."); return; }
 
             int hour = Server.Time.Hour;
-            if (!IsInsideSession(hour))
-                return;
+            if (!IsInsideSession(hour)) { LogWait(string.Format("Outside UTC session. Hour={0}, session={1}-{2}", hour, SessionStartUtcHour, SessionEndUtcHour)); return; }
 
-            if (_tradesToday >= MaxTradesPerDay)
-                return;
+            if (_tradesToday >= MaxTradesPerDay) { LogWait("Daily trade count limit reached."); return; }
 
             if (_consecutiveLosses >= MaxConsecutiveLosses)
             {
@@ -213,24 +237,19 @@ namespace cAlgo.Robots
                 return;
             }
 
-            if ((Server.Time - _lastEntryTime).TotalSeconds < CooldownSeconds)
-                return;
+            if ((Server.Time - _lastEntryTime).TotalSeconds < CooldownSeconds) { LogWait("Cooldown active."); return; }
 
-            if (Positions.FindAll(BotLabel, SymbolName).Length > 0)
-                return;
+            if (Positions.FindAll(BotLabel, SymbolName).Length > 0) { LogWait("Existing bot position is still open."); return; }
 
             int minBars = Math.Max(SlowEmaPeriod, Math.Max(AtrPeriod, VolumeLookback)) + 5;
-            if (Bars.Count < minBars)
-                return;
+            if (Bars.Count < minBars) { LogWait(string.Format("Waiting for candles: {0}/{1}.", Bars.Count, minBars)); return; }
 
             double spreadPips = (Symbol.Ask - Symbol.Bid) / Symbol.PipSize;
 
-            if (spreadPips <= 0 || spreadPips > MaxSpreadPips)
-                return;
+            if (spreadPips <= 0 || spreadPips > MaxSpreadPips) { LogWait(string.Format("Spread: {0:F2} > permitted {1:F2} pips.", spreadPips, MaxSpreadPips)); return; }
 
             double atrPips = _atr.Result.Last(0) / Symbol.PipSize;
-            if (atrPips <= 0)
-                return;
+            if (atrPips <= 0) { LogWait("No valid ATR reading."); return; }
 
             double stopPips = Math.Max(
                 MinimumStopPips,
@@ -243,11 +262,9 @@ namespace cAlgo.Robots
             // breakeven p = (1 + c) / (1 + RR)
             double breakEvenWinRate = (1.0 + costToStop) / (1.0 + RewardRiskRatio);
 
-            if (costToStop > MaxCostToStopRatio)
-                return;
+            if (costToStop > MaxCostToStopRatio) { LogWait(string.Format("Cost/stop={0:F2} > {1:F2} (spread={2:F2}, extra EST={3:F2}, SL={4:F2} pips).", costToStop, MaxCostToStopRatio, spreadPips, ExtraRoundTurnCostPips, stopPips)); return; }
 
-            if (breakEvenWinRate * 100.0 > MaxBreakEvenWinRatePct)
-                return;
+            if (breakEvenWinRate * 100.0 > MaxBreakEvenWinRatePct) { LogWait(string.Format("Estimated break-even win-rate {0:F1}% exceeds permitted {1:F1}%.", breakEvenWinRate*100, MaxBreakEvenWinRatePct)); return; }
 
             double fast = _fastEma.Result.Last(0);
             double slow = _slowEma.Result.Last(0);
@@ -258,8 +275,7 @@ namespace cAlgo.Robots
             double currentVolume = Bars.TickVolumes.Last(0);
             double averageVolume = AverageTickVolume(1, VolumeLookback);
 
-            if (averageVolume <= 0)
-                return;
+            if (averageVolume <= 0) { LogWait("No recent tick-volume average."); return; }
 
             double volumeRatio = currentVolume / averageVolume;
 
@@ -317,6 +333,10 @@ namespace cAlgo.Robots
             else if (AllowSell && sellScore >= MinSignalScore && sellScore > buyScore)
             {
                 OpenScalp(TradeType.Sell, stopPips, breakEvenWinRate, sellScore);
+            }
+            else
+            {
+                LogWait(string.Format("No signal. BuyScore={0:F2} SellScore={1:F2} required={2:F2} RSI={3:F1} VolRatio={4:F2}.", buyScore, sellScore, MinSignalScore, rsi, volumeRatio));
             }
         }
 
@@ -504,7 +524,7 @@ namespace cAlgo.Robots
         protected override void OnStop()
         {
             Positions.Closed -= OnPositionClosed;
-            Print("KhutwaScalpV2 stopped.");
+            Print("KhutwaScalpV21 diagnostic build stopped.");
         }
     }
 }
