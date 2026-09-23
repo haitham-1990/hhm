@@ -1,4 +1,4 @@
-# الصقر — SAQR Multi (experimental M1 multi-market cBot)
+# الصقر — SAQR Quant V2 (continuous M1 multi-market DEMO research bot)
 
 This cBot monitors **EURUSD, GBPUSD, USDJPY and XAUUSD** (symbol names are editable
 to match broker suffixes) using fully closed **M1** bars for entry and fully
@@ -47,3 +47,32 @@ with broker-realistic spread/fees, then out-of-sample and forward tests for
 at least several market regimes. There is NO economic-news event calendar,
 so the candle spike filter cannot protect against sudden data releases.
 Concurrent separate bots/accounts do not share these limits.
+
+## SAQR Quant V2 modifications (separate version label)
+- `SAQR-Quant-V2` label for fresh forward-test stats. **Stop the prior SAQR bot** before
+  installing V2; only ONE bot should trade this group of instruments on the account.
+- Scan 24 hours *while the cTrader cloud instance is running AND each broker
+  instrument is open*. Market hours, weekends, outages and safety filters can
+  prevent trades. The scanner remains running after winning trades.
+- Entry volume/risk and cost geometry are recalculated immediately before orders.
+- New ATR-normalized mathematical gates: M1 EMA distance / M1 ATR >= 0.10;
+  M5 EMA distance / M5 ATR >= 0.12; candle body / M1 ATR >= 0.12.
+  Each is based on the latest completed bar. They are heuristics, **not**
+  statistically verified win probabilities.
+- Expected TARGET after *estimated* round-trip cost divided by stop plus
+  estimated cost: `netRR = (rewardRisk - estimatedCost/stop) /
+  (1 + estimatedCost/stop)`. Default minimum is 1.02.
+- Simplified modeled breakeven hit rate (NOT observed hit rate):
+  `pBE = (1 + estimatedCost/stop) / (1 + rewardRisk)`, default maximum 52%.
+  These are mechanical payoff ratios, NOT promises of execution quality or profit.
+- Dimensionless cross-asset candidate scoring combines signal score, relative
+  M1 and M5 trend strength, candle body/ATR, normalized tick volume and cost/stop.
+- Every 5 minutes, a HEARTBEAT prints counters, running state and block status.
+  When signals are rejected, diagnostics display an available reason per market.
+- Cooldown default 60 sec, max daily orders default 30; both adjustable.
+  Daily **2% reference loss limit and 3-loss streak circuit breakers remain**.
+  They may block NEW orders until the next UTC day, but scanning/heartbeat continue.
+  This protects against infinite trading; it is not a guaranteed max-loss limit.
+- No externally sourced economic calendar/news guard is installed.
+- Never infer validated profitability from a mathematical formula; perform
+  broker-condition backtesting and out-of-sample DEMO forward testing.
