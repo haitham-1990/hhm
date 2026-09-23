@@ -3,7 +3,8 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
-    <AlgoName>KhutwaScalpV2</AlgoName>
+    <AlgoName>KhutwaScalpV22</AlgoName>
+    <AssemblyName>KhutwaScalpV22</AssemblyName>
     <AlgoBuild>true</AlgoBuild>
     <AlgoPublish>false</AlgoPublish>
     <IncludeSource>true</IncludeSource>
