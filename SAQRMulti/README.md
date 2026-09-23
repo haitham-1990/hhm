@@ -17,7 +17,7 @@ a trained model or a proven expected-return estimate.
 - 2% **approximate** daily equity loss threshold. Blocks NEW entries only:
   existing positions keep broker SL/TP and time management; this is not
   a guaranteed liquidation limit, particularly with restarts/other trades.
-- 120 second cooldown, trading session UTC 07:00–20:00 (Oman UTC+4: 11am to midnight).
+- 120 second cooldown, scanner operates UTC 00:00–24:00 (all hours while each broker's market is open). A symbol may be skipped if closed, too expensive, too volatile or signal is absent.
 - FX dynamic stop (pips): max(4, 1.4*ATR14, 3*spread), capped at 14.
 - GOLD dynamic stop (quoted USD/oz): max(2, 1.8*ATR14, 4*spread), capped at 12.
 - M1 candle spike, ATR, spread/ATR and transaction cost/stop filters.
