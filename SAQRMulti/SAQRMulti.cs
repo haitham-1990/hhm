@@ -62,7 +62,7 @@ namespace cAlgo.Robots
         [Parameter("UTC session start hour", DefaultValue = 7, MinValue = 0, MaxValue = 23, Group = "Session")]
         public int StartHour { get; set; }
 
-        [Parameter("UTC session end hour", DefaultValue = 17, MinValue = 1, MaxValue = 24, Group = "Session")]
+        [Parameter("UTC session end hour", DefaultValue = 20, MinValue = 1, MaxValue = 24, Group = "Session")]
         public int EndHour { get; set; }
 
         [Parameter("M1 fast EMA", DefaultValue = 9, MinValue = 2, Group = "Signals")]
@@ -245,6 +245,7 @@ namespace cAlgo.Robots
             Timer.Start(10);
             Print("SAQR ON | DEMO={0} markets={1} M1 closed candles with closed M5 direction. ONE total SAQR position max. Risk={2:F2}%",
                 DemoOnly, string.Join(",", _markets.Select(x => x.Symbol.Name)), RiskPercent);
+            Print("SAQR trading session UTC={0}:00 to {1}:00 (Oman UTC+4: default 11:00-00:00); no new entries outside session.", StartHour, EndHour);
             Print("SAQR: estimated extra fees are PLACEHOLDERS; check broker actual commissions. Daily equity baseline reconstructed, not an enforceable liquidation cap.");
         }
 
