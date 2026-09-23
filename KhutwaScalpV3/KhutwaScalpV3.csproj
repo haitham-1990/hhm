@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AlgoName>KhutwaScalpV3</AlgoName>
+    <AssemblyName>KhutwaScalpV3</AssemblyName>
+    <AlgoBuild>true</AlgoBuild>
+    <AlgoPublish>false</AlgoPublish>
+    <IncludeSource>true</IncludeSource>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="cTrader.Automate" Version="1.0.21" />
+  </ItemGroup>
+</Project>
