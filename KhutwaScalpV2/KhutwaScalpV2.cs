@@ -1,11 +1,12 @@
 using System;
+using System.Collections.Generic;
 using cAlgo.API;
 using cAlgo.API.Indicators;
 
 namespace cAlgo.Robots
 {
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
-    public class KhutwaScalpV21 : Robot
+    public class KhutwaScalpV22 : Robot
     {
         // =========================
         // Signal engine (M1 default)
@@ -55,7 +56,7 @@ namespace cAlgo.Robots
         [Parameter("ATR Stop Multiplier", DefaultValue = 0.90, MinValue = 0.2)]
         public double AtrStopMultiplier { get; set; }
 
-        [Parameter("Minimum Stop (pips)", DefaultValue = 3.0, MinValue = 0.5)]
+        [Parameter("Minimum Stop (pips)", DefaultValue = 4.0, MinValue = 0.5)]
         public double MinimumStopPips { get; set; }
 
         [Parameter("Reward / Risk", DefaultValue = 1.25, MinValue = 0.5)]
@@ -128,7 +129,7 @@ namespace cAlgo.Robots
         [Parameter("Allow Sell", DefaultValue = true)]
         public bool AllowSell { get; set; }
 
-        [Parameter("Bot Label", DefaultValue = "Khutwa-Scalp-V21")]
+        [Parameter("Bot Label", DefaultValue = "Khutwa-Scalp-V22")]
         public string BotLabel { get; set; }
 
 
@@ -143,6 +144,26 @@ namespace cAlgo.Robots
         private int _consecutiveLosses;
         private DateTime _lastEntryTime = DateTime.MinValue;
         private bool _dayBlocked;
+
+        [Parameter("Demo ONLY - Block Live", DefaultValue = true)]
+        public bool DemoOnly { get; set; }
+
+        private class EntryAudit
+        {
+            public double QuotedSpread;
+            public double QuotedPrice;
+            public double ExtraEstimatedPips;
+            public double OriginalStopPips;
+        }
+
+        private readonly Dictionary<int, EntryAudit> _entryAudit = new Dictionary<int, EntryAudit>();
+        private readonly Dictionary<int, string> _intendedClosures = new Dictionary<int, string>();
+        private int _closedCount;
+        private int _wins;
+        private int _losses;
+        private double _realisedNet;
+        private double _sumWinners;
+        private double _sumLosers;
 
         [Parameter("Show Diagnostic Logs", DefaultValue = true)]
         public bool ShowDiagnosticLogs { get; set; }
@@ -169,6 +190,8 @@ namespace cAlgo.Robots
 
         protected override void OnStart()
         {
+            if (DemoOnly && Account.IsLive) { Print("SAFETY BLOCK: live account detected. DemoOnly=true; bot stopped."); Stop(); return; }
+
             if (FastEmaPeriod >= SlowEmaPeriod)
             {
                 Print("ERROR: Fast EMA must be smaller than Slow EMA.");
@@ -196,7 +219,7 @@ namespace cAlgo.Robots
 
             Positions.Closed += OnPositionClosed;
 
-            Print("KhutwaScalpV21 diagnostic build started.");
+            Print("KhutwaScalpV22 entry and exit audit started. DemoOnly={0}", DemoOnly);
             Print("Live spread limit={0:F2} pips; estimated extra cost={1:F2} pips; max cost/stop={2:F2}. Verify actual Fiper commission.", MaxSpreadPips, ExtraRoundTurnCostPips, MaxCostToStopRatio);
             Print("Symbol={0}, TimeFrame={1}", SymbolName, TimeFrame);
             Print("Recommended first profile: EURUSD / M1 / DEMO.");
@@ -246,7 +269,8 @@ namespace cAlgo.Robots
 
             double spreadPips = (Symbol.Ask - Symbol.Bid) / Symbol.PipSize;
 
-            if (spreadPips <= 0 || spreadPips > MaxSpreadPips) { LogWait(string.Format("Spread: {0:F2} > permitted {1:F2} pips.", spreadPips, MaxSpreadPips)); return; }
+            if (spreadPips <= 0) { LogWait("Invalid/zero spread quote; waiting for valid prices."); return; }
+            if (spreadPips > MaxSpreadPips) { LogWait(string.Format("Spread too high: {0:F2} > {1:F2} pips.", spreadPips, MaxSpreadPips)); return; }
 
             double atrPips = _atr.Result.Last(0) / Symbol.PipSize;
             if (atrPips <= 0) { LogWait("No valid ATR reading."); return; }
@@ -344,6 +368,11 @@ namespace cAlgo.Robots
         protected override void OnTick()
         {
             ResetDayIfNeeded();
+            if (!_dayBlocked && DailyLossLimitReached())
+            {
+                _dayBlocked = true;
+                Print("BLOCKED on tick: daily equity threshold reached. Existing position keeps its own SL/TP.");
+            }
 
             var positions = Positions.FindAll(BotLabel, SymbolName);
 
@@ -357,7 +386,13 @@ namespace cAlgo.Robots
                 // Time-based exit: this is a scalper, not a swing bot.
                 if ((Server.Time - position.EntryTime).TotalMinutes >= MaxMinutesInTrade)
                 {
-                    ClosePosition(position);
+                    _intendedClosures[position.Id] = "BOT_TIME_LIMIT";
+                    var closed = ClosePosition(position);
+                    if (!closed.IsSuccessful)
+                    {
+                        _intendedClosures.Remove(position.Id);
+                        Print("TIME_EXIT_FAILED id={0} error={1}", position.Id, closed.Error);
+                    }
                     continue;
                 }
 
@@ -376,7 +411,14 @@ namespace cAlgo.Robots
                         (position.TradeType == TradeType.Sell && position.StopLoss.Value > newStop);
 
                     if (shouldMove)
-                        ModifyPosition(position, newStop, position.TakeProfit);
+                    {
+                        var moved = position.ModifyStopLossPrice(Math.Round(newStop, Symbol.Digits));
+                        if (moved.IsSuccessful)
+                            Print("BREAK_EVEN_STOP_MOVED id={0} stopPrice={1:F5} unrealisedPips={2:F1}",
+                                position.Id, newStop, position.Pips);
+                        else
+                            Print("BREAK_EVEN_STOP_FAILED id={0} error={1}", position.Id, moved.Error);
+                    }
                 }
             }
         }
@@ -404,6 +446,19 @@ namespace cAlgo.Robots
             if (volume > Symbol.VolumeInUnitsMax)
                 volume = Symbol.VolumeInUnitsMax;
 
+            // Use the latest bid/ask just before submission; both may change while scoring.
+            double quotedSpreadPips = (Symbol.Ask - Symbol.Bid) / Symbol.PipSize;
+            double quotedSidePrice = type == TradeType.Buy ? Symbol.Ask : Symbol.Bid;
+            double updatedCostRatio = (quotedSpreadPips + ExtraRoundTurnCostPips) / stopPips;
+            double updatedBreakEven = (1.0 + updatedCostRatio) / (1.0 + RewardRiskRatio) * 100.0;
+            if (quotedSpreadPips <= 0 || quotedSpreadPips > MaxSpreadPips ||
+                updatedCostRatio > MaxCostToStopRatio || updatedBreakEven > MaxBreakEvenWinRatePct)
+            {
+                LogWait(string.Format("Quotes changed before entry: spread={0:F2} cost/stop={1:F2} estimated BE={2:F1}%",
+                    quotedSpreadPips, updatedCostRatio, updatedBreakEven));
+                return;
+            }
+
             var result = ExecuteMarketOrder(
                 type,
                 SymbolName,
@@ -421,14 +476,24 @@ namespace cAlgo.Robots
             _tradesToday++;
             _lastEntryTime = Server.Time;
 
-            Print(
-                "{0} | Score={1:F2} | SL={2:F2}p | TP={3:F2}p | BE win-rate≈{4:F1}% | Volume={5}",
-                type,
-                score,
-                stopPips,
-                takeProfitPips,
-                breakEvenWinRate * 100.0,
-                volume);
+            if (result.Position != null)
+            {
+                var p = result.Position;
+                _entryAudit[p.Id] = new EntryAudit
+                {
+                    QuotedSpread = quotedSpreadPips,
+                    QuotedPrice = quotedSidePrice,
+                    ExtraEstimatedPips = ExtraRoundTurnCostPips,
+                    OriginalStopPips = stopPips
+                };
+                double adverseSlippage = (p.EntryPrice - quotedSidePrice) / Symbol.PipSize *
+                    (type == TradeType.Buy ? 1.0 : -1.0);
+                Print("OPEN id={0} side={1} units={2} score={3:F2} quotedSpread={4:F2}p quote={5:F5} fill={6:F5} adverseSlippage={7:F2}p stop={8:F2}p target={9:F2}p extraCostEST={10:F2}p",
+                    p.Id, type, volume, score, quotedSpreadPips, quotedSidePrice, p.EntryPrice,
+                    adverseSlippage, stopPips, takeProfitPips, ExtraRoundTurnCostPips);
+            }
+            else
+                Print("OPEN: side={0} units={1}; no returned position details.", type, volume);
         }
 
 
@@ -445,6 +510,10 @@ namespace cAlgo.Robots
 
         private double GetInitialRiskPips(Position position)
         {
+            EntryAudit audit;
+            if (_entryAudit.TryGetValue(position.Id, out audit) && audit.OriginalStopPips > 0)
+                return audit.OriginalStopPips;
+
             if (position.TakeProfit.HasValue && RewardRiskRatio > 0)
             {
                 double targetDistancePips =
@@ -507,11 +576,38 @@ namespace cAlgo.Robots
             else if (position.NetProfit > 0)
                 _consecutiveLosses = 0;
 
-            Print(
-                "CLOSED | Net={0:F2} | Pips={1:F1} | Consecutive losses={2}",
-                position.NetProfit,
-                position.Pips,
-                _consecutiveLosses);
+            _closedCount++;
+            _realisedNet += position.NetProfit;
+            if (position.NetProfit > 0) { _wins++; _sumWinners += position.NetProfit; }
+            if (position.NetProfit < 0) { _losses++; _sumLosers += -position.NetProfit; }
+
+            string cause = args.Reason.ToString();
+            string botIntent;
+            if (_intendedClosures.TryGetValue(position.Id, out botIntent))
+            {
+                cause += "+" + botIntent;
+                _intendedClosures.Remove(position.Id);
+            }
+
+            EntryAudit audit;
+            if (_entryAudit.TryGetValue(position.Id, out audit))
+            {
+                Print("CLOSED id={0} reason={1} durationSec={2:F0} quotedSpreadAtEntry={3:F2}p extraCostEST={4:F2}p originalSL={5:F2}p gross={6:F2} brokerCommission={7:F2} swap={8:F2} NET={9:F2} pips={10:F1} lossStreak={11}",
+                    position.Id, cause, (Server.Time-position.EntryTime).TotalSeconds,
+                    audit.QuotedSpread, audit.ExtraEstimatedPips, audit.OriginalStopPips,
+                    position.GrossProfit, position.Commissions, position.Swap,
+                    position.NetProfit, position.Pips, _consecutiveLosses);
+                _entryAudit.Remove(position.Id);
+            }
+            else
+                Print("CLOSED id={0} reason={1} entryQuoteUnavailable=restart durationSec={2:F0} gross={3:F2} brokerCommission={4:F2} swap={5:F2} NET={6:F2} pips={7:F1} lossStreak={8}",
+                    position.Id, cause, (Server.Time-position.EntryTime).TotalSeconds,
+                    position.GrossProfit, position.Commissions, position.Swap,
+                    position.NetProfit, position.Pips, _consecutiveLosses);
+            if (_closedCount % 5 == 0)
+                Print("SUMMARY current session: closed={0}, wins={1}, losses={2}, realisedNET={3:F2}, realisedProfitFactor={4:F2} (not a forecast).",
+                    _closedCount, _wins, _losses, _realisedNet,
+                    _sumLosers > 0 ? _sumWinners/_sumLosers : 0.0);
         }
 
 
@@ -524,7 +620,7 @@ namespace cAlgo.Robots
         protected override void OnStop()
         {
             Positions.Closed -= OnPositionClosed;
-            Print("KhutwaScalpV21 diagnostic build stopped.");
+            Print("KhutwaScalpV22 stopped.");
         }
     }
 }
