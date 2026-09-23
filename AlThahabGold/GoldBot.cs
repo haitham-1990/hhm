@@ -409,9 +409,9 @@ namespace cAlgo.Robots
                 (impulseSell ? 0.5 : 0) + (volRatio >= 1.15 ? 0.5 : 0);
 
             if (m5Buy && upLtf && buyRsi && buyScore >= MinScore && buyScore > sellScore)
-                OpenTrade(TradeType.Buy, buyScore, stop, spread, "M5-UP");
+                OpenTrade(TradeType.Buy, buyScore, stop, spreadPrice, "M5-UP");
             else if (m5Sell && downLtf && sellRsi && sellScore >= MinScore && sellScore > buyScore)
-                OpenTrade(TradeType.Sell, sellScore, stop, spread, "M5-DOWN");
+                OpenTrade(TradeType.Sell, sellScore, stop, spreadPrice, "M5-DOWN");
             else
                 Skip(string.Format("No aligned M1/M5 signal: buy={0:F2}, sell={1:F2}, required={2:F2}, RSI={3:F1}, vol={4:F2}",
                     buyScore, sellScore, MinScore, rsi, volRatio));
