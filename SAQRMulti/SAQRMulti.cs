@@ -14,7 +14,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Bot label", DefaultValue = "SAQR-Multi-V1", Group = "Safety")]
+        [Parameter("Bot label", DefaultValue = "SAQR-Quant-V2", Group = "Safety")]
         public string BotLabel { get; set; }
 
         [Parameter("Risk per trade (%)", DefaultValue = 0.5, MinValue = 0.01, MaxValue = 2.0, Group = "Safety")]
@@ -23,13 +23,13 @@ namespace cAlgo.Robots
         [Parameter("Daily loss threshold (%)", DefaultValue = 2.0, MinValue = 0.5, MaxValue = 10.0, Group = "Safety")]
         public double MaxDailyLossPercent { get; set; }
 
-        [Parameter("Max trades per UTC day", DefaultValue = 15, MinValue = 1, MaxValue = 60, Group = "Safety")]
+        [Parameter("Max trades per UTC day", DefaultValue = 30, MinValue = 1, MaxValue = 100, Group = "Safety")]
         public int MaxTradesDaily { get; set; }
 
         [Parameter("Stop after consecutive losses", DefaultValue = 3, MinValue = 1, MaxValue = 10, Group = "Safety")]
         public int MaxLosingStreak { get; set; }
 
-        [Parameter("Cooldown seconds", DefaultValue = 120, MinValue = 0, Group = "Safety")]
+        [Parameter("Cooldown seconds", DefaultValue = 60, MinValue = 0, Group = "Safety")]
         public int CooldownSeconds { get; set; }
 
         [Parameter("Block if other tracked positions", DefaultValue = true, Group = "Safety")]
@@ -58,6 +58,9 @@ namespace cAlgo.Robots
 
         [Parameter("Enable GOLD", DefaultValue = true, Group = "Markets")]
         public bool EnableGold { get; set; }
+
+        [Parameter("Scan 24h when market open", DefaultValue = true, Group = "Session")]
+        public bool ScanAllOpenHours { get; set; }
 
         [Parameter("UTC session start hour", DefaultValue = 0, MinValue = 0, MaxValue = 23, Group = "Session")]
         public int StartHour { get; set; }
@@ -88,6 +91,21 @@ namespace cAlgo.Robots
 
         [Parameter("Min tick volume ratio", DefaultValue = 1.0, MinValue = 0.1, Group = "Signals")]
         public double MinVolumeRatio { get; set; }
+
+        [Parameter("Min M1 trend / ATR", DefaultValue = 0.10, MinValue = 0, MaxValue = 3, Group = "Quant filters")]
+        public double MinM1TrendAtr { get; set; }
+
+        [Parameter("Min M5 trend / ATR", DefaultValue = 0.12, MinValue = 0, MaxValue = 3, Group = "Quant filters")]
+        public double MinM5TrendAtr { get; set; }
+
+        [Parameter("Min candle body / ATR", DefaultValue = 0.12, MinValue = 0, MaxValue = 2, Group = "Quant filters")]
+        public double MinCandleBodyAtr { get; set; }
+
+        [Parameter("Min net reward / total risk", DefaultValue = 1.02, MinValue = 0.5, MaxValue = 4, Group = "Quant filters")]
+        public double MinNetRewardRisk { get; set; }
+
+        [Parameter("Max modeled breakeven win %", DefaultValue = 52.0, MinValue = 20, MaxValue = 90, Group = "Quant filters")]
+        public double MaxBreakevenWinPct { get; set; }
 
         [Parameter("FX max spread pips", DefaultValue = 1.25, MinValue = 0.1, Group = "FX")]
         public double FxMaxSpread { get; set; }
@@ -184,6 +202,10 @@ namespace cAlgo.Robots
             public double StopPips;
             public double RiskReward;
             public double CostToStop;
+            public double NetRewardRisk;
+            public double BreakEvenWinPct;
+            public double M1Strength;
+            public double M5Strength;
         }
 
         private sealed class TradeAudit
@@ -211,6 +233,8 @@ namespace cAlgo.Robots
         private int _consecutiveLosses;
         private bool _blocked;
         private int _diagnosticTick;
+        private DateTime _nextScanHeartbeat = DateTime.MinValue;
+        private readonly Dictionary<string, string> _lastRejectByMarket = new Dictionary<string, string>();
 
         protected override void OnStart()
         {
@@ -245,7 +269,8 @@ namespace cAlgo.Robots
             Timer.Start(10);
             Print("SAQR ON | DEMO={0} markets={1} M1 closed candles with closed M5 direction. ONE total SAQR position max. Risk={2:F2}%",
                 DemoOnly, string.Join(",", _markets.Select(x => x.Symbol.Name)), RiskPercent);
-            Print("SAQR trading session UTC={0}:00 to {1}:00 (defaults cover all 24 hours; trades only when each broker market is OPEN).", StartHour, EndHour);
+            Print("SAQR QUANT V2: scan24h={0}, market-open only, risk={1:F2}%, quantitative ATR trend/impulse/cost filters.", ScanAllOpenHours, RiskPercent);
+            Print("SAQR UTC session override when scan24h=false: {0}:00 to {1}:00.", StartHour, EndHour);
             Print("SAQR: estimated extra fees are PLACEHOLDERS; check broker actual commissions. Daily equity baseline reconstructed, not an enforceable liquidation cap.");
         }
 
@@ -381,6 +406,7 @@ namespace cAlgo.Robots
 
         private bool TradingHours()
         {
+            if (ScanAllOpenHours) return true;
             int h = Server.Time.Hour;
             return StartHour < EndHour
                 ? h >= StartHour && h < EndHour
@@ -391,7 +417,19 @@ namespace cAlgo.Robots
         {
             ResetUTCDate();
             MaintainOpenPositions();
-            if (RiskBlocked() || !TradingHours() || OpenBotPositions().Length > 0) return;
+
+            // Continue health/status checks even when the entry safety circuit breaker is active.
+            // All blocking is for NEW entries only; the timer keeps running.
+            if (Server.Time >= _nextScanHeartbeat)
+            {
+                Print("SAQR HEARTBEAT UTC={0:HH:mm} scan24h={1} markets={2} positions={3} entriesToday={4}/{5} losingStreak={6}/{7} dayBlocked={8}",
+                    Server.Time, ScanAllOpenHours, _markets.Count, OpenBotPositions().Length,
+                    _entriesToday, MaxTradesDaily, _consecutiveLosses, MaxLosingStreak, _blocked);
+                _nextScanHeartbeat = Server.Time.AddMinutes(5);
+            }
+
+            if (RiskBlocked()) return;  // Logs show why and when entries are blocked.
+            if (!TradingHours() || OpenBotPositions().Length > 0) return;
             if ((Server.Time - _lastEntry).TotalSeconds < CooldownSeconds) return;
             if (BlockOtherPositions && Positions.Any(p =>
                 _markets.Any(m => m.Symbol.Name == p.SymbolName) && p.Label != BotLabel))
@@ -401,6 +439,8 @@ namespace cAlgo.Robots
                 return;
             }
 
+            // 24-hour scan: symbols closed by broker are ignored, never forced.
+            // Quantitative filters use closed-bar volatility normalization and net cost geometry.
             // Rank only independent valid signals from closed M1 + M5 candles.
             // One new SAQR position may be created across all symbols per pass.
             var candidates = new List<Signal>();
@@ -413,14 +453,18 @@ namespace cAlgo.Robots
             if (candidates.Count == 0)
             {
                 if (DiagnosticLogs && _diagnosticTick++ % 30 == 0)
-                    Print("SAQR scanner: no qualifying entries. activeMarkets={0}", _markets.Count);
+                    Print("SAQR scanner active: no qualifying signals; tracked={0}. Market notes: {1}",
+                        _markets.Count, string.Join("; ", _markets.Select(m => m.Symbol.Name + "=" +
+                            (_lastRejectByMarket.ContainsKey(m.Symbol.Name) ? _lastRejectByMarket[m.Symbol.Name] : "waiting"))));
                 return;
             }
             var selected = candidates.OrderByDescending(c => c.Quality)
                 .ThenBy(c => c.CostToStop).First();
-            Print("SAQR ranked {0} signals; selected {1} {2}, score={3:F2}, quality={4:F2}, cost/stop={5:F3}",
-                candidates.Count, selected.Market.Symbol.Name,
-                selected.Side, selected.Score, selected.Quality, selected.CostToStop);
+            Print("SAQR QUANT selected={0} {1}, signals={2}, score={3:F2}, normalizedQuality={4:F2}, cost/SL={5:F3}, netRR={6:F2}, modeledBEwin={7:F1}%, trendM1/ATR={8:F2}, trendM5/ATR={9:F2}",
+                selected.Market.Symbol.Name, selected.Side, candidates.Count,
+                selected.Score, selected.Quality, selected.CostToStop,
+                selected.NetRewardRisk, selected.BreakEvenWinPct,
+                selected.M1Strength, selected.M5Strength);
             ExecuteSignal(selected);
         }
 
@@ -429,8 +473,11 @@ namespace cAlgo.Robots
             var s = market.Symbol;
             var b = market.M1;
             var five = market.M5;
-            if (b.Count < Math.Max(100, VolumeLookback + 8) || five.Count < M5SlowPeriod + 8)
+            if (b.Count < Math.Max(100, VolumeLookback + 8) || five.Count < Math.Max(M5SlowPeriod + 8, 100))
+            {
+                _lastRejectByMarket[s.Name] = "loading M1/M5 history";
                 return null;
+            }
 
             // In OnTimer, Last(0) can be the still-forming candle.
             // Only the latest COMPLETELY CLOSED M1/M5 candles are scored.
@@ -446,7 +493,12 @@ namespace cAlgo.Robots
             if (pip <= 0 || spreadPrice <= 0) return null;
             double spreadPips = spreadPrice / pip;
             double atrPrice = ClosedAtr(b, 14, 75);
-            if (atrPrice <= 0) return null;
+            double m5AtrPrice = ClosedAtr(five, 14, 75);
+            if (atrPrice <= 0 || m5AtrPrice <= 0)
+            {
+                _lastRejectByMarket[s.Name] = "ATR history unavailable";
+                return null;
+            }
             double stopPrice, costPrice, rr;
             if (market.Gold)
             {
@@ -470,19 +522,38 @@ namespace cAlgo.Robots
                 rr = FxRr;
             }
             double costRatio = costPrice / stopPrice;
-            if (costRatio > MaxCostToStop || spreadPrice / atrPrice > MaxSpreadToAtr)
+            double netRewardRisk = (rr - costRatio) / (1 + costRatio);
+            double breakEvenWinPct = (1 + costRatio) / (1 + rr) * 100.0;
+            if (costRatio > MaxCostToStop || spreadPrice / atrPrice > MaxSpreadToAtr ||
+                netRewardRisk < MinNetRewardRisk ||
+                breakEvenWinPct > MaxBreakevenWinPct)
+            {
+                _lastRejectByMarket[s.Name] = string.Format("cost filter: c/SL={0:F2}, netRR={1:F2}, modeledBE={2:F1}%", costRatio, netRewardRisk, breakEvenWinPct);
                 return null;
+            }
             if (b.HighPrices.Last(1) - b.LowPrices.Last(1) > MaxCandleToAtr * atrPrice)
+            {
+                _lastRejectByMarket[s.Name] = "one-minute candle spike";
                 return null;
+            }
 
             bool m5Up = market.M5Fast.Result.Last(1) > market.M5Slow.Result.Last(1) &&
                 market.M5Fast.Result.Last(1) > market.M5Fast.Result.Last(2);
             bool m5Down = market.M5Fast.Result.Last(1) < market.M5Slow.Result.Last(1) &&
                 market.M5Fast.Result.Last(1) < market.M5Fast.Result.Last(2);
+            double m5Strength = Math.Abs(market.M5Fast.Result.Last(1) - market.M5Slow.Result.Last(1)) / m5AtrPrice;
             double fast = market.M1Fast.Result.Last(1);
             double slow = market.M1Slow.Result.Last(1);
             double close = b.ClosePrices.Last(1);
             double open = b.OpenPrices.Last(1);
+            double m1Strength = Math.Abs(fast - slow) / atrPrice;
+            double candleBody = Math.Abs(close - open) / atrPrice;
+            if (m1Strength < MinM1TrendAtr || m5Strength < MinM5TrendAtr || candleBody < MinCandleBodyAtr)
+            {
+                _lastRejectByMarket[s.Name] = string.Format("trend/body: M1={0:F2}, M5={1:F2}, body={2:F2}",
+                    m1Strength, m5Strength, candleBody);
+                return null;
+            }
             double rsi = market.Rsi.Result.Last(1);
             double volMean = 0;
             for (int i = 2; i < VolumeLookback + 2; i++)
@@ -490,7 +561,11 @@ namespace cAlgo.Robots
             volMean /= VolumeLookback;
             if (volMean <= 0) return null;
             double volume = b.TickVolumes.Last(1) / volMean;
-            if (volume < MinVolumeRatio) return null;
+            if (volume < MinVolumeRatio)
+            {
+                _lastRejectByMarket[s.Name] = string.Format("tick volume={0:F2} below min={1:F2}", volume, MinVolumeRatio);
+                return null;
+            }
 
             bool up = fast > slow;
             bool down = fast < slow;
@@ -520,10 +595,19 @@ namespace cAlgo.Robots
                 score = sellScore;
             }
             else
+            {
+                _lastRejectByMarket[s.Name] = string.Format("M1/M5 direction or RSI misaligned; buy={0:F2} sell={1:F2}", buyScore, sellScore);
                 return null;
+            }
 
-            // Relative ranking is heuristic, not predicted expected return.
-            double quality = score - costRatio * 2 + 0.1 * Math.Min(2, volume - 1);
+            // Cross-instrument DIMENSIONLESS quality score; NOT a win probability or expected profit.
+            double quality = (score - MinSignalScore) * 0.8
+                + Math.Min(2.0, m1Strength) * 0.65
+                + Math.Min(2.0, m5Strength) * 0.40
+                + Math.Min(1.0, candleBody) * 0.25
+                + Math.Min(1.0, Math.Max(0, volume - 1)) * 0.15
+                - costRatio * 3.5;
+            _lastRejectByMarket[s.Name] = string.Format("qualified {0} Q={1:F2}", side, quality);
             return new Signal
             {
                 Market = market,
@@ -532,7 +616,11 @@ namespace cAlgo.Robots
                 Quality = quality,
                 StopPips = stopPrice / pip,
                 RiskReward = rr,
-                CostToStop = costRatio
+                CostToStop = costRatio,
+                NetRewardRisk = netRewardRisk,
+                BreakEvenWinPct = breakEvenWinPct,
+                M1Strength = m1Strength,
+                M5Strength = m5Strength
             };
         }
 
@@ -572,7 +660,10 @@ namespace cAlgo.Robots
             bool spreadExceeded = c.Market.Gold
                 ? currentSpread * s.PipSize > GoldMaxSpread
                 : currentSpread > FxMaxSpread;
-            if (currentSpread <= 0 || spreadExceeded || costRatio > MaxCostToStop)
+            double newNetRr = (c.RiskReward - costRatio) / (1 + costRatio);
+            double newBreakEvenWin = (1 + costRatio) / (1 + c.RiskReward) * 100.0;
+            if (currentSpread <= 0 || spreadExceeded || costRatio > MaxCostToStop ||
+                newNetRr < MinNetRewardRisk || newBreakEvenWin > MaxBreakevenWinPct)
             {
                 Print("SAQR skip {0}: live spread/cost worsened before order.", s.Name);
                 return;
@@ -614,7 +705,7 @@ namespace cAlgo.Robots
             };
             double slippagePips = (p.EntryPrice - quote) / s.PipSize *
                 (c.Side == TradeType.Buy ? 1.0 : -1.0);
-            Print("SAQR OPEN id={0} symbol={1} side={2} units={3} score={4:F2} spread={5:F2}p reserveEST={6:F2}p SL={7:F2}p TP={8:F2}p adverseSlip={9:F2}p",
+            Print("SAQR QUANT OPEN id={0} symbol={1} side={2} units={3} score={4:F2} spread={5:F2}p reserveEST={6:F2}p SL={7:F2}p TP={8:F2}p adverseSlip={9:F2}p",
                 p.Id, s.Name, c.Side, units, c.Score,
                 currentSpread, reserve, c.StopPips, c.StopPips * c.RiskReward, slippagePips);
         }
