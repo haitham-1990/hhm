@@ -1,0 +1,33 @@
+name: Build SAQR Multi cTrader algo
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'SAQRMulti/**'
+      - '.github/workflows/build-saqr.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: SAQRMulti
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build SAQR Multi
+        run: dotnet build SAQRMulti.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify algorithm file
+        run: |
+          find . -type f -name '*.algo' -print
+          find . -type f -name '*.algo' -print -quit | grep -q .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SAQR-Multi-algo
+          path: SAQRMulti/**/*.algo
+          if-no-files-found: error
