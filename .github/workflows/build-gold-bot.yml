@@ -1,0 +1,34 @@
+name: Build الذهب cTrader Gold bot
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'AlThahabGold/**'
+      - '.github/workflows/build-gold-bot.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: AlThahabGold
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build GOLD cBot
+        run: dotnet build AlThahabGold.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify algo was generated
+        run: |
+          find . -type f -name '*.algo' -print
+          find . -type f -name '*.algo' -print -quit | grep -q .
+      - name: Upload installable cTrader algo
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoldBot-AlThahab-algo
+          path: AlThahabGold/**/*.algo
+          if-no-files-found: error
