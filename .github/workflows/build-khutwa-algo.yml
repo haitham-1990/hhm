@@ -1,0 +1,34 @@
+name: Build Khutwa cTrader algo
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'KhutwaScalpV2/**'
+      - '.github/workflows/build-khutwa-algo.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: KhutwaScalpV2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build cTrader robot
+        run: dotnet build KhutwaScalpV2.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Find compiled algo
+        run: |
+          find . -type f -name '*.algo' -print
+          find . -type f -name '*.algo' -print -quit | grep -q .
+      - name: Upload compiled algo
+        uses: actions/upload-artifact@v4
+        with:
+          name: KhutwaScalpV2-algo
+          path: KhutwaScalpV2/**/*.algo
+          if-no-files-found: error
