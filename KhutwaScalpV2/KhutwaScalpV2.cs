@@ -217,6 +217,7 @@ namespace cAlgo.Robots
             _consecutiveLosses = 0;
             _dayBlocked = false;
 
+            RestoreTodayHistory();
             Positions.Closed += OnPositionClosed;
 
             Print("KhutwaScalpV22 entry and exit audit started. DemoOnly={0}", DemoOnly);
@@ -560,7 +561,14 @@ namespace cAlgo.Robots
             _consecutiveLosses = 0;
             _dayBlocked = false;
 
-            Print("New UTC day: counters reset. Start equity={0:F2}", _dayStartEquity);
+            _closedCount = 0;
+            _wins = 0;
+            _losses = 0;
+            _realisedNet = 0;
+            _sumWinners = 0;
+            _sumLosers = 0;
+            RestoreTodayHistory();
+            Print("New UTC day: counters reset. Start session equity={0:F2}", _dayStartEquity);
         }
 
 
@@ -610,6 +618,49 @@ namespace cAlgo.Robots
                     _sumLosers > 0 ? _sumWinners/_sumLosers : 0.0);
         }
 
+
+        // Restore today's entry count, net result and losing streak across cBot cloud restarts.
+        // Equity baseline remains session-relative; restarting does not restore the all-account equity peak.
+        private void RestoreTodayHistory()
+        {
+            var closed = History.FindAll(BotLabel, SymbolName)
+                .Where(h => h.EntryTime.Date == _day)
+                .ToList();
+            var ids = new HashSet<int>();
+            var grouped = closed.GroupBy(h => h.PositionId)
+                .OrderBy(g => g.Max(x => x.ClosingTime))
+                .ToList();
+
+            _closedCount = 0;
+            _wins = 0;
+            _losses = 0;
+            _realisedNet = 0;
+            _sumWinners = 0;
+            _sumLosers = 0;
+            _consecutiveLosses = 0;
+            foreach (var g in grouped)
+            {
+                ids.Add(g.Key);
+                double pnl = g.Sum(x => x.NetProfit);
+                _closedCount++;
+                _realisedNet += pnl;
+                if (pnl > 0) { _wins++; _sumWinners += pnl; _consecutiveLosses = 0; }
+                else if (pnl < 0) { _losses++; _sumLosers += -pnl; _consecutiveLosses++; }
+                DateTime entry = g.Max(x => x.EntryTime);
+                if (entry > _lastEntryTime) _lastEntryTime = entry;
+            }
+            foreach (var p in Positions.FindAll(BotLabel, SymbolName))
+            {
+                if (p.EntryTime.Date != _day) continue;
+                ids.Add(p.Id);
+                if (p.EntryTime > _lastEntryTime) _lastEntryTime = p.EntryTime;
+            }
+            _tradesToday = ids.Count;
+            if (_tradesToday >= MaxTradesPerDay || _consecutiveLosses >= MaxConsecutiveLosses)
+                _dayBlocked = true;
+            Print("RESTORED todayTrades={0} closed={1} wins={2} losses={3} consecutiveLosses={4} net={5:F2}; daily equity threshold is session-relative.",
+                _tradesToday, _closedCount, _wins, _losses, _consecutiveLosses, _realisedNet);
+        }
 
         protected override void OnError(Error error)
         {
