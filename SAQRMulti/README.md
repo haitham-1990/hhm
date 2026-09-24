@@ -93,3 +93,21 @@ Concurrent separate bots/accounts do not share these limits.
   entries but do not stop the scanner/timer or remove existing SL/TP protection.
 - Configured risk is only an estimate: slippage, gaps, spread, commissions,
   broker minimum volumes and execution can produce a different realised loss.
+
+## SAQR Quant V4 Adaptive — reduced-risk mode + GOLD-SAFE
+- New label: `SAQR-Quant-V4-Adaptive`.
+- At **2% estimated daily loss**, new-trade risk is multiplied by **0.50**
+  instead of stopping immediately. Example: base 0.10% becomes 0.05%.
+- At **4% estimated daily loss**, the emergency circuit breaker stops NEW entries
+  for the rest of the UTC day. Position management/heartbeat continue.
+- The existing max-trades and consecutive-loss circuit breakers still apply.
+- GOLD gets an additional **0.50 risk multiplier**, so normal gold risk defaults
+  to 0.05% and reduced-mode gold risk defaults to 0.025%.
+- GOLD requires a higher default signal score (4.25), max 1 open gold position,
+  300s gold cooldown, and pauses gold for the UTC day after 2 consecutive gold losses.
+- Every order now verifies approximate **cash risk at the actual normalized volume**
+  using cTrader `Symbol.AmountRisked(volume, stopLossPips)`. If broker minimum volume
+  makes the stop-risk exceed the configured cash budget by more than 10%, the trade
+  is skipped. This is particularly important for XAUUSD on small accounts.
+- GOLD reward/risk default is 1.60. This is an experimental forward-test setting,
+  not evidence of profitability.
