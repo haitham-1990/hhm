@@ -3,8 +3,8 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
-    <AssemblyName>SAQRQuantV2</AssemblyName>
-    <AlgoName>SAQR_Quant_V2</AlgoName>
+    <AssemblyName>SAQRQuantV3_10X</AssemblyName>
+    <AlgoName>SAQR_Quant_V3_10X</AlgoName>
     <AlgoBuild>true</AlgoBuild>
     <AlgoPublish>false</AlgoPublish>
     <IncludeSource>true</IncludeSource>
