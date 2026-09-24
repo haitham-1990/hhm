@@ -76,3 +76,20 @@ Concurrent separate bots/accounts do not share these limits.
 - No externally sourced economic calendar/news guard is installed.
 - Never infer validated profitability from a mathematical formula; perform
   broker-condition backtesting and out-of-sample DEMO forward testing.
+
+## SAQR Quant V3 10X — low-risk concurrent portfolio
+- New label: `SAQR-Quant-V3-10X`; stop prior SAQR instances before forward testing.
+- Default nominal risk per new trade is **0.10% of equity**, not 0.50%.
+- Up to **10 SAQR positions open simultaneously** across the tracked instruments.
+- Up to **3 open SAQR positions per symbol**.
+- Conservative nominal portfolio cap: **1.00%** (= at most 10 x 0.10% configured risk).
+- Same-symbol entries are spaced by at least **60 seconds**.
+- Multiple independent qualifying markets can be entered during the same scan.
+- If broker minimum volume would require more risk than the calculated low-risk
+  position, the order is skipped; the cBot does not force a minimum lot.
+- Gold can therefore be skipped frequently on a small account if one XAUUSD unit
+  is too large for the 0.10% risk budget.
+- Daily loss and losing-streak circuit breakers remain enabled. They stop NEW
+  entries but do not stop the scanner/timer or remove existing SL/TP protection.
+- Configured risk is only an estimate: slippage, gaps, spread, commissions,
+  broker minimum volumes and execution can produce a different realised loss.
