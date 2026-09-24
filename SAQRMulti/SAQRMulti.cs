@@ -14,14 +14,23 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Bot label", DefaultValue = "SAQR-Quant-V3-10X", Group = "Safety")]
+        [Parameter("Bot label", DefaultValue = "SAQR-Quant-V4-Adaptive", Group = "Safety")]
         public string BotLabel { get; set; }
 
         [Parameter("Risk per trade (%)", DefaultValue = 0.10, MinValue = 0.01, MaxValue = 1.0, Group = "Safety")]
         public double RiskPercent { get; set; }
 
-        [Parameter("Daily loss threshold (%)", DefaultValue = 2.0, MinValue = 0.5, MaxValue = 10.0, Group = "Safety")]
+        [Parameter("Reduce risk after daily loss (%)", DefaultValue = 2.0, MinValue = 0.5, MaxValue = 10.0, Group = "Safety")]
         public double MaxDailyLossPercent { get; set; }
+
+        [Parameter("Reduced risk multiplier", DefaultValue = 0.50, MinValue = 0.10, MaxValue = 1.0, Group = "Safety")]
+        public double ReducedRiskMultiplier { get; set; }
+
+        [Parameter("Emergency daily stop (%)", DefaultValue = 4.0, MinValue = 1.0, MaxValue = 20.0, Group = "Safety")]
+        public double EmergencyDailyLossPercent { get; set; }
+
+        [Parameter("Max actual risk / budget", DefaultValue = 1.10, MinValue = 1.0, MaxValue = 2.0, Group = "Safety")]
+        public double MaxActualRiskToBudget { get; set; }
 
         [Parameter("Max trades per UTC day", DefaultValue = 30, MinValue = 1, MaxValue = 100, Group = "Safety")]
         public int MaxTradesDaily { get; set; }
@@ -164,8 +173,23 @@ namespace cAlgo.Robots
         [Parameter("Gold stop ATR multiplier", DefaultValue = 1.8, MinValue = 0.5, Group = "Gold")]
         public double GoldStopAtr { get; set; }
 
-        [Parameter("Gold reward/risk", DefaultValue = 1.4, MinValue = 0.5, Group = "Gold")]
+        [Parameter("Gold reward/risk", DefaultValue = 1.6, MinValue = 0.5, Group = "Gold")]
         public double GoldRr { get; set; }
+
+        [Parameter("Gold risk multiplier", DefaultValue = 0.50, MinValue = 0.10, MaxValue = 1.0, Group = "Gold")]
+        public double GoldRiskMultiplier { get; set; }
+
+        [Parameter("Gold min signal score", DefaultValue = 4.25, MinValue = 2.0, MaxValue = 5.5, Group = "Gold")]
+        public double GoldMinSignalScore { get; set; }
+
+        [Parameter("Gold max open positions", DefaultValue = 1, MinValue = 1, MaxValue = 3, Group = "Gold")]
+        public int GoldMaxOpenPositions { get; set; }
+
+        [Parameter("Gold cooldown seconds", DefaultValue = 300, MinValue = 0, MaxValue = 3600, Group = "Gold")]
+        public int GoldCooldownSeconds { get; set; }
+
+        [Parameter("Pause gold after losses", DefaultValue = 2, MinValue = 1, MaxValue = 10, Group = "Gold")]
+        public int GoldPauseAfterLosses { get; set; }
 
         [Parameter("Max estimated cost/stop", DefaultValue = 0.20, MinValue = 0.01, MaxValue = 0.75, Group = "Execution")]
         public double MaxCostToStop { get; set; }
@@ -245,6 +269,10 @@ namespace cAlgo.Robots
         private int _winsToday;
         private int _consecutiveLosses;
         private bool _blocked;
+        private bool _reducedRiskMode;
+        private bool _reducedRiskLogged;
+        private int _goldConsecutiveLosses;
+        private bool _goldPaused;
         private int _diagnosticTick;
         private DateTime _nextScanHeartbeat = DateTime.MinValue;
         private readonly Dictionary<string, string> _lastRejectByMarket = new Dictionary<string, string>();
@@ -260,9 +288,10 @@ namespace cAlgo.Robots
             if (M1FastPeriod >= M1SlowPeriod || M5FastPeriod >= M5SlowPeriod ||
                 FxMinAtr >= FxMaxAtr || GoldMinAtr >= GoldMaxAtr ||
                 FxMinStop > FxMaxStop || GoldMinStop > GoldMaxStop ||
+                EmergencyDailyLossPercent <= MaxDailyLossPercent ||
                 string.IsNullOrWhiteSpace(BotLabel))
             {
-                Print("SAQR setup invalid: review EMA, ATR, stop ranges and bot label.");
+                Print("SAQR setup invalid: review EMA, ATR, stop ranges, soft/hard daily loss thresholds and bot label.");
                 Stop();
                 return;
             }
@@ -280,9 +309,11 @@ namespace cAlgo.Robots
             RecoverState();
             Positions.Closed += Closed;
             Timer.Start(10);
-            Print("SAQR V3-10X ON | DEMO={0} markets={1} | up to {2} open positions, max {3}/symbol | nominal risk/trade={4:F2}% | portfolio nominal cap={5:F2}%",
+            Print("SAQR V4 ADAPTIVE ON | DEMO={0} markets={1} | up to {2} positions | base risk={3:F2}% | reduce-after={4:F2}% loss x{5:F2} | emergency-stop={6:F2}%",
                 DemoOnly, string.Join(",", _markets.Select(x => x.Symbol.Name)),
-                MaxOpenPositions, MaxOpenPerSymbol, RiskPercent, MaxNominalOpenRiskPercent);
+                MaxOpenPositions, RiskPercent, MaxDailyLossPercent, ReducedRiskMultiplier, EmergencyDailyLossPercent);
+            Print("SAQR GOLD-SAFE: risk x{0:F2}, minScore={1:F2}, maxOpen={2}, cooldown={3}s, pauseAfterLosses={4}; every order cash-risk checked with Symbol.AmountRisked.",
+                GoldRiskMultiplier, GoldMinSignalScore, GoldMaxOpenPositions, GoldCooldownSeconds, GoldPauseAfterLosses);
             Print("SAQR QUANT V2: scan24h={0}, market-open only, risk={1:F2}%, quantitative ATR trend/impulse/cost filters.", ScanAllOpenHours, RiskPercent);
             Print("SAQR UTC session override when scan24h=false: {0}:00 to {1}:00.", StartHour, EndHour);
             Print("SAQR: estimated extra fees are PLACEHOLDERS; check broker actual commissions. Daily equity baseline reconstructed, not an enforceable liquidation cap.");
@@ -338,6 +369,10 @@ namespace cAlgo.Robots
             _botNetToday = 0;
             _positiveToday = 0;
             _negativeToday = 0;
+            _reducedRiskMode = false;
+            _reducedRiskLogged = false;
+            _goldConsecutiveLosses = 0;
+            _goldPaused = false;
             var tracked = new HashSet<string>(_markets.Select(x => x.Symbol.Name));
             var history = History.FindAll(BotLabel)
                 .Where(h => tracked.Contains(h.SymbolName))
@@ -357,7 +392,12 @@ namespace cAlgo.Robots
             }
             var closes = history.Where(h => h.ClosingTime.Date == _utcDay)
                 .GroupBy(h => h.PositionId)
-                .Select(g => new { Amount = g.Sum(h => h.NetProfit), Closed = g.Max(h => h.ClosingTime) })
+                .Select(g => new
+                {
+                    Amount = g.Sum(h => h.NetProfit),
+                    Closed = g.Max(h => h.ClosingTime),
+                    SymbolName = g.First().SymbolName
+                })
                 .OrderBy(g => g.Closed).ToList();
             foreach (var x in closes)
             {
@@ -374,6 +414,13 @@ namespace cAlgo.Robots
                     _negativeToday += -x.Amount;
                     _consecutiveLosses++;
                 }
+
+                bool isGoldClose = _markets.Any(m => m.Gold && m.Symbol.Name == x.SymbolName);
+                if (isGoldClose)
+                {
+                    if (x.Amount < 0) _goldConsecutiveLosses++;
+                    else if (x.Amount > 0) _goldConsecutiveLosses = 0;
+                }
             }
             foreach (var p in OpenBotPositions())
             {
@@ -388,10 +435,19 @@ namespace cAlgo.Robots
                 .Where(p => tracked.Contains(p.SymbolName)).Sum(p => p.NetProfit);
             _referenceEquity = Account.Equity - _botNetToday - floating;
             if (_referenceEquity <= 0) _referenceEquity = Account.Equity;
-            _blocked = _entriesToday >= MaxTradesDaily || _consecutiveLosses >= MaxLosingStreak;
-            Print("SAQR RESTORED todayEntries={0} closed={1} wins={2} net={3:F2} lossStreak={4}, referenceEquity={5:F2}",
+            _goldPaused = _goldConsecutiveLosses >= GoldPauseAfterLosses;
+
+            double restoredLoss = Math.Max(-(_botNetToday + floating), _referenceEquity - Account.Equity);
+            double softThreshold = _referenceEquity * MaxDailyLossPercent / 100.0;
+            double hardThreshold = _referenceEquity * EmergencyDailyLossPercent / 100.0;
+            _reducedRiskMode = restoredLoss >= softThreshold;
+            _blocked = _entriesToday >= MaxTradesDaily ||
+                _consecutiveLosses >= MaxLosingStreak ||
+                restoredLoss >= hardThreshold;
+
+            Print("SAQR RESTORED todayEntries={0} closed={1} wins={2} net={3:F2} lossStreak={4}, goldLossStreak={5}, reducedRisk={6}, blocked={7}, referenceEquity={8:F2}",
                 _entriesToday, _closedToday, _winsToday, _botNetToday,
-                _consecutiveLosses, _referenceEquity);
+                _consecutiveLosses, _goldConsecutiveLosses, _reducedRiskMode, _blocked, _referenceEquity);
         }
 
         private void ResetUTCDate()
@@ -400,25 +456,52 @@ namespace cAlgo.Robots
             _utcDay = Server.Time.Date;
             _lastEntry = DateTime.MinValue;
             _blocked = false;
+            _reducedRiskMode = false;
+            _reducedRiskLogged = false;
+            _goldConsecutiveLosses = 0;
+            _goldPaused = false;
             RecoverState();
         }
 
         private bool RiskBlocked()
         {
             if (_blocked) return true;
+
             double floating = OpenBotPositions().Sum(p => p.NetProfit);
             double estimatedBotLoss = -(_botNetToday + floating);
             double accountEquityDrop = _referenceEquity - Account.Equity;
-            double threshold = _referenceEquity * MaxDailyLossPercent / 100.0;
+            double effectiveLoss = Math.Max(estimatedBotLoss, accountEquityDrop);
+            double softThreshold = _referenceEquity * MaxDailyLossPercent / 100.0;
+            double hardThreshold = _referenceEquity * EmergencyDailyLossPercent / 100.0;
+
+            if (effectiveLoss >= softThreshold)
+            {
+                _reducedRiskMode = true;
+                if (!_reducedRiskLogged)
+                {
+                    Print("SAQR REDUCED-RISK MODE: effectiveLoss={0:F2} >= softCap={1:F2}; NEW trade risk x{2:F2}. Scanner continues.",
+                        effectiveLoss, softThreshold, ReducedRiskMultiplier);
+                    _reducedRiskLogged = true;
+                }
+            }
+
             if (_entriesToday >= MaxTradesDaily || _consecutiveLosses >= MaxLosingStreak ||
-                estimatedBotLoss >= threshold || accountEquityDrop >= threshold)
+                effectiveLoss >= hardThreshold)
             {
                 _blocked = true;
-                Print("SAQR DAY BLOCKED new entries: trades={0}/{1}, lossStreak={2}/{3}, estimatedBotLoss={4:F2}, equityDrop={5:F2}, cap={6:F2}",
+                Print("SAQR EMERGENCY BLOCK new entries: trades={0}/{1}, lossStreak={2}/{3}, effectiveLoss={4:F2}, hardCap={5:F2}. Scanner/position management continue.",
                     _entriesToday, MaxTradesDaily, _consecutiveLosses,
-                    MaxLosingStreak, estimatedBotLoss, accountEquityDrop, threshold);
+                    MaxLosingStreak, effectiveLoss, hardThreshold);
             }
             return _blocked;
+        }
+
+        private double EffectiveRiskPercent(MarketInfo market)
+        {
+            double risk = RiskPercent;
+            if (_reducedRiskMode) risk *= ReducedRiskMultiplier;
+            if (market != null && market.Gold) risk *= GoldRiskMultiplier;
+            return risk;
         }
 
         private bool PortfolioHasRoom(string symbolName)
@@ -426,6 +509,18 @@ namespace cAlgo.Robots
             var opens = OpenBotPositions();
             if (opens.Length >= MaxOpenPositions) return false;
             if (opens.Count(p => p.SymbolName == symbolName) >= MaxOpenPerSymbol) return false;
+
+            var market = _markets.FirstOrDefault(m => m.Symbol.Name == symbolName);
+            if (market != null && market.Gold)
+            {
+                if (_goldPaused) return false;
+                if (opens.Count(p => p.SymbolName == symbolName) >= GoldMaxOpenPositions) return false;
+
+                DateTime goldPrior;
+                if (_lastEntryBySymbol.TryGetValue(symbolName, out goldPrior) &&
+                    (Server.Time - goldPrior).TotalSeconds < GoldCooldownSeconds)
+                    return false;
+            }
 
             // Conservative nominal cap: every open trade is counted at the full configured
             // risk percentage even though execution sizing reserves spread/estimated costs.
@@ -458,9 +553,10 @@ namespace cAlgo.Robots
             // All blocking is for NEW entries only; the timer keeps running.
             if (Server.Time >= _nextScanHeartbeat)
             {
-                Print("SAQR HEARTBEAT UTC={0:HH:mm} scan24h={1} markets={2} positions={3} entriesToday={4}/{5} losingStreak={6}/{7} dayBlocked={8}",
+                Print("SAQR HEARTBEAT UTC={0:HH:mm} scan24h={1} markets={2} positions={3} entriesToday={4}/{5} lossStreak={6}/{7} reducedRisk={8} goldPaused={9} emergencyBlocked={10}",
                     Server.Time, ScanAllOpenHours, _markets.Count, OpenBotPositions().Length,
-                    _entriesToday, MaxTradesDaily, _consecutiveLosses, MaxLosingStreak, _blocked);
+                    _entriesToday, MaxTradesDaily, _consecutiveLosses, MaxLosingStreak,
+                    _reducedRiskMode, _goldPaused, _blocked);
                 _nextScanHeartbeat = Server.Time.AddMinutes(5);
             }
 
@@ -620,6 +716,7 @@ namespace cAlgo.Robots
             bool down = fast < slow;
             bool buyRsi = rsi >= 52 && rsi <= 72;
             bool sellRsi = rsi >= 28 && rsi <= 48;
+            double requiredSignalScore = market.Gold ? Math.Max(MinSignalScore, GoldMinSignalScore) : MinSignalScore;
             bool boost = volume >= 1.2;
             bool trendStrong = Math.Abs(fast - slow) >= 0.25 * atrPrice;
             double buyScore = (m5Up ? 1.25 : 0) + (up ? 1 : 0) +
@@ -633,12 +730,12 @@ namespace cAlgo.Robots
 
             TradeType side;
             double score;
-            if (m5Up && up && buyRsi && buyScore >= MinSignalScore && buyScore > sellScore)
+            if (m5Up && up && buyRsi && buyScore >= requiredSignalScore && buyScore > sellScore)
             {
                 side = TradeType.Buy;
                 score = buyScore;
             }
-            else if (m5Down && down && sellRsi && sellScore >= MinSignalScore && sellScore > buyScore)
+            else if (m5Down && down && sellRsi && sellScore >= requiredSignalScore && sellScore > buyScore)
             {
                 side = TradeType.Sell;
                 score = sellScore;
@@ -650,7 +747,7 @@ namespace cAlgo.Robots
             }
 
             // Cross-instrument DIMENSIONLESS quality score; NOT a win probability or expected profit.
-            double quality = (score - MinSignalScore) * 0.8
+            double quality = (score - requiredSignalScore) * 0.8
                 + Math.Min(2.0, m1Strength) * 0.65
                 + Math.Min(2.0, m5Strength) * 0.40
                 + Math.Min(1.0, candleBody) * 0.25
@@ -719,8 +816,9 @@ namespace cAlgo.Robots
             }
 
             // Account for quoted spread and estimated extra round trip costs in position sizing.
-            // Broker actual slippage/fees and gaps can exceed the intended risk budget.
-            double adjustedRiskPct = RiskPercent * c.StopPips /
+            // V4 also applies reduced-risk mode and an extra GOLD multiplier.
+            double effectiveRiskPct = EffectiveRiskPercent(c.Market);
+            double adjustedRiskPct = effectiveRiskPct * c.StopPips /
                 (c.StopPips + currentSpread + reserve);
             double units = s.VolumeForProportionalRisk(
                 ProportionalAmountType.Equity, adjustedRiskPct, c.StopPips, RoundingMode.Down);
@@ -732,6 +830,17 @@ namespace cAlgo.Robots
                 return false;
             }
             if (units > s.VolumeInUnitsMax) units = s.VolumeInUnitsMax;
+
+            // Critical cash-risk verification, especially for GOLD where minimum volume can
+            // make a 1-unit trade much larger than the intended percent risk.
+            double riskBudgetCash = Account.Equity * effectiveRiskPct / 100.0;
+            double actualStopRiskCash = s.AmountRisked(units, c.StopPips);
+            if (actualStopRiskCash <= 0 || actualStopRiskCash > riskBudgetCash * MaxActualRiskToBudget)
+            {
+                Print("SAQR RISK SKIP {0}: volume={1}, stop={2:F2}p, actualRisk≈{3:F2} > budget={4:F2} x tolerance={5:F2}. No forced minimum size.",
+                    s.Name, units, c.StopPips, actualStopRiskCash, riskBudgetCash, MaxActualRiskToBudget);
+                return false;
+            }
 
             double quote = c.Side == TradeType.Buy ? s.Ask : s.Bid;
             var result = ExecuteMarketOrder(c.Side, s.Name, units, BotLabel,
@@ -755,9 +864,9 @@ namespace cAlgo.Robots
             };
             double slippagePips = (p.EntryPrice - quote) / s.PipSize *
                 (c.Side == TradeType.Buy ? 1.0 : -1.0);
-            Print("SAQR QUANT OPEN id={0} symbol={1} side={2} units={3} score={4:F2} spread={5:F2}p reserveEST={6:F2}p SL={7:F2}p TP={8:F2}p adverseSlip={9:F2}p",
-                p.Id, s.Name, c.Side, units, c.Score,
-                currentSpread, reserve, c.StopPips, c.StopPips * c.RiskReward, slippagePips);
+            Print("SAQR V4 OPEN id={0} symbol={1} side={2} units={3} score={4:F2} effectiveRisk={5:F3}% actualStopRisk≈{6:F2} spread={7:F2}p SL={8:F2}p TP={9:F2}p adverseSlip={10:F2}p",
+                p.Id, s.Name, c.Side, units, c.Score, effectiveRiskPct, actualStopRiskCash,
+                currentSpread, c.StopPips, c.StopPips * c.RiskReward, slippagePips);
             return true;
         }
 
@@ -826,6 +935,20 @@ namespace cAlgo.Robots
                 {
                     _negativeToday += -p.NetProfit;
                     _consecutiveLosses++;
+                }
+
+                var closedMarket = _markets.FirstOrDefault(m => m.Symbol.Name == p.SymbolName);
+                if (closedMarket != null && closedMarket.Gold)
+                {
+                    if (p.NetProfit < 0) _goldConsecutiveLosses++;
+                    else if (p.NetProfit > 0) _goldConsecutiveLosses = 0;
+
+                    if (_goldConsecutiveLosses >= GoldPauseAfterLosses && !_goldPaused)
+                    {
+                        _goldPaused = true;
+                        Print("SAQR GOLD PAUSED for UTC day after {0} consecutive gold losses. FX scanning continues.",
+                            _goldConsecutiveLosses);
+                    }
                 }
             }
             string reason = e.Reason.ToString();
