@@ -16,7 +16,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V5-PROTECT", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V6-MANAGER", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -136,6 +136,18 @@ namespace cAlgo.Robots
         [Parameter("Close sister if lock fails", DefaultValue = true, Group = "Exits")]
         public bool CloseSisterIfLockFails { get; set; }
 
+        [Parameter("Partial profit after opposite SL (%)", DefaultValue = 50.0, MinValue = 0.0, MaxValue = 90.0, Group = "Exits")]
+        public double SisterPartialPercent { get; set; }
+
+        [Parameter("Trail distance (R)", DefaultValue = 0.35, MinValue = 0.10, MaxValue = 1.00, Group = "Exits")]
+        public double SisterTrailR { get; set; }
+
+        [Parameter("Trail activation (R)", DefaultValue = 1.05, MinValue = 0.50, MaxValue = 1.90, Group = "Exits")]
+        public double SisterTrailActivationR { get; set; }
+
+        [Parameter("Whipsaw cooldown after SL (sec)", DefaultValue = 45, MinValue = 0, MaxValue = 600, Group = "Exits")]
+        public int WhipsawCooldownSeconds { get; set; }
+
         [Parameter("Diagnostic logs", DefaultValue = true, Group = "Logs")]
         public bool DiagnosticLogs { get; set; }
 
@@ -151,6 +163,15 @@ namespace cAlgo.Robots
             public RelativeStrengthIndex Rsi;
             public bool Gold;
             public DateTime LastExamined = DateTime.MinValue;
+        }
+
+        private sealed class ProtectedLeg
+        {
+            public long PositionId;
+            public string SymbolName;
+            public double OriginalStopPips;
+            public double BestPrice;
+            public bool PartialTaken;
         }
 
         private sealed class Candidate
@@ -174,11 +195,14 @@ namespace cAlgo.Robots
         private readonly List<MarketInfo> _markets = new List<MarketInfo>();
         private readonly Dictionary<string, string> _notes = new Dictionary<string, string>();
         private readonly Dictionary<string, DateTime> _lastLaunchBySymbol = new Dictionary<string, DateTime>();
+        private readonly Dictionary<string, DateTime> _whipsawUntil = new Dictionary<string, DateTime>();
+        private readonly Dictionary<long, ProtectedLeg> _protectedLegs = new Dictionary<long, ProtectedLeg>();
         private DateTime _utcDay;
         private DateTime _lastFlat = DateTime.MinValue;
         private int _cyclesToday;
         private bool _wasInCycle;
         private DateTime _nextHeartbeat = DateTime.MinValue;
+        private DateTime _nextStats = DateTime.MinValue;
 
         private string BuyLabel { get { return BaseLabel + "-BUY"; } }
         private string SellLabel { get { return BaseLabel + "-SELL"; } }
@@ -220,11 +244,13 @@ namespace cAlgo.Robots
             Positions.Closed += OnPositionClosed;
             Timer.Start(2);
 
-            Print("HEDGE-FAST 2R V5 PROTECT ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s | RR=2:1",
+            Print("HEDGE-FAST 2R V6 MANAGER ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s | RR=2:1",
                 string.Join(",", _markets.Select(m => m.Symbol.Name)),
                 MaxSimultaneousPairs, MaxSimultaneousPairs * 2, MaxHoldSeconds);
             Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, nominal portfolio cap={2:F2}%. Indicators score EMA9/21 + M5 EMA20/50 + RSI7 + tick-volume + breakout/ATR.",
                 FxPairRiskPercent, GoldPairRiskPercent, MaxNominalOpenRiskPercent);
+            Print("V6 exits: opposite SL => lock sister at {0:F2}R, take {1:F0}% partial when possible, then trail by {2:F2}R after {3:F2}R. Whipsaw cooldown={4}s.",
+                SisterLockR, SisterPartialPercent, SisterTrailR, SisterTrailActivationR, WhipsawCooldownSeconds);
             Print("ENTRY ZONE = prior compression + fresh breakout impulse + no late chase. GOLD enabled={0}, goldOnly={1}.",
                 EnableGold, GoldOnlyTest);
             Print("Normalized spread comparison uses spread/stop and spread/ATR; raw FX pips vs GOLD price spread are NOT compared directly.");
@@ -300,6 +326,14 @@ namespace cAlgo.Robots
         {
             ResetDay();
 
+            TrailProtectedSisters();
+
+            if (Server.Time >= _nextStats)
+            {
+                PrintMarketStats();
+                _nextStats = Server.Time.AddMinutes(5);
+            }
+
             var open = BotPositions();
             if (open.Length > 0)
             {
@@ -309,7 +343,7 @@ namespace cAlgo.Robots
 
                 if (Server.Time >= _nextHeartbeat)
                 {
-                    Print("HEDGE-FAST V4 ACTIVE open={0}/{1}, pairs≈{2}/{3}, cycles={4}/{5}, oldestSec={6:F0}",
+                    Print("HEDGE-FAST V6 ACTIVE open={0}/{1}, pairs≈{2}/{3}, cycles={4}/{5}, oldestSec={6:F0}",
                         open.Length, MaxSimultaneousPairs * 2,
                         (open.Length + 1) / 2, MaxSimultaneousPairs,
                         _cyclesToday, MaxCyclesPerDay,
@@ -322,7 +356,7 @@ namespace cAlgo.Robots
             {
                 _wasInCycle = false;
                 _lastFlat = Server.Time;
-                Print("HEDGE-FAST V4 all pairs flat. Cooldown={0}s.", CooldownSeconds);
+                Print("HEDGE-FAST V6 all pairs flat. Cooldown={0}s.", CooldownSeconds);
             }
 
             if (_cyclesToday >= MaxCyclesPerDay) return;
@@ -335,6 +369,15 @@ namespace cAlgo.Robots
                 if (BotPositions().Any(p => p.SymbolName == market.Symbol.Name))
                 {
                     _notes[market.Symbol.Name] = "pair already open";
+                    continue;
+                }
+
+                DateTime whipsawUntil;
+                if (_whipsawUntil.TryGetValue(market.Symbol.Name, out whipsawUntil) &&
+                    Server.Time < whipsawUntil)
+                {
+                    _notes[market.Symbol.Name] = string.Format("whipsaw cooldown {0:F0}s",
+                        (whipsawUntil - Server.Time).TotalSeconds);
                     continue;
                 }
 
@@ -382,7 +425,7 @@ namespace cAlgo.Robots
                 if (BotPositions().Length >= MaxSimultaneousPairs * 2) break;
                 if (BotPositions().Any(p => p.SymbolName == selected.Market.Symbol.Name)) continue;
 
-                Print("HEDGE-FAST V4 SELECT {0}: totalScore={1:F2}, indScore={2:F2}, volume={3:F2}, spread/SL={4:F3}, breakout={5}",
+                Print("HEDGE-FAST V6 SELECT {0}: totalScore={1:F2}, indScore={2:F2}, volume={3:F2}, spread/SL={4:F3}, breakout={5}",
                     selected.Market.Symbol.Name, selected.TotalScore, selected.IndicatorScore,
                     selected.VolumeRatio, selected.SpreadToStop, selected.BreakoutSide);
 
@@ -569,15 +612,19 @@ namespace cAlgo.Robots
             if (closed.Label != BuyLabel && closed.Label != SellLabel) return;
             if (!_markets.Any(m => m.Symbol.Name == closed.SymbolName)) return;
 
-            if (e.Reason != PositionCloseReason.StopLoss) return;
+            _protectedLegs.Remove(closed.Id);
 
-            string sisterLabel = closed.Label == BuyLabel ? SellLabel : BuyLabel;
-            Position sister = Positions.FirstOrDefault(p =>
-                p.SymbolName == closed.SymbolName && p.Label == sisterLabel);
+            if (e.Reason == PositionCloseReason.StopLoss)
+            {
+                _whipsawUntil[closed.SymbolName] = Server.Time.AddSeconds(WhipsawCooldownSeconds);
 
-            if (sister == null) return;
+                string sisterLabel = closed.Label == BuyLabel ? SellLabel : BuyLabel;
+                Position sister = Positions.FirstOrDefault(p =>
+                    p.SymbolName == closed.SymbolName && p.Label == sisterLabel);
 
-            ProtectSisterImmediately(closed, sister);
+                if (sister != null)
+                    ProtectSisterImmediately(closed, sister);
+            }
         }
 
         private void ProtectSisterImmediately(Position stopped, Position sister)
@@ -592,7 +639,7 @@ namespace cAlgo.Robots
                 return;
             }
 
-            // TP is fixed at 2R, so recover original R from half of TP distance.
+            // TP remains 2R, so infer original R from half of TP distance.
             double originalStopPips = 0;
             if (sister.TakeProfit.HasValue)
                 originalStopPips = Math.Abs(sister.TakeProfit.Value - sister.EntryPrice) / s.PipSize / 2.0;
@@ -602,8 +649,7 @@ namespace cAlgo.Robots
 
             if (originalStopPips <= 0)
             {
-                Print("HEDGE-FAST V5 sister protection cannot infer R for id={0}; closing sister={1}.",
-                    stopped.Id, sister.Id);
+                Print("HEDGE-FAST V6 cannot infer R; closing sister id={0}.", sister.Id);
                 if (CloseSisterIfLockFails) ClosePosition(sister);
                 return;
             }
@@ -612,41 +658,172 @@ namespace cAlgo.Robots
             double desiredStop = sister.EntryPrice +
                 (sister.TradeType == TradeType.Buy ? 1.0 : -1.0) * lockPips * s.PipSize;
 
-            // Keep a small execution gap from current quote.
             double minGapPrice = Math.Max(2.0 * s.PipSize, (s.Ask - s.Bid) * 1.5);
-            double safeStop = desiredStop;
+            double safeStop = sister.TradeType == TradeType.Buy
+                ? Math.Min(desiredStop, s.Bid - minGapPrice)
+                : Math.Max(desiredStop, s.Ask + minGapPrice);
 
-            if (sister.TradeType == TradeType.Buy)
-                safeStop = Math.Min(desiredStop, s.Bid - minGapPrice);
-            else
-                safeStop = Math.Max(desiredStop, s.Ask + minGapPrice);
-
-            bool stillLocksProfit =
-                sister.TradeType == TradeType.Buy
-                    ? safeStop > sister.EntryPrice + 0.05 * originalStopPips * s.PipSize
-                    : safeStop < sister.EntryPrice - 0.05 * originalStopPips * s.PipSize;
+            bool stillLocksProfit = sister.TradeType == TradeType.Buy
+                ? safeStop > sister.EntryPrice + 0.05 * originalStopPips * s.PipSize
+                : safeStop < sister.EntryPrice - 0.05 * originalStopPips * s.PipSize;
 
             if (!stillLocksProfit)
             {
-                Print("HEDGE-FAST V5 immediate sister CLOSE id={0} {1}: not enough room to lock profit after opposite SL.",
+                Print("HEDGE-FAST V6 immediate sister CLOSE id={0} {1}: insufficient room to lock profit.",
                     sister.Id, sister.SymbolName);
                 if (CloseSisterIfLockFails) ClosePosition(sister);
                 return;
             }
 
+            // FIRST secure the remaining position; only then attempt a partial profit.
             var mod = sister.ModifyStopLossPrice(Math.Round(safeStop, s.Digits));
-            if (mod.IsSuccessful)
+            if (!mod.IsSuccessful)
             {
-                Print("HEDGE-FAST V5 PROTECTED sister id={0} {1}: opposite id={2} hit SL; locked≈{3:F2}R ({4:F2}p), TP remains 2R.",
-                    sister.Id, sister.SymbolName, stopped.Id, SisterLockR,
-                    Math.Abs(safeStop - sister.EntryPrice) / s.PipSize);
+                Print("HEDGE-FAST V6 lock failed sister id={0} error={1}; immediate close fallback={2}.",
+                    sister.Id, mod.Error, CloseSisterIfLockFails);
+                if (CloseSisterIfLockFails) ClosePosition(sister);
+                return;
+            }
+
+            var state = new ProtectedLeg
+            {
+                PositionId = sister.Id,
+                SymbolName = sister.SymbolName,
+                OriginalStopPips = originalStopPips,
+                BestPrice = sister.TradeType == TradeType.Buy ? s.Bid : s.Ask,
+                PartialTaken = false
+            };
+            _protectedLegs[sister.Id] = state;
+
+            TryTakeSisterPartial(sister, state);
+
+            Print("HEDGE-FAST V6 PROTECTED sister id={0} {1}: opposite #{2} hit SL; locked≈{3:F2}R, partialTaken={4}, TP remains 2R.",
+                sister.Id, sister.SymbolName, stopped.Id, SisterLockR, state.PartialTaken);
+        }
+
+        private void TryTakeSisterPartial(Position sister, ProtectedLeg state)
+        {
+            if (state.PartialTaken || SisterPartialPercent <= 0) return;
+
+            MarketInfo market = _markets.FirstOrDefault(m => m.Symbol.Name == sister.SymbolName);
+            if (market == null) return;
+
+            Symbol s = market.Symbol;
+            double closeUnits = s.NormalizeVolumeInUnits(
+                sister.VolumeInUnits * SisterPartialPercent / 100.0, RoundingMode.Down);
+
+            double remaining = sister.VolumeInUnits - closeUnits;
+            if (closeUnits < s.VolumeInUnitsMin || remaining < s.VolumeInUnitsMin)
+            {
+                Print("HEDGE-FAST V6 PARTIAL SKIP id={0} {1}: volume={2}, close={3}, min={4}. Keeping protected full position.",
+                    sister.Id, sister.SymbolName, sister.VolumeInUnits, closeUnits, s.VolumeInUnitsMin);
+                return;
+            }
+
+            TradeResult partial = ClosePosition(sister, closeUnits);
+            if (partial.IsSuccessful)
+            {
+                state.PartialTaken = true;
+                Print("HEDGE-FAST V6 PARTIAL id={0} {1}: closed {2:F0}% ({3} units); remaining protected + trailing.",
+                    sister.Id, sister.SymbolName, SisterPartialPercent, closeUnits);
             }
             else
             {
-                Print("HEDGE-FAST V5 lock failed sister id={0} error={1}; immediate close fallback={2}.",
-                    sister.Id, mod.Error, CloseSisterIfLockFails);
-                if (CloseSisterIfLockFails)
-                    ClosePosition(sister);
+                Print("HEDGE-FAST V6 PARTIAL FAILED id={0} error={1}; stop protection remains active.",
+                    sister.Id, partial.Error);
+            }
+        }
+
+        private void TrailProtectedSisters()
+        {
+            foreach (var kv in _protectedLegs.ToArray())
+            {
+                Position p = Positions.FirstOrDefault(x => x.Id == kv.Key);
+                if (p == null)
+                {
+                    _protectedLegs.Remove(kv.Key);
+                    continue;
+                }
+
+                ProtectedLeg state = kv.Value;
+                MarketInfo market = _markets.FirstOrDefault(m => m.Symbol.Name == p.SymbolName);
+                if (market == null || state.OriginalStopPips <= 0) continue;
+
+                Symbol s = market.Symbol;
+                double current = p.TradeType == TradeType.Buy ? s.Bid : s.Ask;
+
+                if (p.TradeType == TradeType.Buy)
+                    state.BestPrice = Math.Max(state.BestPrice, current);
+                else
+                    state.BestPrice = Math.Min(state.BestPrice, current);
+
+                double favorablePips = p.TradeType == TradeType.Buy
+                    ? (state.BestPrice - p.EntryPrice) / s.PipSize
+                    : (p.EntryPrice - state.BestPrice) / s.PipSize;
+
+                double favorableR = favorablePips / state.OriginalStopPips;
+                if (favorableR < SisterTrailActivationR) continue;
+
+                double atrPrice = ClosedAtr(market.M1, AtrPeriod, 40);
+                double atrTrailPips = atrPrice > 0 ? (atrPrice / s.PipSize) * 0.35 : 0;
+                double trailPips = Math.Max(state.OriginalStopPips * SisterTrailR, atrTrailPips);
+
+                double proposed = p.TradeType == TradeType.Buy
+                    ? state.BestPrice - trailPips * s.PipSize
+                    : state.BestPrice + trailPips * s.PipSize;
+
+                // Never loosen below the initial V6 lock.
+                double floorLock = p.EntryPrice +
+                    (p.TradeType == TradeType.Buy ? 1.0 : -1.0) *
+                    state.OriginalStopPips * SisterLockR * s.PipSize;
+
+                if (p.TradeType == TradeType.Buy)
+                    proposed = Math.Max(proposed, floorLock);
+                else
+                    proposed = Math.Min(proposed, floorLock);
+
+                double gap = Math.Max(2.0 * s.PipSize, (s.Ask - s.Bid) * 1.5);
+                proposed = p.TradeType == TradeType.Buy
+                    ? Math.Min(proposed, s.Bid - gap)
+                    : Math.Max(proposed, s.Ask + gap);
+
+                bool improves = !p.StopLoss.HasValue ||
+                    (p.TradeType == TradeType.Buy
+                        ? proposed > p.StopLoss.Value + 0.10 * s.PipSize
+                        : proposed < p.StopLoss.Value - 0.10 * s.PipSize);
+
+                if (!improves) continue;
+
+                var mod = p.ModifyStopLossPrice(Math.Round(proposed, s.Digits));
+                if (mod.IsSuccessful && DiagnosticLogs)
+                {
+                    double lockedR = Math.Abs(proposed - p.EntryPrice) / s.PipSize / state.OriginalStopPips;
+                    Print("HEDGE-FAST V6 TRAIL id={0} {1}: best={2:F2}R stop≈{3:F2}R.",
+                        p.Id, p.SymbolName, favorableR, lockedR);
+                }
+            }
+        }
+
+        private void PrintMarketStats()
+        {
+            foreach (var m in _markets)
+            {
+                var trades = History.FindAll(BuyLabel)
+                    .Concat(History.FindAll(SellLabel))
+                    .Where(h => h.SymbolName == m.Symbol.Name && h.EntryTime.Date == _utcDay)
+                    .ToArray();
+
+                if (trades.Length == 0) continue;
+
+                double net = trades.Sum(h => h.NetProfit);
+                double grossWin = trades.Where(h => h.NetProfit > 0).Sum(h => h.NetProfit);
+                double grossLoss = -trades.Where(h => h.NetProfit < 0).Sum(h => h.NetProfit);
+                int wins = trades.Count(h => h.NetProfit > 0);
+                int losses = trades.Count(h => h.NetProfit < 0);
+                double pf = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? 999.0 : 0.0);
+
+                Print("HEDGE-FAST V6 STATS {0}: closed={1} W/L={2}/{3} net={4:F2} PF={5:F2}",
+                    m.Symbol.Name, trades.Length, wins, losses, net, pf);
             }
         }
 
@@ -694,7 +871,7 @@ namespace cAlgo.Robots
             }
             if (currentNominalRisk + pairRisk > MaxNominalOpenRiskPercent + 1e-9)
             {
-                Print("HEDGE-FAST V4 PORTFOLIO SKIP {0}: nominalRiskIfAdded={1:F2}% > cap={2:F2}%.",
+                Print("HEDGE-FAST V6 PORTFOLIO SKIP {0}: nominalRiskIfAdded={1:F2}% > cap={2:F2}%.",
                     s.Name, currentNominalRisk + pairRisk, MaxNominalOpenRiskPercent);
                 return;
             }
@@ -743,7 +920,7 @@ namespace cAlgo.Robots
             _cyclesToday++;
             _wasInCycle = true;
             _lastLaunchBySymbol[s.Name] = Server.Time;
-            Print("HEDGE-FAST V4 OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} breakout={10}",
+            Print("HEDGE-FAST V6 OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} breakout={10}",
                 s.Name, _cyclesToday, MaxCyclesPerDay, buy.Position.Id, sell.Position.Id,
                 units, c.StopPips, tpPips, liveSpreadToStop, c.SetupQuality, c.BreakoutSide);
         }
@@ -797,7 +974,7 @@ namespace cAlgo.Robots
         {
             Positions.Closed -= OnPositionClosed;
             Timer.Stop();
-            Print("HEDGE-FAST V5 stopped.");
+            Print("HEDGE-FAST V6 stopped.");
         }
     }
 }
