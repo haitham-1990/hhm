@@ -3,8 +3,8 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
-    <AssemblyName>DualHedgeFast2RV4Multi</AssemblyName>
-    <AlgoName>Dual_Hedge_FAST_2R_V4_MULTI</AlgoName>
+    <AssemblyName>DualHedgeFast2RV5Protect</AssemblyName>
+    <AlgoName>Dual_Hedge_FAST_2R_V5_PROTECT</AlgoName>
     <AlgoBuild>true</AlgoBuild>
     <AlgoPublish>false</AlgoPublish>
     <IncludeSource>true</IncludeSource>
