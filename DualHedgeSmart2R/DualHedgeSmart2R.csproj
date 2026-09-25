@@ -3,8 +3,8 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
-    <AssemblyName>DualHedgeSmart2RRelaxed</AssemblyName>
-    <AlgoName>Dual_Hedge_Smart_2R_RELAXED</AlgoName>
+    <AssemblyName>DualHedgeFast2R</AssemblyName>
+    <AlgoName>Dual_Hedge_FAST_2R</AlgoName>
     <AlgoBuild>true</AlgoBuild>
     <AlgoPublish>false</AlgoPublish>
     <IncludeSource>true</IncludeSource>
