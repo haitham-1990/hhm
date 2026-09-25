@@ -16,7 +16,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V6-1-NOTIME", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V7-CRYPTO", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -24,6 +24,9 @@ namespace cAlgo.Robots
 
         [Parameter("Gold total pair risk (%)", DefaultValue = 0.40, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
         public double GoldPairRiskPercent { get; set; }
+
+        [Parameter("Crypto total pair risk (%)", DefaultValue = 0.25, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
+        public double CryptoPairRiskPercent { get; set; }
 
         [Parameter("Max cycles per UTC day", DefaultValue = 150, MinValue = 1, MaxValue = 300, Group = "Risk")]
         public int MaxCyclesPerDay { get; set; }
@@ -49,6 +52,12 @@ namespace cAlgo.Robots
         [Parameter("GOLD symbol", DefaultValue = "XAUUSD", Group = "Markets")]
         public string GoldName { get; set; }
 
+        [Parameter("Bitcoin symbol", DefaultValue = "BTCUSD", Group = "عملات رقمية / Crypto")]
+        public string BitcoinName { get; set; }
+
+        [Parameter("Ethereum symbol", DefaultValue = "ETHUSD", Group = "عملات رقمية / Crypto")]
+        public string EthereumName { get; set; }
+
         [Parameter("Enable EURUSD", DefaultValue = true, Group = "Markets")]
         public bool EnableEurUsd { get; set; }
 
@@ -60,6 +69,12 @@ namespace cAlgo.Robots
 
         [Parameter("Enable GOLD", DefaultValue = true, Group = "Markets")]
         public bool EnableGold { get; set; }
+
+        [Parameter("Enable Bitcoin", DefaultValue = true, Group = "عملات رقمية / Crypto")]
+        public bool EnableBitcoin { get; set; }
+
+        [Parameter("Enable Ethereum", DefaultValue = true, Group = "عملات رقمية / Crypto")]
+        public bool EnableEthereum { get; set; }
 
         [Parameter("Gold-only test", DefaultValue = false, Group = "Markets")]
         public bool GoldOnlyTest { get; set; }
@@ -115,6 +130,21 @@ namespace cAlgo.Robots
         [Parameter("Gold max stop USD", DefaultValue = 1.50, MinValue = 0.10, MaxValue = 100.0, Group = "Stops")]
         public double GoldMaxStopPrice { get; set; }
 
+        [Parameter("Crypto ATR stop multiplier", DefaultValue = 0.55, MinValue = 0.20, MaxValue = 5.0, Group = "عملات رقمية / Crypto")]
+        public double CryptoAtrStopMultiplier { get; set; }
+
+        [Parameter("Crypto min stop (%)", DefaultValue = 0.08, MinValue = 0.01, MaxValue = 2.0, Group = "عملات رقمية / Crypto")]
+        public double CryptoMinStopPercent { get; set; }
+
+        [Parameter("Crypto max stop (%)", DefaultValue = 0.60, MinValue = 0.05, MaxValue = 5.0, Group = "عملات رقمية / Crypto")]
+        public double CryptoMaxStopPercent { get; set; }
+
+        [Parameter("Crypto max spread / stop", DefaultValue = 0.35, MinValue = 0.02, MaxValue = 1.0, Group = "عملات رقمية / Crypto")]
+        public double CryptoMaxSpreadToStop { get; set; }
+
+        [Parameter("Crypto max spread / ATR", DefaultValue = 0.70, MinValue = 0.05, MaxValue = 2.0, Group = "عملات رقمية / Crypto")]
+        public double CryptoMaxSpreadToAtr { get; set; }
+
         [Parameter("Reward / risk", DefaultValue = 2.0, MinValue = 2.0, MaxValue = 2.0, Group = "Stops")]
         public double RewardRisk { get; set; }
 
@@ -162,6 +192,7 @@ namespace cAlgo.Robots
             public ExponentialMovingAverage M5Slow;
             public RelativeStrengthIndex Rsi;
             public bool Gold;
+            public bool Crypto;
             public DateTime LastExamined = DateTime.MinValue;
         }
 
@@ -227,10 +258,12 @@ namespace cAlgo.Robots
                 return;
             }
 
-            AddMarket(EnableEurUsd && !GoldOnlyTest, EurUsdName, false);
-            AddMarket(EnableGbpUsd && !GoldOnlyTest, GbpUsdName, false);
-            AddMarket(EnableUsdJpy && !GoldOnlyTest, UsdJpyName, false);
-            AddMarket(EnableGold, GoldName, true);
+            AddMarket(EnableEurUsd && !GoldOnlyTest, EurUsdName, false, false);
+            AddMarket(EnableGbpUsd && !GoldOnlyTest, GbpUsdName, false, false);
+            AddMarket(EnableUsdJpy && !GoldOnlyTest, UsdJpyName, false, false);
+            AddMarket(EnableGold, GoldName, true, false);
+            AddMarket(EnableBitcoin && !GoldOnlyTest, BitcoinName, false, true);
+            AddMarket(EnableEthereum && !GoldOnlyTest, EthereumName, false, true);
 
             if (_markets.Count == 0)
             {
@@ -244,11 +277,12 @@ namespace cAlgo.Robots
             Positions.Closed += OnPositionClosed;
             Timer.Start(2);
 
-            Print("HEDGE-FAST 2R V6.1 NO-TIMEOUT ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
+            Print("HEDGE-FAST 2R V7 عملات رقمية / CRYPTO ON | markets={0} | scan=2s | batchMaxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
                 string.Join(",", _markets.Select(m => m.Symbol.Name)),
                 MaxSimultaneousPairs, MaxSimultaneousPairs * 2, MaxHoldSeconds);
-            Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, nominal portfolio cap={2:F2}%. Indicators score EMA9/21 + M5 EMA20/50 + RSI7 + tick-volume + breakout/ATR.",
-                FxPairRiskPercent, GoldPairRiskPercent, MaxNominalOpenRiskPercent);
+            Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, CRYPTO pair={2:F2}%, nominal portfolio cap={3:F2}%.",
+                FxPairRiskPercent, GoldPairRiskPercent, CryptoPairRiskPercent, MaxNominalOpenRiskPercent);
+            Print("V7 BATCH: ranks ALL available markets then launches up to 4 BUY+SELL pairs = 8 positions in the same scan.");
             Print("V6 exits: opposite SL => lock sister at {0:F2}R, take {1:F0}% partial when possible, then trail by {2:F2}R after {3:F2}R. Whipsaw cooldown={4}s.",
                 SisterLockR, SisterPartialPercent, SisterTrailR, SisterTrailActivationR, WhipsawCooldownSeconds);
             Print("ENTRY ZONE = prior compression + fresh breakout impulse + no late chase. GOLD enabled={0}, goldOnly={1}.",
@@ -256,7 +290,7 @@ namespace cAlgo.Robots
             Print("Normalized spread comparison uses spread/stop and spread/ATR; raw FX pips vs GOLD price spread are NOT compared directly.");
         }
 
-        private void AddMarket(bool enabled, string name, bool gold)
+        private void AddMarket(bool enabled, string name, bool gold, bool crypto)
         {
             if (!enabled || string.IsNullOrWhiteSpace(name)) return;
             try
@@ -279,10 +313,12 @@ namespace cAlgo.Robots
                     M5Fast = Indicators.ExponentialMovingAverage(bars5.ClosePrices, M5EmaFast),
                     M5Slow = Indicators.ExponentialMovingAverage(bars5.ClosePrices, M5EmaSlow),
                     Rsi = Indicators.RelativeStrengthIndex(bars.ClosePrices, RsiPeriod),
-                    Gold = gold
+                    Gold = gold,
+                    Crypto = crypto
                 });
                 Print("HEDGE-SMART tracking {0} as {1}, minVolume={2}, pip={3}",
-                    s.Name, gold ? "GOLD" : "FX", s.VolumeInUnitsMin, s.PipSize);
+                    s.Name, crypto ? "عملات رقمية/CRYPTO" : (gold ? "GOLD" : "FX"),
+                    s.VolumeInUnitsMin, s.PipSize);
             }
             catch (Exception ex)
             {
@@ -471,11 +507,7 @@ namespace cAlgo.Robots
             }
 
             double compression = recentTr / baselineTr;
-            if (compression > CompressionMaxRatio)
-            {
-                _notes[s.Name] = string.Format("no squeeze {0:F2}>{1:F2}", compression, CompressionMaxRatio);
-                return null;
-            }
+            // V7: compression is scored, not a hard rejection. This keeps batch activity high.
 
             double priorHigh = double.MinValue;
             double priorLow = double.MaxValue;
@@ -488,26 +520,15 @@ namespace cAlgo.Robots
             double open = b.OpenPrices.Last(1);
             double close = b.ClosePrices.Last(1);
             double bodyAtr = Math.Abs(close - open) / atr;
-            if (bodyAtr < MinBreakoutBodyAtr)
-            {
-                _notes[s.Name] = string.Format("weak impulse body/ATR={0:F2}", bodyAtr);
-                return null;
-            }
 
-            bool up = close > priorHigh;
-            bool down = close < priorLow;
-            if (!up && !down)
-            {
-                _notes[s.Name] = "still inside compressed range";
-                return null;
-            }
+            bool trueBreakUp = close > priorHigh;
+            bool trueBreakDown = close < priorLow;
+            bool up = trueBreakUp || (!trueBreakDown && close >= open);
+            bool down = !up;
 
-            double chase = up ? (close - priorHigh) / atr : (priorLow - close) / atr;
-            if (chase < 0 || chase > MaxBreakoutChaseAtr)
-            {
-                _notes[s.Name] = string.Format("late breakout chase/ATR={0:F2}", chase);
-                return null;
-            }
+            double chase = trueBreakUp ? (close - priorHigh) / atr :
+                (trueBreakDown ? (priorLow - close) / atr : 0.0);
+            chase = Math.Max(0.0, chase);
 
             double spreadPrice = s.Ask - s.Bid;
             if (spreadPrice <= 0)
@@ -516,29 +537,50 @@ namespace cAlgo.Robots
                 return null;
             }
 
-            double stopPrice = Math.Max(atr * StopAtrMultiplier, spreadPrice * 4.0);
-            if (market.Gold)
+            double stopPrice;
+            double allowedSpreadToStop = MaxSpreadToStop;
+            double allowedSpreadToAtr = MaxSpreadToAtr;
+
+            if (market.Crypto)
             {
-                stopPrice = Math.Max(stopPrice, GoldMinStopPrice);
-                if (stopPrice > GoldMaxStopPrice)
-                {
-                    _notes[s.Name] = "gold stop too wide";
-                    return null;
-                }
+                double mid = (s.Bid + s.Ask) / 2.0;
+                double minCryptoStop = mid * CryptoMinStopPercent / 100.0;
+                double maxCryptoStop = mid * CryptoMaxStopPercent / 100.0;
+                stopPrice = Math.Max(atr * CryptoAtrStopMultiplier,
+                    Math.Max(spreadPrice * 4.0, minCryptoStop));
+
+                if (stopPrice > maxCryptoStop)
+                    stopPrice = maxCryptoStop;
+
+                allowedSpreadToStop = CryptoMaxSpreadToStop;
+                allowedSpreadToAtr = CryptoMaxSpreadToAtr;
             }
             else
             {
-                stopPrice = Math.Max(stopPrice, FxMinStopPips * s.PipSize);
-                if (stopPrice / s.PipSize > FxMaxStopPips)
+                stopPrice = Math.Max(atr * StopAtrMultiplier, spreadPrice * 4.0);
+                if (market.Gold)
                 {
-                    _notes[s.Name] = "FX stop too wide";
-                    return null;
+                    stopPrice = Math.Max(stopPrice, GoldMinStopPrice);
+                    if (stopPrice > GoldMaxStopPrice)
+                    {
+                        _notes[s.Name] = "gold stop too wide";
+                        return null;
+                    }
+                }
+                else
+                {
+                    stopPrice = Math.Max(stopPrice, FxMinStopPips * s.PipSize);
+                    if (stopPrice / s.PipSize > FxMaxStopPips)
+                    {
+                        _notes[s.Name] = "FX stop too wide";
+                        return null;
+                    }
                 }
             }
 
             double spreadToStop = spreadPrice / stopPrice;
             double spreadToAtr = spreadPrice / atr;
-            if (spreadToStop > MaxSpreadToStop || spreadToAtr > MaxSpreadToAtr)
+            if (spreadToStop > allowedSpreadToStop || spreadToAtr > allowedSpreadToAtr)
             {
                 _notes[s.Name] = string.Format("spread costly s/SL={0:F2}, s/ATR={1:F2}", spreadToStop, spreadToAtr);
                 return null;
@@ -567,16 +609,18 @@ namespace cAlgo.Robots
                 (volumeRatio >= 1.00 ? 0.50 : 0) +
                 (volumeRatio >= 1.20 ? 0.25 : 0);
 
-            if (indicatorScore < MinIndicatorScore)
-            {
-                _notes[s.Name] = string.Format("indicator score {0:F2}<{1:F2}", indicatorScore, MinIndicatorScore);
-                return null;
-            }
+            // V7: indicator score ranks candidates; it no longer blocks them by itself.
+
+            double breakoutBonus = (trueBreakUp || trueBreakDown) ? 0.75 : 0.0;
+            double bodyBonus = Math.Min(1.5, bodyAtr) * 0.60;
+            double compressionScore = Math.Max(-0.75, (CompressionMaxRatio - compression) * 1.20);
+            double chasePenalty = Math.Max(0.0, chase - MaxBreakoutChaseAtr) * 0.60;
 
             double setupQuality =
-                (CompressionMaxRatio - compression) * 1.20 +
-                Math.Min(1.5, bodyAtr) * 0.60 +
-                (MaxBreakoutChaseAtr - chase) * 0.25 -
+                compressionScore +
+                bodyBonus +
+                breakoutBonus -
+                chasePenalty -
                 spreadToStop * 2.0;
 
             double totalScore =
@@ -597,7 +641,7 @@ namespace cAlgo.Robots
                 CompressionRatio = compression,
                 BreakoutBodyAtr = bodyAtr,
                 ChaseAtr = chase,
-                BreakoutSide = up ? "UP" : "DOWN",
+                BreakoutSide = trueBreakUp ? "BREAK-UP" : (trueBreakDown ? "BREAK-DOWN" : (up ? "MOM-UP" : "MOM-DOWN")),
                 SetupQuality = setupQuality,
                 IndicatorScore = indicatorScore,
                 VolumeRatio = volumeRatio,
@@ -864,14 +908,16 @@ namespace cAlgo.Robots
                 return;
             }
 
-            double pairRisk = c.Market.Gold ? GoldPairRiskPercent : FxPairRiskPercent;
+            double pairRisk = c.Market.Crypto ? CryptoPairRiskPercent :
+                (c.Market.Gold ? GoldPairRiskPercent : FxPairRiskPercent);
 
             double currentNominalRisk = 0;
             foreach (var p in BotPositions())
             {
                 var m = _markets.FirstOrDefault(x => x.Symbol.Name == p.SymbolName);
                 if (m != null)
-                    currentNominalRisk += (m.Gold ? GoldPairRiskPercent : FxPairRiskPercent) / 2.0;
+                    currentNominalRisk += (m.Crypto ? CryptoPairRiskPercent :
+                        (m.Gold ? GoldPairRiskPercent : FxPairRiskPercent)) / 2.0;
             }
             if (currentNominalRisk + pairRisk > MaxNominalOpenRiskPercent + 1e-9)
             {
@@ -887,7 +933,7 @@ namespace cAlgo.Robots
 
             if (units < s.VolumeInUnitsMin)
             {
-                Print("HEDGE-SMART RISK SKIP {0}: calculated volume={1} < broker min={2}. No forced gold/FX risk.",
+                Print("HEDGE-SMART RISK SKIP {0}: calculated volume={1} < broker min={2}. No forced FX/GOLD/CRYPTO risk.",
                     s.Name, units, s.VolumeInUnitsMin);
                 return;
             }
@@ -924,7 +970,7 @@ namespace cAlgo.Robots
             _cyclesToday++;
             _wasInCycle = true;
             _lastLaunchBySymbol[s.Name] = Server.Time;
-            Print("HEDGE-FAST V6 OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} breakout={10}",
+            Print("HEDGE-FAST V7 CRYPTO OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} mode={10}",
                 s.Name, _cyclesToday, MaxCyclesPerDay, buy.Position.Id, sell.Position.Id,
                 units, c.StopPips, tpPips, liveSpreadToStop, c.SetupQuality, c.BreakoutSide);
         }
@@ -978,7 +1024,7 @@ namespace cAlgo.Robots
         {
             Positions.Closed -= OnPositionClosed;
             Timer.Stop();
-            Print("HEDGE-FAST V6 stopped.");
+            Print("HEDGE-FAST V7 CRYPTO stopped.");
         }
     }
 }
