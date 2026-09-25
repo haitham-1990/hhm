@@ -15,7 +15,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-SMART-2R-V2", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-SMART-2R-V2-RELAXED", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.20, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -24,10 +24,10 @@ namespace cAlgo.Robots
         [Parameter("Gold total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
         public double GoldPairRiskPercent { get; set; }
 
-        [Parameter("Max cycles per UTC day", DefaultValue = 15, MinValue = 1, MaxValue = 100, Group = "Risk")]
+        [Parameter("Max cycles per UTC day", DefaultValue = 40, MinValue = 1, MaxValue = 100, Group = "Risk")]
         public int MaxCyclesPerDay { get; set; }
 
-        [Parameter("Cooldown after flat (sec)", DefaultValue = 120, MinValue = 0, MaxValue = 3600, Group = "Risk")]
+        [Parameter("Cooldown after flat (sec)", DefaultValue = 30, MinValue = 0, MaxValue = 3600, Group = "Risk")]
         public int CooldownSeconds { get; set; }
 
         [Parameter("EURUSD symbol", DefaultValue = "EURUSD", Group = "Markets")]
@@ -63,13 +63,13 @@ namespace cAlgo.Robots
         [Parameter("Compression bars", DefaultValue = 8, MinValue = 4, MaxValue = 30, Group = "Setup")]
         public int CompressionBars { get; set; }
 
-        [Parameter("Compression max ratio", DefaultValue = 0.85, MinValue = 0.20, MaxValue = 1.50, Group = "Setup")]
+        [Parameter("Compression max ratio", DefaultValue = 1.20, MinValue = 0.20, MaxValue = 1.50, Group = "Setup")]
         public double CompressionMaxRatio { get; set; }
 
-        [Parameter("Min breakout body / ATR", DefaultValue = 0.45, MinValue = 0.10, MaxValue = 3.0, Group = "Setup")]
+        [Parameter("Min breakout body / ATR", DefaultValue = 0.15, MinValue = 0.05, MaxValue = 3.0, Group = "Setup")]
         public double MinBreakoutBodyAtr { get; set; }
 
-        [Parameter("Max breakout chase / ATR", DefaultValue = 0.35, MinValue = 0.05, MaxValue = 2.0, Group = "Setup")]
+        [Parameter("Max breakout chase / ATR", DefaultValue = 0.90, MinValue = 0.05, MaxValue = 2.0, Group = "Setup")]
         public double MaxBreakoutChaseAtr { get; set; }
 
         [Parameter("Stop ATR multiplier", DefaultValue = 1.35, MinValue = 0.2, MaxValue = 10.0, Group = "Stops")]
@@ -90,10 +90,10 @@ namespace cAlgo.Robots
         [Parameter("Reward / risk", DefaultValue = 2.0, MinValue = 2.0, MaxValue = 2.0, Group = "Stops")]
         public double RewardRisk { get; set; }
 
-        [Parameter("Max spread / stop", DefaultValue = 0.12, MinValue = 0.01, MaxValue = 0.50, Group = "Execution")]
+        [Parameter("Max spread / stop", DefaultValue = 0.25, MinValue = 0.01, MaxValue = 0.50, Group = "Execution")]
         public double MaxSpreadToStop { get; set; }
 
-        [Parameter("Max spread / ATR", DefaultValue = 0.18, MinValue = 0.01, MaxValue = 1.0, Group = "Execution")]
+        [Parameter("Max spread / ATR", DefaultValue = 0.35, MinValue = 0.01, MaxValue = 1.0, Group = "Execution")]
         public double MaxSpreadToAtr { get; set; }
 
         [Parameter("Max actual risk / budget", DefaultValue = 1.10, MinValue = 1.0, MaxValue = 2.0, Group = "Execution")]
@@ -171,7 +171,7 @@ namespace cAlgo.Robots
             RecoverToday();
             Timer.Start(5);
 
-            Print("HEDGE-SMART 2R V2 ON | markets={0} | chooses LOWEST normalized spread among qualified setups | RR=2:1",
+            Print("HEDGE-SMART 2R V2 RELAXED ON | markets={0} | lower entry thresholds, LOWEST normalized spread | RR=2:1",
                 string.Join(",", _markets.Select(m => m.Symbol.Name)));
             Print("ENTRY ZONE = prior compression + fresh breakout impulse + no late chase. GOLD enabled={0}, goldOnly={1}.",
                 EnableGold, GoldOnlyTest);
