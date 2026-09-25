@@ -16,7 +16,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V7-CRYPTO", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V7-1-عملات-رقمية", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -262,8 +262,14 @@ namespace cAlgo.Robots
             AddMarket(EnableGbpUsd && !GoldOnlyTest, GbpUsdName, false, false);
             AddMarket(EnableUsdJpy && !GoldOnlyTest, UsdJpyName, false, false);
             AddMarket(EnableGold, GoldName, true, false);
-            AddMarket(EnableBitcoin && !GoldOnlyTest, BitcoinName, false, true);
-            AddMarket(EnableEthereum && !GoldOnlyTest, EthereumName, false, true);
+
+            string detectedBitcoin = ResolveBrokerSymbol(BitcoinName,
+                new[] { "BTC", "XBT" }, new[] { "USD", "USDT" });
+            string detectedEthereum = ResolveBrokerSymbol(EthereumName,
+                new[] { "ETH" }, new[] { "USD", "USDT" });
+
+            AddMarket(EnableBitcoin && !GoldOnlyTest, detectedBitcoin, false, true);
+            AddMarket(EnableEthereum && !GoldOnlyTest, detectedEthereum, false, true);
 
             if (_markets.Count == 0)
             {
@@ -277,7 +283,7 @@ namespace cAlgo.Robots
             Positions.Closed += OnPositionClosed;
             Timer.Start(2);
 
-            Print("HEDGE-FAST 2R V7 عملات رقمية / CRYPTO ON | markets={0} | scan=2s | batchMaxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
+            Print("HEDGE-FAST 2R V7.1 عملات رقمية / CRYPTO AUTO-SYMBOLS ON | markets={0} | scan=2s | batchMaxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
                 string.Join(",", _markets.Select(m => m.Symbol.Name)),
                 MaxSimultaneousPairs, MaxSimultaneousPairs * 2, MaxHoldSeconds);
             Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, CRYPTO pair={2:F2}%, nominal portfolio cap={3:F2}%.",
@@ -290,15 +296,83 @@ namespace cAlgo.Robots
             Print("Normalized spread comparison uses spread/stop and spread/ATR; raw FX pips vs GOLD price spread are NOT compared directly.");
         }
 
+        private string ResolveBrokerSymbol(string preferred, string[] assetTokens, string[] quoteTokens)
+        {
+            if (!string.IsNullOrWhiteSpace(preferred))
+            {
+                string trimmed = preferred.Trim();
+                if (Symbols.Exists(trimmed))
+                {
+                    Print("HEDGE-FAST V7.1 AUTO-SYMBOL exact {0}.", trimmed);
+                    return trimmed;
+                }
+
+                string preferredNorm = NormalizeSymbolName(trimmed);
+                for (int i = 0; i < Symbols.Count; i++)
+                {
+                    string candidate = Symbols[i];
+                    if (NormalizeSymbolName(candidate) == preferredNorm)
+                    {
+                        Print("HEDGE-FAST V7.1 AUTO-SYMBOL mapped {0} -> {1}.", trimmed, candidate);
+                        return candidate;
+                    }
+                }
+            }
+
+            var matches = new List<string>();
+            for (int i = 0; i < Symbols.Count; i++)
+            {
+                string candidate = Symbols[i];
+                string norm = NormalizeSymbolName(candidate);
+
+                bool assetMatch = assetTokens.Any(t => norm.Contains(t));
+                bool quoteMatch = quoteTokens.Any(t => norm.Contains(t));
+                if (assetMatch && quoteMatch)
+                    matches.Add(candidate);
+            }
+
+            if (matches.Count == 0)
+            {
+                Print("HEDGE-FAST V7.1 AUTO-SYMBOL: no broker symbol found for assets={0} quotes={1}.",
+                    string.Join("/", assetTokens), string.Join("/", quoteTokens));
+                return preferred;
+            }
+
+            string chosen = matches
+                .OrderBy(x => NormalizeSymbolName(x).Length)
+                .ThenBy(x => x.Length)
+                .First();
+
+            Print("HEDGE-FAST V7.1 AUTO-SYMBOL discovered {0}. Candidates={1}",
+                chosen, string.Join(",", matches.Take(8)));
+            return chosen;
+        }
+
+        private string NormalizeSymbolName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            return new string(value
+                .ToUpperInvariant()
+                .Where(char.IsLetterOrDigit)
+                .ToArray());
+        }
+
         private void AddMarket(bool enabled, string name, bool gold, bool crypto)
         {
             if (!enabled || string.IsNullOrWhiteSpace(name)) return;
             try
             {
-                var s = Symbols.GetSymbol(name.Trim());
+                string resolved = name.Trim();
+                if (!Symbols.Exists(resolved))
+                {
+                    Print("HEDGE-SMART missing broker symbol {0}.", resolved);
+                    return;
+                }
+
+                var s = Symbols.GetSymbol(resolved);
                 if (s == null)
                 {
-                    Print("HEDGE-SMART missing broker symbol {0}.", name);
+                    Print("HEDGE-SMART unable to load broker symbol {0}.", resolved);
                     return;
                 }
                 var bars = MarketData.GetBars(TimeFrame.Minute, s.Name);
@@ -1024,7 +1098,7 @@ namespace cAlgo.Robots
         {
             Positions.Closed -= OnPositionClosed;
             Timer.Stop();
-            Print("HEDGE-FAST V7 CRYPTO stopped.");
+            Print("HEDGE-FAST V7.1 عملات رقمية stopped.");
         }
     }
 }
