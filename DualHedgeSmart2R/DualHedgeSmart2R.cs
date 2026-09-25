@@ -16,7 +16,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V7-1-عملات-رقمية", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V7-2-CRYPTO-COST-SAFE", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -139,11 +139,23 @@ namespace cAlgo.Robots
         [Parameter("Crypto max stop (%)", DefaultValue = 0.60, MinValue = 0.05, MaxValue = 5.0, Group = "عملات رقمية / Crypto")]
         public double CryptoMaxStopPercent { get; set; }
 
-        [Parameter("Crypto max spread / stop", DefaultValue = 0.35, MinValue = 0.02, MaxValue = 1.0, Group = "عملات رقمية / Crypto")]
+        [Parameter("Crypto max spread / stop", DefaultValue = 0.15, MinValue = 0.02, MaxValue = 1.0, Group = "عملات رقمية / Crypto")]
         public double CryptoMaxSpreadToStop { get; set; }
 
-        [Parameter("Crypto max spread / ATR", DefaultValue = 0.70, MinValue = 0.05, MaxValue = 2.0, Group = "عملات رقمية / Crypto")]
+        [Parameter("Crypto max spread / ATR", DefaultValue = 0.55, MinValue = 0.05, MaxValue = 2.0, Group = "عملات رقمية / Crypto")]
         public double CryptoMaxSpreadToAtr { get; set; }
+
+        [Parameter("Crypto minimum stop / spread", DefaultValue = 7.0, MinValue = 4.0, MaxValue = 20.0, Group = "عملات رقمية / Crypto")]
+        public double CryptoMinStopSpreadMultiple { get; set; }
+
+        [Parameter("Crypto max spread widening x", DefaultValue = 1.25, MinValue = 1.0, MaxValue = 3.0, Group = "عملات رقمية / Crypto")]
+        public double CryptoMaxSpreadWideningFactor { get; set; }
+
+        [Parameter("Crypto capture current profit (%)", DefaultValue = 70.0, MinValue = 30.0, MaxValue = 90.0, Group = "عملات رقمية / Crypto")]
+        public double CryptoCaptureCurrentProfitPercent { get; set; }
+
+        [Parameter("Crypto partial only after R", DefaultValue = 0.60, MinValue = 0.10, MaxValue = 1.50, Group = "عملات رقمية / Crypto")]
+        public double CryptoPartialMinR { get; set; }
 
         [Parameter("Reward / risk", DefaultValue = 2.0, MinValue = 2.0, MaxValue = 2.0, Group = "Stops")]
         public double RewardRisk { get; set; }
@@ -283,12 +295,14 @@ namespace cAlgo.Robots
             Positions.Closed += OnPositionClosed;
             Timer.Start(2);
 
-            Print("HEDGE-FAST 2R V7.1 عملات رقمية / CRYPTO AUTO-SYMBOLS ON | markets={0} | scan=2s | batchMaxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
+            Print("HEDGE-FAST 2R V7.2 عملات رقمية / CRYPTO COST-SAFE ON | markets={0} | scan=2s | batchMaxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
                 string.Join(",", _markets.Select(m => m.Symbol.Name)),
                 MaxSimultaneousPairs, MaxSimultaneousPairs * 2, MaxHoldSeconds);
             Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, CRYPTO pair={2:F2}%, nominal portfolio cap={3:F2}%.",
                 FxPairRiskPercent, GoldPairRiskPercent, CryptoPairRiskPercent, MaxNominalOpenRiskPercent);
-            Print("V7 BATCH: ranks ALL available markets then launches up to 4 BUY+SELL pairs = 8 positions in the same scan.");
+            Print("V7.2 BATCH: ranks ALL available markets then launches up to 4 BUY+SELL pairs = 8 positions in the same scan.");
+            Print("CRYPTO COST GUARD: stop>=spread*{0:F1}, spread/SL<={1:F2}, spread widening<={2:F2}x, dynamic sister capture={3:F0}%.",
+                CryptoMinStopSpreadMultiple, CryptoMaxSpreadToStop, CryptoMaxSpreadWideningFactor, CryptoCaptureCurrentProfitPercent);
             Print("V6 exits: opposite SL => lock sister at {0:F2}R, take {1:F0}% partial when possible, then trail by {2:F2}R after {3:F2}R. Whipsaw cooldown={4}s.",
                 SisterLockR, SisterPartialPercent, SisterTrailR, SisterTrailActivationR, WhipsawCooldownSeconds);
             Print("ENTRY ZONE = prior compression + fresh breakout impulse + no late chase. GOLD enabled={0}, goldOnly={1}.",
@@ -621,7 +635,7 @@ namespace cAlgo.Robots
                 double minCryptoStop = mid * CryptoMinStopPercent / 100.0;
                 double maxCryptoStop = mid * CryptoMaxStopPercent / 100.0;
                 stopPrice = Math.Max(atr * CryptoAtrStopMultiplier,
-                    Math.Max(spreadPrice * 4.0, minCryptoStop));
+                    Math.Max(spreadPrice * CryptoMinStopSpreadMultiple, minCryptoStop));
 
                 if (stopPrice > maxCryptoStop)
                     stopPrice = maxCryptoStop;
@@ -772,7 +786,23 @@ namespace cAlgo.Robots
                 return;
             }
 
-            double lockPips = originalStopPips * SisterLockR;
+            double currentFavorablePips = sister.TradeType == TradeType.Buy
+                ? (s.Bid - sister.EntryPrice) / s.PipSize
+                : (sister.EntryPrice - s.Ask) / s.PipSize;
+
+            double lockPips;
+            if (market.Crypto)
+            {
+                // Crypto spread can consume a large part of 1R. Capture a percentage of
+                // the profit that actually exists now instead of demanding a fixed +0.70R.
+                lockPips = Math.Max(0.0,
+                    currentFavorablePips * CryptoCaptureCurrentProfitPercent / 100.0);
+            }
+            else
+            {
+                lockPips = originalStopPips * SisterLockR;
+            }
+
             double desiredStop = sister.EntryPrice +
                 (sister.TradeType == TradeType.Buy ? 1.0 : -1.0) * lockPips * s.PipSize;
 
@@ -781,9 +811,10 @@ namespace cAlgo.Robots
                 ? Math.Min(desiredStop, s.Bid - minGapPrice)
                 : Math.Max(desiredStop, s.Ask + minGapPrice);
 
+            double minimumPositiveLockR = market.Crypto ? 0.02 : 0.05;
             bool stillLocksProfit = sister.TradeType == TradeType.Buy
-                ? safeStop > sister.EntryPrice + 0.05 * originalStopPips * s.PipSize
-                : safeStop < sister.EntryPrice - 0.05 * originalStopPips * s.PipSize;
+                ? safeStop > sister.EntryPrice + minimumPositiveLockR * originalStopPips * s.PipSize
+                : safeStop < sister.EntryPrice - minimumPositiveLockR * originalStopPips * s.PipSize;
 
             if (!stillLocksProfit)
             {
@@ -815,8 +846,9 @@ namespace cAlgo.Robots
 
             TryTakeSisterPartial(sister, state);
 
-            Print("HEDGE-FAST V6 PROTECTED sister id={0} {1}: opposite #{2} hit SL; locked≈{3:F2}R, partialTaken={4}, TP remains 2R.",
-                sister.Id, sister.SymbolName, stopped.Id, SisterLockR, state.PartialTaken);
+            double effectiveLockedR = Math.Abs(safeStop - sister.EntryPrice) / s.PipSize / originalStopPips;
+            Print("HEDGE-FAST V7.2 PROTECTED sister id={0} {1}: opposite #{2} hit SL; locked≈{3:F2}R from ACTUAL available profit, partialTaken={4}, TP remains 2R.",
+                sister.Id, sister.SymbolName, stopped.Id, effectiveLockedR, state.PartialTaken);
         }
 
         private void TryTakeSisterPartial(Position sister, ProtectedLeg state)
@@ -827,6 +859,24 @@ namespace cAlgo.Robots
             if (market == null) return;
 
             Symbol s = market.Symbol;
+
+            if (market.Crypto)
+            {
+                double favorablePips = sister.TradeType == TradeType.Buy
+                    ? (s.Bid - sister.EntryPrice) / s.PipSize
+                    : (sister.EntryPrice - s.Ask) / s.PipSize;
+                double favorableR = state.OriginalStopPips > 0
+                    ? favorablePips / state.OriginalStopPips
+                    : 0;
+
+                if (favorableR < CryptoPartialMinR)
+                {
+                    Print("HEDGE-FAST V7.2 CRYPTO PARTIAL WAIT id={0} {1}: current={2:F2}R < min={3:F2}R. Keeping full position protected.",
+                        sister.Id, sister.SymbolName, favorableR, CryptoPartialMinR);
+                    return;
+                }
+            }
+
             double closeUnits = s.NormalizeVolumeInUnits(
                 sister.VolumeInUnits * SisterPartialPercent / 100.0, RoundingMode.Down);
 
@@ -975,10 +1025,22 @@ namespace cAlgo.Robots
 
             double liveSpreadPrice = s.Ask - s.Bid;
             if (liveSpreadPrice <= 0) return;
+            double liveSpreadPips = liveSpreadPrice / s.PipSize;
             double liveSpreadToStop = liveSpreadPrice / (c.StopPips * s.PipSize);
-            if (liveSpreadToStop > MaxSpreadToStop)
+            double allowedLiveSpreadToStop = c.Market.Crypto ? CryptoMaxSpreadToStop : MaxSpreadToStop;
+
+            if (liveSpreadToStop > allowedLiveSpreadToStop)
             {
-                Print("HEDGE-SMART CANCEL {0}: spread worsened before execution.", s.Name);
+                Print("HEDGE-SMART CANCEL {0}: spread/SL worsened to {1:F3} > {2:F3}.",
+                    s.Name, liveSpreadToStop, allowedLiveSpreadToStop);
+                return;
+            }
+
+            if (c.Market.Crypto &&
+                liveSpreadPips > c.SpreadPips * CryptoMaxSpreadWideningFactor)
+            {
+                Print("HEDGE-FAST V7.2 CRYPTO CANCEL {0}: live spread widened {1:F2}p vs evaluated {2:F2}p (>{3:F2}x).",
+                    s.Name, liveSpreadPips, c.SpreadPips, CryptoMaxSpreadWideningFactor);
                 return;
             }
 
@@ -1044,7 +1106,7 @@ namespace cAlgo.Robots
             _cyclesToday++;
             _wasInCycle = true;
             _lastLaunchBySymbol[s.Name] = Server.Time;
-            Print("HEDGE-FAST V7 CRYPTO OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} mode={10}",
+            Print("HEDGE-FAST V7.2 CRYPTO OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} mode={10}",
                 s.Name, _cyclesToday, MaxCyclesPerDay, buy.Position.Id, sell.Position.Id,
                 units, c.StopPips, tpPips, liveSpreadToStop, c.SetupQuality, c.BreakoutSide);
         }
@@ -1098,7 +1160,7 @@ namespace cAlgo.Robots
         {
             Positions.Closed -= OnPositionClosed;
             Timer.Stop();
-            Print("HEDGE-FAST V7.1 عملات رقمية stopped.");
+            Print("HEDGE-FAST V7.2 عملات رقمية stopped.");
         }
     }
 }
