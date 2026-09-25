@@ -15,7 +15,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-SMART-2R-V2-RELAXED", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V3", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.20, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -24,10 +24,10 @@ namespace cAlgo.Robots
         [Parameter("Gold total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
         public double GoldPairRiskPercent { get; set; }
 
-        [Parameter("Max cycles per UTC day", DefaultValue = 40, MinValue = 1, MaxValue = 100, Group = "Risk")]
+        [Parameter("Max cycles per UTC day", DefaultValue = 80, MinValue = 1, MaxValue = 200, Group = "Risk")]
         public int MaxCyclesPerDay { get; set; }
 
-        [Parameter("Cooldown after flat (sec)", DefaultValue = 30, MinValue = 0, MaxValue = 3600, Group = "Risk")]
+        [Parameter("Cooldown after flat (sec)", DefaultValue = 5, MinValue = 0, MaxValue = 3600, Group = "Risk")]
         public int CooldownSeconds { get; set; }
 
         [Parameter("EURUSD symbol", DefaultValue = "EURUSD", Group = "Markets")]
@@ -63,41 +63,44 @@ namespace cAlgo.Robots
         [Parameter("Compression bars", DefaultValue = 8, MinValue = 4, MaxValue = 30, Group = "Setup")]
         public int CompressionBars { get; set; }
 
-        [Parameter("Compression max ratio", DefaultValue = 1.20, MinValue = 0.20, MaxValue = 1.50, Group = "Setup")]
+        [Parameter("Compression max ratio", DefaultValue = 1.35, MinValue = 0.20, MaxValue = 1.50, Group = "Setup")]
         public double CompressionMaxRatio { get; set; }
 
-        [Parameter("Min breakout body / ATR", DefaultValue = 0.15, MinValue = 0.05, MaxValue = 3.0, Group = "Setup")]
+        [Parameter("Min breakout body / ATR", DefaultValue = 0.10, MinValue = 0.05, MaxValue = 3.0, Group = "Setup")]
         public double MinBreakoutBodyAtr { get; set; }
 
-        [Parameter("Max breakout chase / ATR", DefaultValue = 0.90, MinValue = 0.05, MaxValue = 2.0, Group = "Setup")]
+        [Parameter("Max breakout chase / ATR", DefaultValue = 1.20, MinValue = 0.05, MaxValue = 2.0, Group = "Setup")]
         public double MaxBreakoutChaseAtr { get; set; }
 
-        [Parameter("Stop ATR multiplier", DefaultValue = 1.35, MinValue = 0.2, MaxValue = 10.0, Group = "Stops")]
+        [Parameter("Stop ATR multiplier", DefaultValue = 0.65, MinValue = 0.2, MaxValue = 10.0, Group = "Stops")]
         public double StopAtrMultiplier { get; set; }
 
-        [Parameter("FX min stop pips", DefaultValue = 4.0, MinValue = 0.5, MaxValue = 100, Group = "Stops")]
+        [Parameter("FX min stop pips", DefaultValue = 2.0, MinValue = 0.5, MaxValue = 100, Group = "Stops")]
         public double FxMinStopPips { get; set; }
 
-        [Parameter("FX max stop pips", DefaultValue = 15.0, MinValue = 1.0, MaxValue = 200, Group = "Stops")]
+        [Parameter("FX max stop pips", DefaultValue = 6.0, MinValue = 1.0, MaxValue = 200, Group = "Stops")]
         public double FxMaxStopPips { get; set; }
 
-        [Parameter("Gold min stop USD", DefaultValue = 0.60, MinValue = 0.05, MaxValue = 20.0, Group = "Stops")]
+        [Parameter("Gold min stop USD", DefaultValue = 0.30, MinValue = 0.05, MaxValue = 20.0, Group = "Stops")]
         public double GoldMinStopPrice { get; set; }
 
-        [Parameter("Gold max stop USD", DefaultValue = 8.0, MinValue = 0.10, MaxValue = 100.0, Group = "Stops")]
+        [Parameter("Gold max stop USD", DefaultValue = 1.50, MinValue = 0.10, MaxValue = 100.0, Group = "Stops")]
         public double GoldMaxStopPrice { get; set; }
 
         [Parameter("Reward / risk", DefaultValue = 2.0, MinValue = 2.0, MaxValue = 2.0, Group = "Stops")]
         public double RewardRisk { get; set; }
 
-        [Parameter("Max spread / stop", DefaultValue = 0.25, MinValue = 0.01, MaxValue = 0.50, Group = "Execution")]
+        [Parameter("Max spread / stop", DefaultValue = 0.30, MinValue = 0.01, MaxValue = 0.50, Group = "Execution")]
         public double MaxSpreadToStop { get; set; }
 
-        [Parameter("Max spread / ATR", DefaultValue = 0.35, MinValue = 0.01, MaxValue = 1.0, Group = "Execution")]
+        [Parameter("Max spread / ATR", DefaultValue = 0.45, MinValue = 0.01, MaxValue = 1.0, Group = "Execution")]
         public double MaxSpreadToAtr { get; set; }
 
         [Parameter("Max actual risk / budget", DefaultValue = 1.10, MinValue = 1.0, MaxValue = 2.0, Group = "Execution")]
         public double MaxActualRiskToBudget { get; set; }
+
+        [Parameter("Max hold seconds", DefaultValue = 180, MinValue = 30, MaxValue = 1800, Group = "Exits")]
+        public int MaxHoldSeconds { get; set; }
 
         [Parameter("Diagnostic logs", DefaultValue = true, Group = "Logs")]
         public bool DiagnosticLogs { get; set; }
@@ -169,10 +172,10 @@ namespace cAlgo.Robots
 
             _utcDay = Server.Time.Date;
             RecoverToday();
-            Timer.Start(5);
+            Timer.Start(2);
 
-            Print("HEDGE-SMART 2R V2 RELAXED ON | markets={0} | lower entry thresholds, LOWEST normalized spread | RR=2:1",
-                string.Join(",", _markets.Select(m => m.Symbol.Name)));
+            Print("HEDGE-FAST 2R V3 ON | markets={0} | 2-second scan | maxHold={1}s | tight SL/TP | RR=2:1",
+                string.Join(",", _markets.Select(m => m.Symbol.Name)), MaxHoldSeconds);
             Print("ENTRY ZONE = prior compression + fresh breakout impulse + no late chase. GOLD enabled={0}, goldOnly={1}.",
                 EnableGold, GoldOnlyTest);
             Print("Normalized spread comparison uses spread/stop and spread/ATR; raw FX pips vs GOLD price spread are NOT compared directly.");
@@ -240,12 +243,20 @@ namespace cAlgo.Robots
             if (open.Length > 0)
             {
                 _wasInCycle = true;
-                if (Server.Time >= _nextHeartbeat)
+                MaintainFastExits(open);
+                open = BotPositions();
+
+                if (open.Length > 0)
                 {
-                    Print("HEDGE-SMART ACTIVE openLegs={0}, cycles={1}/{2}", open.Length, _cyclesToday, MaxCyclesPerDay);
-                    _nextHeartbeat = Server.Time.AddMinutes(5);
+                    if (Server.Time >= _nextHeartbeat)
+                    {
+                        Print("HEDGE-FAST ACTIVE openLegs={0}, cycles={1}/{2}, oldestSec={3:F0}",
+                            open.Length, _cyclesToday, MaxCyclesPerDay,
+                            open.Max(p => (Server.Time - p.EntryTime).TotalSeconds));
+                        _nextHeartbeat = Server.Time.AddMinutes(2);
+                    }
+                    return;
                 }
-                return;
             }
 
             if (_wasInCycle)
@@ -434,6 +445,22 @@ namespace cAlgo.Robots
             };
         }
 
+        private void MaintainFastExits(Position[] open)
+        {
+            foreach (var p in open)
+            {
+                double ageSec = (Server.Time - p.EntryTime).TotalSeconds;
+                if (ageSec < MaxHoldSeconds) continue;
+
+                var close = ClosePosition(p);
+                if (close.IsSuccessful)
+                    Print("HEDGE-FAST TIME EXIT id={0} {1} age={2:F0}s net={3:F2} pips={4:F1}",
+                        p.Id, p.SymbolName, ageSec, p.NetProfit, p.Pips);
+                else
+                    Print("HEDGE-FAST TIME EXIT FAILED id={0} error={1}", p.Id, close.Error);
+            }
+        }
+
         private void OpenPair(Candidate c)
         {
             if (BotPositions().Length > 0) return;
@@ -494,7 +521,7 @@ namespace cAlgo.Robots
 
             _cyclesToday++;
             _wasInCycle = true;
-            Print("HEDGE-SMART OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} breakout={10}",
+            Print("HEDGE-FAST OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} breakout={10}",
                 s.Name, _cyclesToday, MaxCyclesPerDay, buy.Position.Id, sell.Position.Id,
                 units, c.StopPips, tpPips, liveSpreadToStop, c.SetupQuality, c.BreakoutSide);
         }
