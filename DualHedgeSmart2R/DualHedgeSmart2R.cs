@@ -16,7 +16,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V4-MULTI", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V5-PROTECT", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -130,6 +130,12 @@ namespace cAlgo.Robots
         [Parameter("Max hold seconds", DefaultValue = 180, MinValue = 30, MaxValue = 1800, Group = "Exits")]
         public int MaxHoldSeconds { get; set; }
 
+        [Parameter("Lock sister after SL (R)", DefaultValue = 0.70, MinValue = 0.10, MaxValue = 0.95, Group = "Exits")]
+        public double SisterLockR { get; set; }
+
+        [Parameter("Close sister if lock fails", DefaultValue = true, Group = "Exits")]
+        public bool CloseSisterIfLockFails { get; set; }
+
         [Parameter("Diagnostic logs", DefaultValue = true, Group = "Logs")]
         public bool DiagnosticLogs { get; set; }
 
@@ -211,9 +217,10 @@ namespace cAlgo.Robots
 
             _utcDay = Server.Time.Date;
             RecoverToday();
+            Positions.Closed += OnPositionClosed;
             Timer.Start(2);
 
-            Print("HEDGE-FAST 2R V4 MULTI ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s | RR=2:1",
+            Print("HEDGE-FAST 2R V5 PROTECT ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s | RR=2:1",
                 string.Join(",", _markets.Select(m => m.Symbol.Name)),
                 MaxSimultaneousPairs, MaxSimultaneousPairs * 2, MaxHoldSeconds);
             Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, nominal portfolio cap={2:F2}%. Indicators score EMA9/21 + M5 EMA20/50 + RSI7 + tick-volume + breakout/ATR.",
@@ -555,6 +562,94 @@ namespace cAlgo.Robots
             };
         }
 
+        private void OnPositionClosed(PositionClosedEventArgs e)
+        {
+            Position closed = e.Position;
+            if (closed == null) return;
+            if (closed.Label != BuyLabel && closed.Label != SellLabel) return;
+            if (!_markets.Any(m => m.Symbol.Name == closed.SymbolName)) return;
+
+            if (e.Reason != PositionCloseReason.StopLoss) return;
+
+            string sisterLabel = closed.Label == BuyLabel ? SellLabel : BuyLabel;
+            Position sister = Positions.FirstOrDefault(p =>
+                p.SymbolName == closed.SymbolName && p.Label == sisterLabel);
+
+            if (sister == null) return;
+
+            ProtectSisterImmediately(closed, sister);
+        }
+
+        private void ProtectSisterImmediately(Position stopped, Position sister)
+        {
+            MarketInfo market = _markets.FirstOrDefault(m => m.Symbol.Name == sister.SymbolName);
+            if (market == null) return;
+
+            Symbol s = market.Symbol;
+            if (s.PipSize <= 0)
+            {
+                if (CloseSisterIfLockFails) ClosePosition(sister);
+                return;
+            }
+
+            // TP is fixed at 2R, so recover original R from half of TP distance.
+            double originalStopPips = 0;
+            if (sister.TakeProfit.HasValue)
+                originalStopPips = Math.Abs(sister.TakeProfit.Value - sister.EntryPrice) / s.PipSize / 2.0;
+
+            if (originalStopPips <= 0 && stopped.StopLoss.HasValue)
+                originalStopPips = Math.Abs(stopped.StopLoss.Value - stopped.EntryPrice) / s.PipSize;
+
+            if (originalStopPips <= 0)
+            {
+                Print("HEDGE-FAST V5 sister protection cannot infer R for id={0}; closing sister={1}.",
+                    stopped.Id, sister.Id);
+                if (CloseSisterIfLockFails) ClosePosition(sister);
+                return;
+            }
+
+            double lockPips = originalStopPips * SisterLockR;
+            double desiredStop = sister.EntryPrice +
+                (sister.TradeType == TradeType.Buy ? 1.0 : -1.0) * lockPips * s.PipSize;
+
+            // Keep a small execution gap from current quote.
+            double minGapPrice = Math.Max(2.0 * s.PipSize, (s.Ask - s.Bid) * 1.5);
+            double safeStop = desiredStop;
+
+            if (sister.TradeType == TradeType.Buy)
+                safeStop = Math.Min(desiredStop, s.Bid - minGapPrice);
+            else
+                safeStop = Math.Max(desiredStop, s.Ask + minGapPrice);
+
+            bool stillLocksProfit =
+                sister.TradeType == TradeType.Buy
+                    ? safeStop > sister.EntryPrice + 0.05 * originalStopPips * s.PipSize
+                    : safeStop < sister.EntryPrice - 0.05 * originalStopPips * s.PipSize;
+
+            if (!stillLocksProfit)
+            {
+                Print("HEDGE-FAST V5 immediate sister CLOSE id={0} {1}: not enough room to lock profit after opposite SL.",
+                    sister.Id, sister.SymbolName);
+                if (CloseSisterIfLockFails) ClosePosition(sister);
+                return;
+            }
+
+            var mod = sister.ModifyStopLossPrice(Math.Round(safeStop, s.Digits));
+            if (mod.IsSuccessful)
+            {
+                Print("HEDGE-FAST V5 PROTECTED sister id={0} {1}: opposite id={2} hit SL; locked≈{3:F2}R ({4:F2}p), TP remains 2R.",
+                    sister.Id, sister.SymbolName, stopped.Id, SisterLockR,
+                    Math.Abs(safeStop - sister.EntryPrice) / s.PipSize);
+            }
+            else
+            {
+                Print("HEDGE-FAST V5 lock failed sister id={0} error={1}; immediate close fallback={2}.",
+                    sister.Id, mod.Error, CloseSisterIfLockFails);
+                if (CloseSisterIfLockFails)
+                    ClosePosition(sister);
+            }
+        }
+
         private void MaintainFastExits(Position[] open)
         {
             foreach (var p in open)
@@ -700,8 +795,9 @@ namespace cAlgo.Robots
 
         protected override void OnStop()
         {
+            Positions.Closed -= OnPositionClosed;
             Timer.Stop();
-            Print("HEDGE-SMART stopped.");
+            Print("HEDGE-FAST V5 stopped.");
         }
     }
 }
