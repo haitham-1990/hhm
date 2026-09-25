@@ -24,3 +24,16 @@ Experimental DEMO-first cTrader paired-hedge strategy.
 - If second hedge leg fails, the bot attempts to close the first immediately.
 - Requires a hedging account. Opposite orders are sequential, not atomic.
 - Opening both directions does not create a guaranteed edge. Whipsaws can stop both legs and both legs pay spread/fees.
+
+## FAST V4 MULTI
+- Default FX pair risk raised modestly from 0.20% to **0.30% total per BUY+SELL pair**.
+- Default GOLD pair risk raised from 0.30% to **0.40% total per pair**.
+- Up to **4 simultaneous pairs / 8 open positions**, with one active pair per tracked symbol.
+- Default daily cycle cap raised to **150**.
+- Keeps the 2-second scanner, 5-second cooldown and 180-second maximum hold.
+- Adds scoring from M1 EMA 9/21, M5 EMA 20/50, RSI 7 and normalized tick volume.
+- Indicator inputs are used primarily as a weighted score, not as all-hard gates, so adding indicators does not automatically choke trade frequency.
+- Candidate ranking combines indicator score, breakout/ATR setup quality, spread/stop and spread/ATR.
+- Default nominal portfolio-risk cap is **1.50%** across all currently open hedge legs.
+- One pair per symbol at a time; closed symbols can re-enter on a later qualifying bar.
+- Still DEMO-only by default. More trades and more indicators do not establish an edge; evaluate net results after spread and execution costs.
