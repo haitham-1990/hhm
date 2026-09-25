@@ -16,7 +16,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V6-MANAGER", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V6-1-NOTIME", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -127,7 +127,7 @@ namespace cAlgo.Robots
         [Parameter("Max actual risk / budget", DefaultValue = 1.10, MinValue = 1.0, MaxValue = 2.0, Group = "Execution")]
         public double MaxActualRiskToBudget { get; set; }
 
-        [Parameter("Max hold seconds", DefaultValue = 180, MinValue = 30, MaxValue = 1800, Group = "Exits")]
+        [Parameter("Max hold seconds (0=OFF)", DefaultValue = 0, MinValue = 0, MaxValue = 1800, Group = "Exits")]
         public int MaxHoldSeconds { get; set; }
 
         [Parameter("Lock sister after SL (R)", DefaultValue = 0.70, MinValue = 0.10, MaxValue = 0.95, Group = "Exits")]
@@ -244,7 +244,7 @@ namespace cAlgo.Robots
             Positions.Closed += OnPositionClosed;
             Timer.Start(2);
 
-            Print("HEDGE-FAST 2R V6 MANAGER ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s | RR=2:1",
+            Print("HEDGE-FAST 2R V6.1 NO-TIMEOUT ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
                 string.Join(",", _markets.Select(m => m.Symbol.Name)),
                 MaxSimultaneousPairs, MaxSimultaneousPairs * 2, MaxHoldSeconds);
             Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, nominal portfolio cap={2:F2}%. Indicators score EMA9/21 + M5 EMA20/50 + RSI7 + tick-volume + breakout/ATR.",
@@ -829,6 +829,10 @@ namespace cAlgo.Robots
 
         private void MaintainFastExits(Position[] open)
         {
+            // V6.1: time-based exits are OFF by default.
+            // Positions are left to TP/SL/sister protection/trailing unless the user explicitly sets MaxHoldSeconds > 0.
+            if (MaxHoldSeconds <= 0) return;
+
             foreach (var p in open)
             {
                 double ageSec = (Server.Time - p.EntryTime).TotalSeconds;
@@ -836,10 +840,10 @@ namespace cAlgo.Robots
 
                 var close = ClosePosition(p);
                 if (close.IsSuccessful)
-                    Print("HEDGE-FAST TIME EXIT id={0} {1} age={2:F0}s net={3:F2} pips={4:F1}",
+                    Print("HEDGE-FAST OPTIONAL TIME EXIT id={0} {1} age={2:F0}s net={3:F2} pips={4:F1}",
                         p.Id, p.SymbolName, ageSec, p.NetProfit, p.Pips);
                 else
-                    Print("HEDGE-FAST TIME EXIT FAILED id={0} error={1}", p.Id, close.Error);
+                    Print("HEDGE-FAST OPTIONAL TIME EXIT FAILED id={0} error={1}", p.Id, close.Error);
             }
         }
 
