@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using cAlgo.API;
 using cAlgo.API.Internals;
+using cAlgo.API.Indicators;
 
 namespace cAlgo.Robots
 {
@@ -15,20 +16,26 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V3", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V4-MULTI", Group = "Safety")]
         public string BaseLabel { get; set; }
 
-        [Parameter("FX total pair risk (%)", DefaultValue = 0.20, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
+        [Parameter("FX total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
         public double FxPairRiskPercent { get; set; }
 
-        [Parameter("Gold total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
+        [Parameter("Gold total pair risk (%)", DefaultValue = 0.40, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
         public double GoldPairRiskPercent { get; set; }
 
-        [Parameter("Max cycles per UTC day", DefaultValue = 80, MinValue = 1, MaxValue = 200, Group = "Risk")]
+        [Parameter("Max cycles per UTC day", DefaultValue = 150, MinValue = 1, MaxValue = 300, Group = "Risk")]
         public int MaxCyclesPerDay { get; set; }
 
         [Parameter("Cooldown after flat (sec)", DefaultValue = 5, MinValue = 0, MaxValue = 3600, Group = "Risk")]
         public int CooldownSeconds { get; set; }
+
+        [Parameter("Max simultaneous pairs", DefaultValue = 4, MinValue = 1, MaxValue = 4, Group = "Risk")]
+        public int MaxSimultaneousPairs { get; set; }
+
+        [Parameter("Max nominal open risk (%)", DefaultValue = 1.50, MinValue = 0.20, MaxValue = 5.0, Group = "Risk")]
+        public double MaxNominalOpenRiskPercent { get; set; }
 
         [Parameter("EURUSD symbol", DefaultValue = "EURUSD", Group = "Markets")]
         public string EurUsdName { get; set; }
@@ -59,6 +66,27 @@ namespace cAlgo.Robots
 
         [Parameter("ATR period", DefaultValue = 14, MinValue = 2, MaxValue = 100, Group = "Setup")]
         public int AtrPeriod { get; set; }
+
+        [Parameter("M1 EMA fast", DefaultValue = 9, MinValue = 2, MaxValue = 100, Group = "Indicators")]
+        public int M1EmaFast { get; set; }
+
+        [Parameter("M1 EMA slow", DefaultValue = 21, MinValue = 3, MaxValue = 200, Group = "Indicators")]
+        public int M1EmaSlow { get; set; }
+
+        [Parameter("M5 EMA fast", DefaultValue = 20, MinValue = 2, MaxValue = 100, Group = "Indicators")]
+        public int M5EmaFast { get; set; }
+
+        [Parameter("M5 EMA slow", DefaultValue = 50, MinValue = 3, MaxValue = 200, Group = "Indicators")]
+        public int M5EmaSlow { get; set; }
+
+        [Parameter("RSI period", DefaultValue = 7, MinValue = 2, MaxValue = 100, Group = "Indicators")]
+        public int RsiPeriod { get; set; }
+
+        [Parameter("Volume lookback", DefaultValue = 20, MinValue = 5, MaxValue = 100, Group = "Indicators")]
+        public int VolumeLookback { get; set; }
+
+        [Parameter("Min indicator score", DefaultValue = 0.75, MinValue = 0.0, MaxValue = 4.0, Group = "Indicators")]
+        public double MinIndicatorScore { get; set; }
 
         [Parameter("Compression bars", DefaultValue = 8, MinValue = 4, MaxValue = 30, Group = "Setup")]
         public int CompressionBars { get; set; }
@@ -109,6 +137,12 @@ namespace cAlgo.Robots
         {
             public Symbol Symbol;
             public Bars M1;
+            public Bars M5;
+            public ExponentialMovingAverage M1Fast;
+            public ExponentialMovingAverage M1Slow;
+            public ExponentialMovingAverage M5Fast;
+            public ExponentialMovingAverage M5Slow;
+            public RelativeStrengthIndex Rsi;
             public bool Gold;
             public DateTime LastExamined = DateTime.MinValue;
         }
@@ -126,10 +160,14 @@ namespace cAlgo.Robots
             public double ChaseAtr;
             public string BreakoutSide;
             public double SetupQuality;
+            public double IndicatorScore;
+            public double VolumeRatio;
+            public double TotalScore;
         }
 
         private readonly List<MarketInfo> _markets = new List<MarketInfo>();
         private readonly Dictionary<string, string> _notes = new Dictionary<string, string>();
+        private readonly Dictionary<string, DateTime> _lastLaunchBySymbol = new Dictionary<string, DateTime>();
         private DateTime _utcDay;
         private DateTime _lastFlat = DateTime.MinValue;
         private int _cyclesToday;
@@ -149,6 +187,7 @@ namespace cAlgo.Robots
             }
 
             if (string.IsNullOrWhiteSpace(BaseLabel) ||
+                M1EmaFast >= M1EmaSlow || M5EmaFast >= M5EmaSlow ||
                 FxMinStopPips > FxMaxStopPips ||
                 GoldMinStopPrice > GoldMaxStopPrice ||
                 CompressionBars < 4)
@@ -174,8 +213,11 @@ namespace cAlgo.Robots
             RecoverToday();
             Timer.Start(2);
 
-            Print("HEDGE-FAST 2R V3 ON | markets={0} | 2-second scan | maxHold={1}s | tight SL/TP | RR=2:1",
-                string.Join(",", _markets.Select(m => m.Symbol.Name)), MaxHoldSeconds);
+            Print("HEDGE-FAST 2R V4 MULTI ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s | RR=2:1",
+                string.Join(",", _markets.Select(m => m.Symbol.Name)),
+                MaxSimultaneousPairs, MaxSimultaneousPairs * 2, MaxHoldSeconds);
+            Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, nominal portfolio cap={2:F2}%. Indicators score EMA9/21 + M5 EMA20/50 + RSI7 + tick-volume + breakout/ATR.",
+                FxPairRiskPercent, GoldPairRiskPercent, MaxNominalOpenRiskPercent);
             Print("ENTRY ZONE = prior compression + fresh breakout impulse + no late chase. GOLD enabled={0}, goldOnly={1}.",
                 EnableGold, GoldOnlyTest);
             Print("Normalized spread comparison uses spread/stop and spread/ATR; raw FX pips vs GOLD price spread are NOT compared directly.");
@@ -193,7 +235,19 @@ namespace cAlgo.Robots
                     return;
                 }
                 var bars = MarketData.GetBars(TimeFrame.Minute, s.Name);
-                _markets.Add(new MarketInfo { Symbol = s, M1 = bars, Gold = gold });
+                var bars5 = MarketData.GetBars(TimeFrame.Minute5, s.Name);
+                _markets.Add(new MarketInfo
+                {
+                    Symbol = s,
+                    M1 = bars,
+                    M5 = bars5,
+                    M1Fast = Indicators.ExponentialMovingAverage(bars.ClosePrices, M1EmaFast),
+                    M1Slow = Indicators.ExponentialMovingAverage(bars.ClosePrices, M1EmaSlow),
+                    M5Fast = Indicators.ExponentialMovingAverage(bars5.ClosePrices, M5EmaFast),
+                    M5Slow = Indicators.ExponentialMovingAverage(bars5.ClosePrices, M5EmaSlow),
+                    Rsi = Indicators.RelativeStrengthIndex(bars.ClosePrices, RsiPeriod),
+                    Gold = gold
+                });
                 Print("HEDGE-SMART tracking {0} as {1}, minVolume={2}, pip={3}",
                     s.Name, gold ? "GOLD" : "FX", s.VolumeInUnitsMin, s.PipSize);
             }
@@ -246,16 +300,14 @@ namespace cAlgo.Robots
                 MaintainFastExits(open);
                 open = BotPositions();
 
-                if (open.Length > 0)
+                if (Server.Time >= _nextHeartbeat)
                 {
-                    if (Server.Time >= _nextHeartbeat)
-                    {
-                        Print("HEDGE-FAST ACTIVE openLegs={0}, cycles={1}/{2}, oldestSec={3:F0}",
-                            open.Length, _cyclesToday, MaxCyclesPerDay,
-                            open.Max(p => (Server.Time - p.EntryTime).TotalSeconds));
-                        _nextHeartbeat = Server.Time.AddMinutes(2);
-                    }
-                    return;
+                    Print("HEDGE-FAST V4 ACTIVE open={0}/{1}, pairs≈{2}/{3}, cycles={4}/{5}, oldestSec={6:F0}",
+                        open.Length, MaxSimultaneousPairs * 2,
+                        (open.Length + 1) / 2, MaxSimultaneousPairs,
+                        _cyclesToday, MaxCyclesPerDay,
+                        open.Length > 0 ? open.Max(p => (Server.Time - p.EntryTime).TotalSeconds) : 0);
+                    _nextHeartbeat = Server.Time.AddMinutes(2);
                 }
             }
 
@@ -267,11 +319,26 @@ namespace cAlgo.Robots
             }
 
             if (_cyclesToday >= MaxCyclesPerDay) return;
-            if ((Server.Time - _lastFlat).TotalSeconds < CooldownSeconds) return;
+            if (BotPositions().Length >= MaxSimultaneousPairs * 2) return;
+            if (BotPositions().Length == 0 && (Server.Time - _lastFlat).TotalSeconds < CooldownSeconds) return;
 
             var candidates = new List<Candidate>();
             foreach (var market in _markets)
             {
+                if (BotPositions().Any(p => p.SymbolName == market.Symbol.Name))
+                {
+                    _notes[market.Symbol.Name] = "pair already open";
+                    continue;
+                }
+
+                DateTime lastLaunch;
+                if (_lastLaunchBySymbol.TryGetValue(market.Symbol.Name, out lastLaunch) &&
+                    (Server.Time - lastLaunch).TotalSeconds < CooldownSeconds)
+                {
+                    _notes[market.Symbol.Name] = "symbol cooldown";
+                    continue;
+                }
+
                 if (!market.Symbol.MarketHours.IsOpened())
                 {
                     _notes[market.Symbol.Name] = "market closed";
@@ -294,29 +361,34 @@ namespace cAlgo.Robots
                 return;
             }
 
-            // "Lowest spread" across different instruments must be normalized.
-            // Primary rank: spread relative to stop. Secondary: spread relative to ATR.
-            // Only then use setup quality.
-            var selected = candidates
-                .OrderBy(c => c.SpreadToStop)
+            // More indicators are used as a SCORE, not as hard all-or-nothing gates.
+            // This keeps trade frequency high while preferring stronger/cheaper setups.
+            var ranked = candidates
+                .OrderByDescending(c => c.TotalScore)
+                .ThenBy(c => c.SpreadToStop)
                 .ThenBy(c => c.SpreadToAtr)
-                .ThenByDescending(c => c.SetupQuality)
-                .First();
+                .ToList();
 
-            Print("HEDGE-SMART SELECT {0}: normSpread/SL={1:F3}, spread/ATR={2:F3}, compression={3:F2}, breakout={4}, body/ATR={5:F2}, chase/ATR={6:F2}",
-                selected.Market.Symbol.Name, selected.SpreadToStop, selected.SpreadToAtr,
-                selected.CompressionRatio, selected.BreakoutSide,
-                selected.BreakoutBodyAtr, selected.ChaseAtr);
+            foreach (var selected in ranked)
+            {
+                if (_cyclesToday >= MaxCyclesPerDay) break;
+                if (BotPositions().Length >= MaxSimultaneousPairs * 2) break;
+                if (BotPositions().Any(p => p.SymbolName == selected.Market.Symbol.Name)) continue;
 
-            OpenPair(selected);
+                Print("HEDGE-FAST V4 SELECT {0}: totalScore={1:F2}, indScore={2:F2}, volume={3:F2}, spread/SL={4:F3}, breakout={5}",
+                    selected.Market.Symbol.Name, selected.TotalScore, selected.IndicatorScore,
+                    selected.VolumeRatio, selected.SpreadToStop, selected.BreakoutSide);
+
+                OpenPair(selected);
+            }
         }
 
         private Candidate Evaluate(MarketInfo market)
         {
             Bars b = market.M1;
             Symbol s = market.Symbol;
-            int minBars = Math.Max(120, CompressionBars + 60);
-            if (b == null || b.Count < minBars)
+            int minBars = Math.Max(120, Math.Max(CompressionBars + 60, VolumeLookback + 20));
+            if (b == null || market.M5 == null || b.Count < minBars || market.M5.Count < M5EmaSlow + 10)
             {
                 _notes[s.Name] = "loading history";
                 return null;
@@ -422,13 +494,48 @@ namespace cAlgo.Robots
                 return null;
             }
 
+            double m1Fast = market.M1Fast.Result.Last(1);
+            double m1Slow = market.M1Slow.Result.Last(1);
+            double m5Fast = market.M5Fast.Result.Last(1);
+            double m5Slow = market.M5Slow.Result.Last(1);
+            double rsi = market.Rsi.Result.Last(1);
+
+            bool m1Align = up ? m1Fast > m1Slow : m1Fast < m1Slow;
+            bool m5Align = up ? m5Fast > m5Slow : m5Fast < m5Slow;
+            bool rsiAlign = up ? (rsi >= 50 && rsi <= 75) : (rsi <= 50 && rsi >= 25);
+
+            double volMean = 0;
+            for (int i = 2; i < VolumeLookback + 2; i++)
+                volMean += b.TickVolumes.Last(i);
+            volMean /= VolumeLookback;
+            double volumeRatio = volMean > 0 ? b.TickVolumes.Last(1) / volMean : 0;
+
+            double indicatorScore =
+                (m1Align ? 1.00 : 0) +
+                (m5Align ? 1.25 : 0) +
+                (rsiAlign ? 0.75 : 0) +
+                (volumeRatio >= 1.00 ? 0.50 : 0) +
+                (volumeRatio >= 1.20 ? 0.25 : 0);
+
+            if (indicatorScore < MinIndicatorScore)
+            {
+                _notes[s.Name] = string.Format("indicator score {0:F2}<{1:F2}", indicatorScore, MinIndicatorScore);
+                return null;
+            }
+
             double setupQuality =
-                (CompressionMaxRatio - compression) * 2.0 +
+                (CompressionMaxRatio - compression) * 1.20 +
                 Math.Min(1.5, bodyAtr) * 0.60 +
-                (MaxBreakoutChaseAtr - chase) * 0.40 -
+                (MaxBreakoutChaseAtr - chase) * 0.25 -
                 spreadToStop * 2.0;
 
-            _notes[s.Name] = string.Format("QUALIFIED s/SL={0:F3}", spreadToStop);
+            double totalScore =
+                indicatorScore +
+                setupQuality -
+                spreadToStop * 1.5 -
+                spreadToAtr * 0.5;
+
+            _notes[s.Name] = string.Format("QUALIFIED score={0:F2} s/SL={1:F3}", totalScore, spreadToStop);
             return new Candidate
             {
                 Market = market,
@@ -441,7 +548,10 @@ namespace cAlgo.Robots
                 BreakoutBodyAtr = bodyAtr,
                 ChaseAtr = chase,
                 BreakoutSide = up ? "UP" : "DOWN",
-                SetupQuality = setupQuality
+                SetupQuality = setupQuality,
+                IndicatorScore = indicatorScore,
+                VolumeRatio = volumeRatio,
+                TotalScore = totalScore
             };
         }
 
@@ -463,7 +573,8 @@ namespace cAlgo.Robots
 
         private void OpenPair(Candidate c)
         {
-            if (BotPositions().Length > 0) return;
+            if (BotPositions().Length >= MaxSimultaneousPairs * 2) return;
+            if (BotPositions().Any(p => p.SymbolName == c.Market.Symbol.Name)) return;
 
             Symbol s = c.Market.Symbol;
             if (!s.MarketHours.IsOpened()) return;
@@ -478,6 +589,21 @@ namespace cAlgo.Robots
             }
 
             double pairRisk = c.Market.Gold ? GoldPairRiskPercent : FxPairRiskPercent;
+
+            double currentNominalRisk = 0;
+            foreach (var p in BotPositions())
+            {
+                var m = _markets.FirstOrDefault(x => x.Symbol.Name == p.SymbolName);
+                if (m != null)
+                    currentNominalRisk += (m.Gold ? GoldPairRiskPercent : FxPairRiskPercent) / 2.0;
+            }
+            if (currentNominalRisk + pairRisk > MaxNominalOpenRiskPercent + 1e-9)
+            {
+                Print("HEDGE-FAST V4 PORTFOLIO SKIP {0}: nominalRiskIfAdded={1:F2}% > cap={2:F2}%.",
+                    s.Name, currentNominalRisk + pairRisk, MaxNominalOpenRiskPercent);
+                return;
+            }
+
             double legRiskPct = pairRisk / 2.0;
             double units = s.VolumeForProportionalRisk(
                 ProportionalAmountType.Equity, legRiskPct, c.StopPips, RoundingMode.Down);
@@ -521,7 +647,8 @@ namespace cAlgo.Robots
 
             _cyclesToday++;
             _wasInCycle = true;
-            Print("HEDGE-FAST OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} breakout={10}",
+            _lastLaunchBySymbol[s.Name] = Server.Time;
+            Print("HEDGE-FAST V4 OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} breakout={10}",
                 s.Name, _cyclesToday, MaxCyclesPerDay, buy.Position.Id, sell.Position.Id,
                 units, c.StopPips, tpPips, liveSpreadToStop, c.SetupQuality, c.BreakoutSide);
         }
