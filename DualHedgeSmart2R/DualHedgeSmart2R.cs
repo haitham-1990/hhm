@@ -272,8 +272,8 @@ namespace cAlgo.Robots
             int sells = History.FindAll(SellLabel)
                 .Count(h => names.Contains(h.SymbolName) && h.EntryTime.Date == _utcDay);
 
-            _cyclesToday = Math.Max(buys, sells);
-            if (BotPositions().Length > 0) _cyclesToday++;
+            int openPairSymbols = BotPositions().Select(p => p.SymbolName).Distinct().Count();
+            _cyclesToday = Math.Max(buys, sells) + openPairSymbols;
             _wasInCycle = BotPositions().Length > 0;
             _lastFlat = Server.Time;
 
@@ -311,11 +311,11 @@ namespace cAlgo.Robots
                 }
             }
 
-            if (_wasInCycle)
+            if (BotPositions().Length == 0 && _wasInCycle)
             {
                 _wasInCycle = false;
                 _lastFlat = Server.Time;
-                Print("HEDGE-SMART cycle flat. Cooldown={0}s.", CooldownSeconds);
+                Print("HEDGE-FAST V4 all pairs flat. Cooldown={0}s.", CooldownSeconds);
             }
 
             if (_cyclesToday >= MaxCyclesPerDay) return;
