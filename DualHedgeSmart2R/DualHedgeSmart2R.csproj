@@ -3,8 +3,8 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
-    <AssemblyName>DualHedgeFast2RV7Crypto</AssemblyName>
-    <AlgoName>Dual_Hedge_FAST_2R_V7_CRYPTO</AlgoName>
+    <AssemblyName>DualHedgeFast2RV71CryptoAuto</AssemblyName>
+    <AlgoName>Dual_Hedge_FAST_2R_V7_1_CRYPTO_AUTO</AlgoName>
     <AlgoBuild>true</AlgoBuild>
     <AlgoPublish>false</AlgoPublish>
     <IncludeSource>true</IncludeSource>
