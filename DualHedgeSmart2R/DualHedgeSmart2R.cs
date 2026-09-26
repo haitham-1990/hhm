@@ -901,8 +901,8 @@ namespace cAlgo.Robots
                     ? state.BestPrice - trailPips * s.PipSize
                     : state.BestPrice + trailPips * s.PipSize;
 
-                double lossR = state.LegRiskCash > 0 ? state.FirstLossCash / state.LegRiskCash : 1.0;
-                double floorR = lossR + PairLockedBufferR;
+                double trailLossR = state.LegRiskCash > 0 ? state.FirstLossCash / state.LegRiskCash : 1.0;
+                double floorR = trailLossR + PairLockedBufferR;
                 double floorLock = p.EntryPrice +
                     (p.TradeType == TradeType.Buy ? 1.0 : -1.0) *
                     state.OriginalStopPips * floorR * s.PipSize;
