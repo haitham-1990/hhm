@@ -16,7 +16,7 @@ namespace cAlgo.Robots
         [Parameter("Demo ONLY - block live", DefaultValue = true, Group = "Safety")]
         public bool DemoOnly { get; set; }
 
-        [Parameter("Base label", DefaultValue = "HEDGE-FAST-2R-V7-2-CRYPTO-COST-SAFE", Group = "Safety")]
+        [Parameter("Base label", DefaultValue = "HEDGE-MATH-EDGE-V6-2", Group = "Safety")]
         public string BaseLabel { get; set; }
 
         [Parameter("FX total pair risk (%)", DefaultValue = 0.30, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
@@ -24,9 +24,6 @@ namespace cAlgo.Robots
 
         [Parameter("Gold total pair risk (%)", DefaultValue = 0.40, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
         public double GoldPairRiskPercent { get; set; }
-
-        [Parameter("Crypto total pair risk (%)", DefaultValue = 0.25, MinValue = 0.02, MaxValue = 2.0, Group = "Risk")]
-        public double CryptoPairRiskPercent { get; set; }
 
         [Parameter("Max cycles per UTC day", DefaultValue = 150, MinValue = 1, MaxValue = 300, Group = "Risk")]
         public int MaxCyclesPerDay { get; set; }
@@ -52,12 +49,6 @@ namespace cAlgo.Robots
         [Parameter("GOLD symbol", DefaultValue = "XAUUSD", Group = "Markets")]
         public string GoldName { get; set; }
 
-        [Parameter("Bitcoin symbol", DefaultValue = "BTCUSD", Group = "عملات رقمية / Crypto")]
-        public string BitcoinName { get; set; }
-
-        [Parameter("Ethereum symbol", DefaultValue = "ETHUSD", Group = "عملات رقمية / Crypto")]
-        public string EthereumName { get; set; }
-
         [Parameter("Enable EURUSD", DefaultValue = true, Group = "Markets")]
         public bool EnableEurUsd { get; set; }
 
@@ -69,12 +60,6 @@ namespace cAlgo.Robots
 
         [Parameter("Enable GOLD", DefaultValue = true, Group = "Markets")]
         public bool EnableGold { get; set; }
-
-        [Parameter("Enable Bitcoin", DefaultValue = true, Group = "عملات رقمية / Crypto")]
-        public bool EnableBitcoin { get; set; }
-
-        [Parameter("Enable Ethereum", DefaultValue = true, Group = "عملات رقمية / Crypto")]
-        public bool EnableEthereum { get; set; }
 
         [Parameter("Gold-only test", DefaultValue = false, Group = "Markets")]
         public bool GoldOnlyTest { get; set; }
@@ -103,6 +88,24 @@ namespace cAlgo.Robots
         [Parameter("Min indicator score", DefaultValue = 0.75, MinValue = 0.0, MaxValue = 4.0, Group = "Indicators")]
         public double MinIndicatorScore { get; set; }
 
+        [Parameter("Kaufman ER period", DefaultValue = 12, MinValue = 5, MaxValue = 50, Group = "Math Edge")]
+        public int EfficiencyRatioPeriod { get; set; }
+
+        [Parameter("ADX period", DefaultValue = 14, MinValue = 5, MaxValue = 50, Group = "Math Edge")]
+        public int AdxPeriod { get; set; }
+
+        [Parameter("ATR percentile lookback", DefaultValue = 60, MinValue = 30, MaxValue = 200, Group = "Math Edge")]
+        public int AtrPercentileLookback { get; set; }
+
+        [Parameter("Bollinger period", DefaultValue = 20, MinValue = 10, MaxValue = 50, Group = "Math Edge")]
+        public int BollingerPeriod { get; set; }
+
+        [Parameter("Min Math Edge score", DefaultValue = 2.75, MinValue = 0.0, MaxValue = 10.0, Group = "Math Edge")]
+        public double MinMathEdgeScore { get; set; }
+
+        [Parameter("Avoid correlated EUR/GBP pairs", DefaultValue = true, Group = "Math Edge")]
+        public bool AvoidCorrelatedFxPairs { get; set; }
+
         [Parameter("Compression bars", DefaultValue = 8, MinValue = 4, MaxValue = 30, Group = "Setup")]
         public int CompressionBars { get; set; }
 
@@ -130,33 +133,6 @@ namespace cAlgo.Robots
         [Parameter("Gold max stop USD", DefaultValue = 1.50, MinValue = 0.10, MaxValue = 100.0, Group = "Stops")]
         public double GoldMaxStopPrice { get; set; }
 
-        [Parameter("Crypto ATR stop multiplier", DefaultValue = 0.55, MinValue = 0.20, MaxValue = 5.0, Group = "عملات رقمية / Crypto")]
-        public double CryptoAtrStopMultiplier { get; set; }
-
-        [Parameter("Crypto min stop (%)", DefaultValue = 0.08, MinValue = 0.01, MaxValue = 2.0, Group = "عملات رقمية / Crypto")]
-        public double CryptoMinStopPercent { get; set; }
-
-        [Parameter("Crypto max stop (%)", DefaultValue = 0.60, MinValue = 0.05, MaxValue = 5.0, Group = "عملات رقمية / Crypto")]
-        public double CryptoMaxStopPercent { get; set; }
-
-        [Parameter("Crypto max spread / stop", DefaultValue = 0.15, MinValue = 0.02, MaxValue = 1.0, Group = "عملات رقمية / Crypto")]
-        public double CryptoMaxSpreadToStop { get; set; }
-
-        [Parameter("Crypto max spread / ATR", DefaultValue = 0.55, MinValue = 0.05, MaxValue = 2.0, Group = "عملات رقمية / Crypto")]
-        public double CryptoMaxSpreadToAtr { get; set; }
-
-        [Parameter("Crypto minimum stop / spread", DefaultValue = 7.0, MinValue = 4.0, MaxValue = 20.0, Group = "عملات رقمية / Crypto")]
-        public double CryptoMinStopSpreadMultiple { get; set; }
-
-        [Parameter("Crypto max spread widening x", DefaultValue = 1.25, MinValue = 1.0, MaxValue = 3.0, Group = "عملات رقمية / Crypto")]
-        public double CryptoMaxSpreadWideningFactor { get; set; }
-
-        [Parameter("Crypto capture current profit (%)", DefaultValue = 70.0, MinValue = 30.0, MaxValue = 90.0, Group = "عملات رقمية / Crypto")]
-        public double CryptoCaptureCurrentProfitPercent { get; set; }
-
-        [Parameter("Crypto partial only after R", DefaultValue = 0.60, MinValue = 0.10, MaxValue = 1.50, Group = "عملات رقمية / Crypto")]
-        public double CryptoPartialMinR { get; set; }
-
         [Parameter("Reward / risk", DefaultValue = 2.0, MinValue = 2.0, MaxValue = 2.0, Group = "Stops")]
         public double RewardRisk { get; set; }
 
@@ -172,20 +148,29 @@ namespace cAlgo.Robots
         [Parameter("Max hold seconds (0=OFF)", DefaultValue = 0, MinValue = 0, MaxValue = 1800, Group = "Exits")]
         public int MaxHoldSeconds { get; set; }
 
-        [Parameter("Lock sister after SL (R)", DefaultValue = 0.70, MinValue = 0.10, MaxValue = 0.95, Group = "Exits")]
-        public double SisterLockR { get; set; }
+        [Parameter("Initial sister floor after SL (R)", DefaultValue = 0.10, MinValue = 0.0, MaxValue = 0.50, Group = "Pair Math")]
+        public double InitialSisterFloorR { get; set; }
 
-        [Parameter("Close sister if lock fails", DefaultValue = true, Group = "Exits")]
-        public bool CloseSisterIfLockFails { get; set; }
+        [Parameter("Pair recovery trigger (R)", DefaultValue = 1.25, MinValue = 1.0, MaxValue = 1.90, Group = "Pair Math")]
+        public double PairRecoveryTriggerR { get; set; }
 
-        [Parameter("Partial profit after opposite SL (%)", DefaultValue = 50.0, MinValue = 0.0, MaxValue = 90.0, Group = "Exits")]
+        [Parameter("Pair locked buffer over loss (R)", DefaultValue = 0.12, MinValue = 0.02, MaxValue = 0.50, Group = "Pair Math")]
+        public double PairLockedBufferR { get; set; }
+
+        [Parameter("Late partial profit (%)", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 50.0, Group = "Pair Math")]
         public double SisterPartialPercent { get; set; }
 
-        [Parameter("Trail distance (R)", DefaultValue = 0.35, MinValue = 0.10, MaxValue = 1.00, Group = "Exits")]
+        [Parameter("Late partial trigger (R)", DefaultValue = 1.50, MinValue = 1.10, MaxValue = 1.95, Group = "Pair Math")]
+        public double SisterPartialTriggerR { get; set; }
+
+        [Parameter("Trail distance (R)", DefaultValue = 0.35, MinValue = 0.10, MaxValue = 1.00, Group = "Pair Math")]
         public double SisterTrailR { get; set; }
 
-        [Parameter("Trail activation (R)", DefaultValue = 1.05, MinValue = 0.50, MaxValue = 1.90, Group = "Exits")]
+        [Parameter("Trail activation (R)", DefaultValue = 1.60, MinValue = 1.10, MaxValue = 1.95, Group = "Pair Math")]
         public double SisterTrailActivationR { get; set; }
+
+        [Parameter("Close sister if protection fails", DefaultValue = true, Group = "Pair Math")]
+        public bool CloseSisterIfLockFails { get; set; }
 
         [Parameter("Whipsaw cooldown after SL (sec)", DefaultValue = 45, MinValue = 0, MaxValue = 600, Group = "Exits")]
         public int WhipsawCooldownSeconds { get; set; }
@@ -204,7 +189,6 @@ namespace cAlgo.Robots
             public ExponentialMovingAverage M5Slow;
             public RelativeStrengthIndex Rsi;
             public bool Gold;
-            public bool Crypto;
             public DateTime LastExamined = DateTime.MinValue;
         }
 
@@ -215,6 +199,21 @@ namespace cAlgo.Robots
             public double OriginalStopPips;
             public double BestPrice;
             public bool PartialTaken;
+            public bool RecoveryLocked;
+            public double FirstLossCash;
+            public double LegRiskCash;
+        }
+
+        private sealed class PairExperiment
+        {
+            public string SymbolName;
+            public long BuyId;
+            public long SellId;
+            public double LegRiskCash;
+            public double RealizedNet;
+            public double MfeR;
+            public double MaeR;
+            public DateTime OpenTime;
         }
 
         private sealed class Candidate
@@ -232,6 +231,13 @@ namespace cAlgo.Robots
             public double SetupQuality;
             public double IndicatorScore;
             public double VolumeRatio;
+            public double EfficiencyRatio;
+            public double Adx;
+            public double AtrPercentile;
+            public double BollingerExpansion;
+            public double EmaSlopeAtr;
+            public double BodyWickRatio;
+            public double MathEdgeScore;
             public double TotalScore;
         }
 
@@ -240,6 +246,8 @@ namespace cAlgo.Robots
         private readonly Dictionary<string, DateTime> _lastLaunchBySymbol = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, DateTime> _whipsawUntil = new Dictionary<string, DateTime>();
         private readonly Dictionary<long, ProtectedLeg> _protectedLegs = new Dictionary<long, ProtectedLeg>();
+        private readonly Dictionary<string, PairExperiment> _pairExperiments = new Dictionary<string, PairExperiment>();
+        private readonly List<double> _completedPairR = new List<double>();
         private DateTime _utcDay;
         private DateTime _lastFlat = DateTime.MinValue;
         private int _cyclesToday;
@@ -270,18 +278,10 @@ namespace cAlgo.Robots
                 return;
             }
 
-            AddMarket(EnableEurUsd && !GoldOnlyTest, EurUsdName, false, false);
-            AddMarket(EnableGbpUsd && !GoldOnlyTest, GbpUsdName, false, false);
-            AddMarket(EnableUsdJpy && !GoldOnlyTest, UsdJpyName, false, false);
-            AddMarket(EnableGold, GoldName, true, false);
-
-            string detectedBitcoin = ResolveBrokerSymbol(BitcoinName,
-                new[] { "BTC", "XBT" }, new[] { "USD", "USDT" });
-            string detectedEthereum = ResolveBrokerSymbol(EthereumName,
-                new[] { "ETH" }, new[] { "USD", "USDT" });
-
-            AddMarket(EnableBitcoin && !GoldOnlyTest, detectedBitcoin, false, true);
-            AddMarket(EnableEthereum && !GoldOnlyTest, detectedEthereum, false, true);
+            AddMarket(EnableEurUsd && !GoldOnlyTest, EurUsdName, false);
+            AddMarket(EnableGbpUsd && !GoldOnlyTest, GbpUsdName, false);
+            AddMarket(EnableUsdJpy && !GoldOnlyTest, UsdJpyName, false);
+            AddMarket(EnableGold, GoldName, true);
 
             if (_markets.Count == 0)
             {
@@ -295,98 +295,30 @@ namespace cAlgo.Robots
             Positions.Closed += OnPositionClosed;
             Timer.Start(2);
 
-            Print("HEDGE-FAST 2R V7.2 عملات رقمية / CRYPTO COST-SAFE ON | markets={0} | scan=2s | batchMaxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
+            Print("HEDGE MATH EDGE V6.2 ON | markets={0} | scan=2s | maxPairs={1} ({2} positions) | maxHold={3}s (0=OFF) | RR=2:1",
                 string.Join(",", _markets.Select(m => m.Symbol.Name)),
                 MaxSimultaneousPairs, MaxSimultaneousPairs * 2, MaxHoldSeconds);
-            Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, CRYPTO pair={2:F2}%, nominal portfolio cap={3:F2}%.",
-                FxPairRiskPercent, GoldPairRiskPercent, CryptoPairRiskPercent, MaxNominalOpenRiskPercent);
-            Print("V7.2 BATCH: ranks ALL available markets then launches up to 4 BUY+SELL pairs = 8 positions in the same scan.");
-            Print("CRYPTO COST GUARD: stop>=spread*{0:F1}, spread/SL<={1:F2}, spread widening<={2:F2}x, dynamic sister capture={3:F0}%.",
-                CryptoMinStopSpreadMultiple, CryptoMaxSpreadToStop, CryptoMaxSpreadWideningFactor, CryptoCaptureCurrentProfitPercent);
-            Print("V6 exits: opposite SL => lock sister at {0:F2}R, take {1:F0}% partial when possible, then trail by {2:F2}R after {3:F2}R. Whipsaw cooldown={4}s.",
-                SisterLockR, SisterPartialPercent, SisterTrailR, SisterTrailActivationR, WhipsawCooldownSeconds);
+            Print("Risk: FX pair={0:F2}%, GOLD pair={1:F2}%, nominal portfolio cap={2:F2}%. Indicators score EMA9/21 + M5 EMA20/50 + RSI7 + tick-volume + breakout/ATR.",
+                FxPairRiskPercent, GoldPairRiskPercent, MaxNominalOpenRiskPercent);
+            Print("PAIR MATH: first SL => floor={0:F2}R; recovery at {1:F2}R; then lock enough to cover ACTUAL first loss + {2:F2}R buffer. Partial={3:F0}% only after {4:F2}R; trail after {5:F2}R.",
+                InitialSisterFloorR, PairRecoveryTriggerR, PairLockedBufferR,
+                SisterPartialPercent, SisterPartialTriggerR, SisterTrailActivationR);
+            Print("MATH EDGE SCORE uses Kaufman ER + ADX + ATR percentile + Bollinger expansion + EMA slope + body/wick + volume + cost.");
+            Print("EXPERIMENT: evaluate 100 completed PAIRS (not individual legs). Expectancy/MFE/MAE are reported in R.");
             Print("ENTRY ZONE = prior compression + fresh breakout impulse + no late chase. GOLD enabled={0}, goldOnly={1}.",
                 EnableGold, GoldOnlyTest);
             Print("Normalized spread comparison uses spread/stop and spread/ATR; raw FX pips vs GOLD price spread are NOT compared directly.");
         }
 
-        private string ResolveBrokerSymbol(string preferred, string[] assetTokens, string[] quoteTokens)
-        {
-            if (!string.IsNullOrWhiteSpace(preferred))
-            {
-                string trimmed = preferred.Trim();
-                if (Symbols.Exists(trimmed))
-                {
-                    Print("HEDGE-FAST V7.1 AUTO-SYMBOL exact {0}.", trimmed);
-                    return trimmed;
-                }
-
-                string preferredNorm = NormalizeSymbolName(trimmed);
-                for (int i = 0; i < Symbols.Count; i++)
-                {
-                    string candidate = Symbols[i];
-                    if (NormalizeSymbolName(candidate) == preferredNorm)
-                    {
-                        Print("HEDGE-FAST V7.1 AUTO-SYMBOL mapped {0} -> {1}.", trimmed, candidate);
-                        return candidate;
-                    }
-                }
-            }
-
-            var matches = new List<string>();
-            for (int i = 0; i < Symbols.Count; i++)
-            {
-                string candidate = Symbols[i];
-                string norm = NormalizeSymbolName(candidate);
-
-                bool assetMatch = assetTokens.Any(t => norm.Contains(t));
-                bool quoteMatch = quoteTokens.Any(t => norm.Contains(t));
-                if (assetMatch && quoteMatch)
-                    matches.Add(candidate);
-            }
-
-            if (matches.Count == 0)
-            {
-                Print("HEDGE-FAST V7.1 AUTO-SYMBOL: no broker symbol found for assets={0} quotes={1}.",
-                    string.Join("/", assetTokens), string.Join("/", quoteTokens));
-                return preferred;
-            }
-
-            string chosen = matches
-                .OrderBy(x => NormalizeSymbolName(x).Length)
-                .ThenBy(x => x.Length)
-                .First();
-
-            Print("HEDGE-FAST V7.1 AUTO-SYMBOL discovered {0}. Candidates={1}",
-                chosen, string.Join(",", matches.Take(8)));
-            return chosen;
-        }
-
-        private string NormalizeSymbolName(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-            return new string(value
-                .ToUpperInvariant()
-                .Where(char.IsLetterOrDigit)
-                .ToArray());
-        }
-
-        private void AddMarket(bool enabled, string name, bool gold, bool crypto)
+        private void AddMarket(bool enabled, string name, bool gold)
         {
             if (!enabled || string.IsNullOrWhiteSpace(name)) return;
             try
             {
-                string resolved = name.Trim();
-                if (!Symbols.Exists(resolved))
-                {
-                    Print("HEDGE-SMART missing broker symbol {0}.", resolved);
-                    return;
-                }
-
-                var s = Symbols.GetSymbol(resolved);
+                var s = Symbols.GetSymbol(name.Trim());
                 if (s == null)
                 {
-                    Print("HEDGE-SMART unable to load broker symbol {0}.", resolved);
+                    Print("HEDGE-SMART missing broker symbol {0}.", name);
                     return;
                 }
                 var bars = MarketData.GetBars(TimeFrame.Minute, s.Name);
@@ -401,12 +333,10 @@ namespace cAlgo.Robots
                     M5Fast = Indicators.ExponentialMovingAverage(bars5.ClosePrices, M5EmaFast),
                     M5Slow = Indicators.ExponentialMovingAverage(bars5.ClosePrices, M5EmaSlow),
                     Rsi = Indicators.RelativeStrengthIndex(bars.ClosePrices, RsiPeriod),
-                    Gold = gold,
-                    Crypto = crypto
+                    Gold = gold
                 });
                 Print("HEDGE-SMART tracking {0} as {1}, minVolume={2}, pip={3}",
-                    s.Name, crypto ? "عملات رقمية/CRYPTO" : (gold ? "GOLD" : "FX"),
-                    s.VolumeInUnitsMin, s.PipSize);
+                    s.Name, gold ? "GOLD" : "FX", s.VolumeInUnitsMin, s.PipSize);
             }
             catch (Exception ex)
             {
@@ -450,6 +380,7 @@ namespace cAlgo.Robots
         {
             ResetDay();
 
+            UpdatePairExperiments();
             TrailProtectedSisters();
 
             if (Server.Time >= _nextStats)
@@ -519,6 +450,12 @@ namespace cAlgo.Robots
                     continue;
                 }
 
+                if (AvoidCorrelatedFxPairs && IsCorrelatedFxBlocked(market.Symbol.Name))
+                {
+                    _notes[market.Symbol.Name] = "correlation guard";
+                    continue;
+                }
+
                 Candidate c = Evaluate(market);
                 if (c != null) candidates.Add(c);
             }
@@ -549,9 +486,10 @@ namespace cAlgo.Robots
                 if (BotPositions().Length >= MaxSimultaneousPairs * 2) break;
                 if (BotPositions().Any(p => p.SymbolName == selected.Market.Symbol.Name)) continue;
 
-                Print("HEDGE-FAST V6 SELECT {0}: totalScore={1:F2}, indScore={2:F2}, volume={3:F2}, spread/SL={4:F3}, breakout={5}",
-                    selected.Market.Symbol.Name, selected.TotalScore, selected.IndicatorScore,
-                    selected.VolumeRatio, selected.SpreadToStop, selected.BreakoutSide);
+                Print("MATH EDGE SELECT {0}: total={1:F2}, math={2:F2}, ER={3:F2}, ADX={4:F1}, ATRpct={5:F0}, BBx={6:F2}, spread/SL={7:F3}, breakout={8}",
+                    selected.Market.Symbol.Name, selected.TotalScore, selected.MathEdgeScore,
+                    selected.EfficiencyRatio, selected.Adx, selected.AtrPercentile,
+                    selected.BollingerExpansion, selected.SpreadToStop, selected.BreakoutSide);
 
                 OpenPair(selected);
             }
@@ -561,7 +499,8 @@ namespace cAlgo.Robots
         {
             Bars b = market.M1;
             Symbol s = market.Symbol;
-            int minBars = Math.Max(120, Math.Max(CompressionBars + 60, VolumeLookback + 20));
+            int minBars = Math.Max(220, Math.Max(CompressionBars + 80,
+                Math.Max(VolumeLookback + 30, AtrPercentileLookback + AtrPeriod + 30)));
             if (b == null || market.M5 == null || b.Count < minBars || market.M5.Count < M5EmaSlow + 10)
             {
                 _notes[s.Name] = "loading history";
@@ -595,7 +534,11 @@ namespace cAlgo.Robots
             }
 
             double compression = recentTr / baselineTr;
-            // V7: compression is scored, not a hard rejection. This keeps batch activity high.
+            if (compression > CompressionMaxRatio)
+            {
+                _notes[s.Name] = string.Format("no squeeze {0:F2}>{1:F2}", compression, CompressionMaxRatio);
+                return null;
+            }
 
             double priorHigh = double.MinValue;
             double priorLow = double.MaxValue;
@@ -608,15 +551,26 @@ namespace cAlgo.Robots
             double open = b.OpenPrices.Last(1);
             double close = b.ClosePrices.Last(1);
             double bodyAtr = Math.Abs(close - open) / atr;
+            if (bodyAtr < MinBreakoutBodyAtr)
+            {
+                _notes[s.Name] = string.Format("weak impulse body/ATR={0:F2}", bodyAtr);
+                return null;
+            }
 
-            bool trueBreakUp = close > priorHigh;
-            bool trueBreakDown = close < priorLow;
-            bool up = trueBreakUp || (!trueBreakDown && close >= open);
-            bool down = !up;
+            bool up = close > priorHigh;
+            bool down = close < priorLow;
+            if (!up && !down)
+            {
+                _notes[s.Name] = "still inside compressed range";
+                return null;
+            }
 
-            double chase = trueBreakUp ? (close - priorHigh) / atr :
-                (trueBreakDown ? (priorLow - close) / atr : 0.0);
-            chase = Math.Max(0.0, chase);
+            double chase = up ? (close - priorHigh) / atr : (priorLow - close) / atr;
+            if (chase < 0 || chase > MaxBreakoutChaseAtr)
+            {
+                _notes[s.Name] = string.Format("late breakout chase/ATR={0:F2}", chase);
+                return null;
+            }
 
             double spreadPrice = s.Ask - s.Bid;
             if (spreadPrice <= 0)
@@ -625,50 +579,29 @@ namespace cAlgo.Robots
                 return null;
             }
 
-            double stopPrice;
-            double allowedSpreadToStop = MaxSpreadToStop;
-            double allowedSpreadToAtr = MaxSpreadToAtr;
-
-            if (market.Crypto)
+            double stopPrice = Math.Max(atr * StopAtrMultiplier, spreadPrice * 4.0);
+            if (market.Gold)
             {
-                double mid = (s.Bid + s.Ask) / 2.0;
-                double minCryptoStop = mid * CryptoMinStopPercent / 100.0;
-                double maxCryptoStop = mid * CryptoMaxStopPercent / 100.0;
-                stopPrice = Math.Max(atr * CryptoAtrStopMultiplier,
-                    Math.Max(spreadPrice * CryptoMinStopSpreadMultiple, minCryptoStop));
-
-                if (stopPrice > maxCryptoStop)
-                    stopPrice = maxCryptoStop;
-
-                allowedSpreadToStop = CryptoMaxSpreadToStop;
-                allowedSpreadToAtr = CryptoMaxSpreadToAtr;
+                stopPrice = Math.Max(stopPrice, GoldMinStopPrice);
+                if (stopPrice > GoldMaxStopPrice)
+                {
+                    _notes[s.Name] = "gold stop too wide";
+                    return null;
+                }
             }
             else
             {
-                stopPrice = Math.Max(atr * StopAtrMultiplier, spreadPrice * 4.0);
-                if (market.Gold)
+                stopPrice = Math.Max(stopPrice, FxMinStopPips * s.PipSize);
+                if (stopPrice / s.PipSize > FxMaxStopPips)
                 {
-                    stopPrice = Math.Max(stopPrice, GoldMinStopPrice);
-                    if (stopPrice > GoldMaxStopPrice)
-                    {
-                        _notes[s.Name] = "gold stop too wide";
-                        return null;
-                    }
-                }
-                else
-                {
-                    stopPrice = Math.Max(stopPrice, FxMinStopPips * s.PipSize);
-                    if (stopPrice / s.PipSize > FxMaxStopPips)
-                    {
-                        _notes[s.Name] = "FX stop too wide";
-                        return null;
-                    }
+                    _notes[s.Name] = "FX stop too wide";
+                    return null;
                 }
             }
 
             double spreadToStop = spreadPrice / stopPrice;
             double spreadToAtr = spreadPrice / atr;
-            if (spreadToStop > allowedSpreadToStop || spreadToAtr > allowedSpreadToAtr)
+            if (spreadToStop > MaxSpreadToStop || spreadToAtr > MaxSpreadToAtr)
             {
                 _notes[s.Name] = string.Format("spread costly s/SL={0:F2}, s/ATR={1:F2}", spreadToStop, spreadToAtr);
                 return null;
@@ -697,27 +630,59 @@ namespace cAlgo.Robots
                 (volumeRatio >= 1.00 ? 0.50 : 0) +
                 (volumeRatio >= 1.20 ? 0.25 : 0);
 
-            // V7: indicator score ranks candidates; it no longer blocks them by itself.
+            if (indicatorScore < MinIndicatorScore)
+            {
+                _notes[s.Name] = string.Format("indicator score {0:F2}<{1:F2}", indicatorScore, MinIndicatorScore);
+                return null;
+            }
 
-            double breakoutBonus = (trueBreakUp || trueBreakDown) ? 0.75 : 0.0;
-            double bodyBonus = Math.Min(1.5, bodyAtr) * 0.60;
-            double compressionScore = Math.Max(-0.75, (CompressionMaxRatio - compression) * 1.20);
-            double chasePenalty = Math.Max(0.0, chase - MaxBreakoutChaseAtr) * 0.60;
+            double er = KaufmanEfficiencyRatio(b, EfficiencyRatioPeriod, 1);
+            double adx = CalculateAdx(b, AdxPeriod, 1);
+            double atrPercentile = AtrPercentile(b, AtrPeriod, AtrPercentileLookback);
+            double bbExpansion = BollingerExpansionRatio(b, BollingerPeriod);
+            double emaSlopeAtr = atr > 0
+                ? Math.Abs(market.M1Fast.Result.Last(1) - market.M1Fast.Result.Last(4)) / (3.0 * atr)
+                : 0;
+            double candleRange = b.HighPrices.Last(1) - b.LowPrices.Last(1);
+            double wick = Math.Max(0.0, candleRange - Math.Abs(close - open));
+            double bodyWickRatio = wick > 0 ? Math.Abs(close - open) / wick : 5.0;
+
+            bool slopeAlign = up
+                ? market.M1Fast.Result.Last(1) > market.M1Fast.Result.Last(4)
+                : market.M1Fast.Result.Last(1) < market.M1Fast.Result.Last(4);
+
+            double mathEdgeScore = 0;
+            mathEdgeScore += Math.Min(1.50, er * 2.0);
+            mathEdgeScore += Math.Min(1.25, Math.Max(0, adx - 12.0) / 20.0);
+            mathEdgeScore += (atrPercentile >= 35 && atrPercentile <= 90) ? 0.75 :
+                (atrPercentile > 90 ? 0.25 : 0.0);
+            mathEdgeScore += Math.Min(0.75, Math.Max(0, bbExpansion - 0.90));
+            mathEdgeScore += slopeAlign ? Math.Min(0.75, emaSlopeAtr * 2.5) : 0;
+            mathEdgeScore += Math.Min(0.50, bodyWickRatio / 4.0);
+            mathEdgeScore += volumeRatio >= 1.0 ? Math.Min(0.50, (volumeRatio - 0.8) * 0.8) : 0;
+            mathEdgeScore -= spreadToStop * 2.5;
+            mathEdgeScore -= spreadToAtr * 0.5;
+
+            if (mathEdgeScore < MinMathEdgeScore)
+            {
+                _notes[s.Name] = string.Format("math edge {0:F2}<{1:F2}", mathEdgeScore, MinMathEdgeScore);
+                return null;
+            }
 
             double setupQuality =
-                compressionScore +
-                bodyBonus +
-                breakoutBonus -
-                chasePenalty -
+                (CompressionMaxRatio - compression) * 1.20 +
+                Math.Min(1.5, bodyAtr) * 0.60 +
+                (MaxBreakoutChaseAtr - chase) * 0.25 -
                 spreadToStop * 2.0;
 
             double totalScore =
                 indicatorScore +
+                mathEdgeScore +
                 setupQuality -
                 spreadToStop * 1.5 -
                 spreadToAtr * 0.5;
 
-            _notes[s.Name] = string.Format("QUALIFIED score={0:F2} s/SL={1:F3}", totalScore, spreadToStop);
+            _notes[s.Name] = string.Format("QUALIFIED total={0:F2} math={1:F2}", totalScore, mathEdgeScore);
             return new Candidate
             {
                 Market = market,
@@ -729,10 +694,17 @@ namespace cAlgo.Robots
                 CompressionRatio = compression,
                 BreakoutBodyAtr = bodyAtr,
                 ChaseAtr = chase,
-                BreakoutSide = trueBreakUp ? "BREAK-UP" : (trueBreakDown ? "BREAK-DOWN" : (up ? "MOM-UP" : "MOM-DOWN")),
+                BreakoutSide = up ? "UP" : "DOWN",
                 SetupQuality = setupQuality,
                 IndicatorScore = indicatorScore,
                 VolumeRatio = volumeRatio,
+                EfficiencyRatio = er,
+                Adx = adx,
+                AtrPercentile = atrPercentile,
+                BollingerExpansion = bbExpansion,
+                EmaSlopeAtr = emaSlopeAtr,
+                BodyWickRatio = bodyWickRatio,
+                MathEdgeScore = mathEdgeScore,
                 TotalScore = totalScore
             };
         }
@@ -745,6 +717,7 @@ namespace cAlgo.Robots
             if (!_markets.Any(m => m.Symbol.Name == closed.SymbolName)) return;
 
             _protectedLegs.Remove(closed.Id);
+            RecordPairLegClose(closed);
 
             if (e.Reason == PositionCloseReason.StopLoss)
             {
@@ -771,68 +744,22 @@ namespace cAlgo.Robots
                 return;
             }
 
-            // TP remains 2R, so infer original R from half of TP distance.
             double originalStopPips = 0;
             if (sister.TakeProfit.HasValue)
                 originalStopPips = Math.Abs(sister.TakeProfit.Value - sister.EntryPrice) / s.PipSize / 2.0;
-
             if (originalStopPips <= 0 && stopped.StopLoss.HasValue)
                 originalStopPips = Math.Abs(stopped.StopLoss.Value - stopped.EntryPrice) / s.PipSize;
 
             if (originalStopPips <= 0)
             {
-                Print("HEDGE-FAST V6 cannot infer R; closing sister id={0}.", sister.Id);
+                Print("MATH EDGE cannot infer 1R for sister id={0}.", sister.Id);
                 if (CloseSisterIfLockFails) ClosePosition(sister);
                 return;
             }
 
-            double currentFavorablePips = sister.TradeType == TradeType.Buy
-                ? (s.Bid - sister.EntryPrice) / s.PipSize
-                : (sister.EntryPrice - s.Ask) / s.PipSize;
-
-            double lockPips;
-            if (market.Crypto)
-            {
-                // Crypto spread can consume a large part of 1R. Capture a percentage of
-                // the profit that actually exists now instead of demanding a fixed +0.70R.
-                lockPips = Math.Max(0.0,
-                    currentFavorablePips * CryptoCaptureCurrentProfitPercent / 100.0);
-            }
-            else
-            {
-                lockPips = originalStopPips * SisterLockR;
-            }
-
-            double desiredStop = sister.EntryPrice +
-                (sister.TradeType == TradeType.Buy ? 1.0 : -1.0) * lockPips * s.PipSize;
-
-            double minGapPrice = Math.Max(2.0 * s.PipSize, (s.Ask - s.Bid) * 1.5);
-            double safeStop = sister.TradeType == TradeType.Buy
-                ? Math.Min(desiredStop, s.Bid - minGapPrice)
-                : Math.Max(desiredStop, s.Ask + minGapPrice);
-
-            double minimumPositiveLockR = market.Crypto ? 0.02 : 0.05;
-            bool stillLocksProfit = sister.TradeType == TradeType.Buy
-                ? safeStop > sister.EntryPrice + minimumPositiveLockR * originalStopPips * s.PipSize
-                : safeStop < sister.EntryPrice - minimumPositiveLockR * originalStopPips * s.PipSize;
-
-            if (!stillLocksProfit)
-            {
-                Print("HEDGE-FAST V6 immediate sister CLOSE id={0} {1}: insufficient room to lock profit.",
-                    sister.Id, sister.SymbolName);
-                if (CloseSisterIfLockFails) ClosePosition(sister);
-                return;
-            }
-
-            // FIRST secure the remaining position; only then attempt a partial profit.
-            var mod = sister.ModifyStopLossPrice(Math.Round(safeStop, s.Digits));
-            if (!mod.IsSuccessful)
-            {
-                Print("HEDGE-FAST V6 lock failed sister id={0} error={1}; immediate close fallback={2}.",
-                    sister.Id, mod.Error, CloseSisterIfLockFails);
-                if (CloseSisterIfLockFails) ClosePosition(sister);
-                return;
-            }
+            double legRiskCash = s.AmountRisked(sister.VolumeInUnits, originalStopPips);
+            if (legRiskCash <= 0)
+                legRiskCash = Math.Max(0.01, Math.Abs(stopped.NetProfit));
 
             var state = new ProtectedLeg
             {
@@ -840,65 +767,79 @@ namespace cAlgo.Robots
                 SymbolName = sister.SymbolName,
                 OriginalStopPips = originalStopPips,
                 BestPrice = sister.TradeType == TradeType.Buy ? s.Bid : s.Ask,
-                PartialTaken = false
+                PartialTaken = false,
+                RecoveryLocked = false,
+                FirstLossCash = Math.Abs(stopped.NetProfit),
+                LegRiskCash = legRiskCash
             };
             _protectedLegs[sister.Id] = state;
 
-            TryTakeSisterPartial(sister, state);
+            // Do NOT force the old +0.70R lock. Give the winner room to recover the pair,
+            // while placing only a small positive floor if market distance allows it.
+            if (InitialSisterFloorR > 0)
+                TryImproveSisterStop(sister, state, InitialSisterFloorR, "INITIAL FLOOR");
 
-            double effectiveLockedR = Math.Abs(safeStop - sister.EntryPrice) / s.PipSize / originalStopPips;
-            Print("HEDGE-FAST V7.2 PROTECTED sister id={0} {1}: opposite #{2} hit SL; locked≈{3:F2}R from ACTUAL available profit, partialTaken={4}, TP remains 2R.",
-                sister.Id, sister.SymbolName, stopped.Id, effectiveLockedR, state.PartialTaken);
+            Print("MATH EDGE FIRST SL {0}: stopped#{1} net={2:F2}; sister#{3} continues toward pair recovery. 1Rcash≈{4:F2}",
+                sister.SymbolName, stopped.Id, stopped.NetProfit, sister.Id, legRiskCash);
         }
 
-        private void TryTakeSisterPartial(Position sister, ProtectedLeg state)
+        private bool TryImproveSisterStop(Position sister, ProtectedLeg state, double targetLockR, string reason)
         {
-            if (state.PartialTaken || SisterPartialPercent <= 0) return;
+            MarketInfo market = _markets.FirstOrDefault(m => m.Symbol.Name == sister.SymbolName);
+            if (market == null || state.OriginalStopPips <= 0) return false;
+
+            Symbol s = market.Symbol;
+            double desired = sister.EntryPrice +
+                (sister.TradeType == TradeType.Buy ? 1.0 : -1.0) *
+                targetLockR * state.OriginalStopPips * s.PipSize;
+
+            double gap = Math.Max(2.0 * s.PipSize, (s.Ask - s.Bid) * 1.5);
+            double safe = sister.TradeType == TradeType.Buy
+                ? Math.Min(desired, s.Bid - gap)
+                : Math.Max(desired, s.Ask + gap);
+
+            bool positive = sister.TradeType == TradeType.Buy
+                ? safe > sister.EntryPrice
+                : safe < sister.EntryPrice;
+            if (!positive) return false;
+
+            bool improves = !sister.StopLoss.HasValue ||
+                (sister.TradeType == TradeType.Buy
+                    ? safe > sister.StopLoss.Value + 0.10 * s.PipSize
+                    : safe < sister.StopLoss.Value - 0.10 * s.PipSize);
+            if (!improves) return true;
+
+            var mod = sister.ModifyStopLossPrice(Math.Round(safe, s.Digits));
+            if (mod.IsSuccessful)
+            {
+                double actualR = Math.Abs(safe - sister.EntryPrice) / s.PipSize / state.OriginalStopPips;
+                Print("MATH EDGE {0} {1} id={2}: stop locks≈{3:F2}R.", reason, sister.SymbolName, sister.Id, actualR);
+                return true;
+            }
+
+            Print("MATH EDGE {0} failed id={1} error={2}", reason, sister.Id, mod.Error);
+            return false;
+        }
+
+        private void TryLatePartial(Position sister, ProtectedLeg state, double favorableR)
+        {
+            if (state.PartialTaken || SisterPartialPercent <= 0 || favorableR < SisterPartialTriggerR) return;
 
             MarketInfo market = _markets.FirstOrDefault(m => m.Symbol.Name == sister.SymbolName);
             if (market == null) return;
-
             Symbol s = market.Symbol;
-
-            if (market.Crypto)
-            {
-                double favorablePips = sister.TradeType == TradeType.Buy
-                    ? (s.Bid - sister.EntryPrice) / s.PipSize
-                    : (sister.EntryPrice - s.Ask) / s.PipSize;
-                double favorableR = state.OriginalStopPips > 0
-                    ? favorablePips / state.OriginalStopPips
-                    : 0;
-
-                if (favorableR < CryptoPartialMinR)
-                {
-                    Print("HEDGE-FAST V7.2 CRYPTO PARTIAL WAIT id={0} {1}: current={2:F2}R < min={3:F2}R. Keeping full position protected.",
-                        sister.Id, sister.SymbolName, favorableR, CryptoPartialMinR);
-                    return;
-                }
-            }
 
             double closeUnits = s.NormalizeVolumeInUnits(
                 sister.VolumeInUnits * SisterPartialPercent / 100.0, RoundingMode.Down);
-
             double remaining = sister.VolumeInUnits - closeUnits;
-            if (closeUnits < s.VolumeInUnitsMin || remaining < s.VolumeInUnitsMin)
-            {
-                Print("HEDGE-FAST V6 PARTIAL SKIP id={0} {1}: volume={2}, close={3}, min={4}. Keeping protected full position.",
-                    sister.Id, sister.SymbolName, sister.VolumeInUnits, closeUnits, s.VolumeInUnitsMin);
-                return;
-            }
+            if (closeUnits < s.VolumeInUnitsMin || remaining < s.VolumeInUnitsMin) return;
 
-            TradeResult partial = ClosePosition(sister, closeUnits);
+            var partial = ClosePosition(sister, closeUnits);
             if (partial.IsSuccessful)
             {
                 state.PartialTaken = true;
-                Print("HEDGE-FAST V6 PARTIAL id={0} {1}: closed {2:F0}% ({3} units); remaining protected + trailing.",
-                    sister.Id, sister.SymbolName, SisterPartialPercent, closeUnits);
-            }
-            else
-            {
-                Print("HEDGE-FAST V6 PARTIAL FAILED id={0} error={1}; stop protection remains active.",
-                    sister.Id, partial.Error);
+                Print("MATH EDGE LATE PARTIAL {0} id={1}: {2:F0}% at≈{3:F2}R.",
+                    sister.SymbolName, sister.Id, SisterPartialPercent, favorableR);
             }
         }
 
@@ -930,7 +871,27 @@ namespace cAlgo.Robots
                     : (p.EntryPrice - state.BestPrice) / s.PipSize;
 
                 double favorableR = favorablePips / state.OriginalStopPips;
-                if (favorableR < SisterTrailActivationR) continue;
+
+                // Once the winner has enough distance, lock enough R to offset the ACTUAL first loss
+                // plus a small buffer. This is pair-level protection, not leg-level protection.
+                if (!state.RecoveryLocked && favorableR >= PairRecoveryTriggerR)
+                {
+                    double lossR = state.LegRiskCash > 0 ? state.FirstLossCash / state.LegRiskCash : 1.0;
+                    double requiredLockR = lossR + PairLockedBufferR;
+                    bool locked = TryImproveSisterStop(p, state, requiredLockR, "PAIR RECOVERY");
+                    if (locked)
+                        state.RecoveryLocked = true;
+                    else if (CloseSisterIfLockFails)
+                    {
+                        Print("MATH EDGE recovery lock unavailable; closing sister id={0} to avoid full reversal.", p.Id);
+                        ClosePosition(p);
+                        continue;
+                    }
+                }
+
+                TryLatePartial(p, state, favorableR);
+
+                if (!state.RecoveryLocked || favorableR < SisterTrailActivationR) continue;
 
                 double atrPrice = ClosedAtr(market.M1, AtrPeriod, 40);
                 double atrTrailPips = atrPrice > 0 ? (atrPrice / s.PipSize) * 0.35 : 0;
@@ -940,10 +901,11 @@ namespace cAlgo.Robots
                     ? state.BestPrice - trailPips * s.PipSize
                     : state.BestPrice + trailPips * s.PipSize;
 
-                // Never loosen below the initial V6 lock.
+                double lossR = state.LegRiskCash > 0 ? state.FirstLossCash / state.LegRiskCash : 1.0;
+                double floorR = lossR + PairLockedBufferR;
                 double floorLock = p.EntryPrice +
                     (p.TradeType == TradeType.Buy ? 1.0 : -1.0) *
-                    state.OriginalStopPips * SisterLockR * s.PipSize;
+                    state.OriginalStopPips * floorR * s.PipSize;
 
                 if (p.TradeType == TradeType.Buy)
                     proposed = Math.Max(proposed, floorLock);
@@ -966,7 +928,7 @@ namespace cAlgo.Robots
                 if (mod.IsSuccessful && DiagnosticLogs)
                 {
                     double lockedR = Math.Abs(proposed - p.EntryPrice) / s.PipSize / state.OriginalStopPips;
-                    Print("HEDGE-FAST V6 TRAIL id={0} {1}: best={2:F2}R stop≈{3:F2}R.",
+                    Print("MATH EDGE TRAIL id={0} {1}: best={2:F2}R stop≈{3:F2}R.",
                         p.Id, p.SymbolName, favorableR, lockedR);
                 }
             }
@@ -990,7 +952,7 @@ namespace cAlgo.Robots
                 int losses = trades.Count(h => h.NetProfit < 0);
                 double pf = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? 999.0 : 0.0);
 
-                Print("HEDGE-FAST V6 STATS {0}: closed={1} W/L={2}/{3} net={4:F2} PF={5:F2}",
+                Print("MATH EDGE LEG STATS {0}: closed={1} W/L={2}/{3} net={4:F2} PF={5:F2}",
                     m.Symbol.Name, trades.Length, wins, losses, net, pf);
             }
         }
@@ -1025,35 +987,21 @@ namespace cAlgo.Robots
 
             double liveSpreadPrice = s.Ask - s.Bid;
             if (liveSpreadPrice <= 0) return;
-            double liveSpreadPips = liveSpreadPrice / s.PipSize;
             double liveSpreadToStop = liveSpreadPrice / (c.StopPips * s.PipSize);
-            double allowedLiveSpreadToStop = c.Market.Crypto ? CryptoMaxSpreadToStop : MaxSpreadToStop;
-
-            if (liveSpreadToStop > allowedLiveSpreadToStop)
+            if (liveSpreadToStop > MaxSpreadToStop)
             {
-                Print("HEDGE-SMART CANCEL {0}: spread/SL worsened to {1:F3} > {2:F3}.",
-                    s.Name, liveSpreadToStop, allowedLiveSpreadToStop);
+                Print("HEDGE-SMART CANCEL {0}: spread worsened before execution.", s.Name);
                 return;
             }
 
-            if (c.Market.Crypto &&
-                liveSpreadPips > c.SpreadPips * CryptoMaxSpreadWideningFactor)
-            {
-                Print("HEDGE-FAST V7.2 CRYPTO CANCEL {0}: live spread widened {1:F2}p vs evaluated {2:F2}p (>{3:F2}x).",
-                    s.Name, liveSpreadPips, c.SpreadPips, CryptoMaxSpreadWideningFactor);
-                return;
-            }
-
-            double pairRisk = c.Market.Crypto ? CryptoPairRiskPercent :
-                (c.Market.Gold ? GoldPairRiskPercent : FxPairRiskPercent);
+            double pairRisk = c.Market.Gold ? GoldPairRiskPercent : FxPairRiskPercent;
 
             double currentNominalRisk = 0;
             foreach (var p in BotPositions())
             {
                 var m = _markets.FirstOrDefault(x => x.Symbol.Name == p.SymbolName);
                 if (m != null)
-                    currentNominalRisk += (m.Crypto ? CryptoPairRiskPercent :
-                        (m.Gold ? GoldPairRiskPercent : FxPairRiskPercent)) / 2.0;
+                    currentNominalRisk += (m.Gold ? GoldPairRiskPercent : FxPairRiskPercent) / 2.0;
             }
             if (currentNominalRisk + pairRisk > MaxNominalOpenRiskPercent + 1e-9)
             {
@@ -1069,7 +1017,7 @@ namespace cAlgo.Robots
 
             if (units < s.VolumeInUnitsMin)
             {
-                Print("HEDGE-SMART RISK SKIP {0}: calculated volume={1} < broker min={2}. No forced FX/GOLD/CRYPTO risk.",
+                Print("HEDGE-SMART RISK SKIP {0}: calculated volume={1} < broker min={2}. No forced gold/FX risk.",
                     s.Name, units, s.VolumeInUnitsMin);
                 return;
             }
@@ -1106,9 +1054,173 @@ namespace cAlgo.Robots
             _cyclesToday++;
             _wasInCycle = true;
             _lastLaunchBySymbol[s.Name] = Server.Time;
-            Print("HEDGE-FAST V7.2 CRYPTO OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} mode={10}",
+            _pairExperiments[s.Name] = new PairExperiment
+            {
+                SymbolName = s.Name,
+                BuyId = buy.Position.Id,
+                SellId = sell.Position.Id,
+                LegRiskCash = actualRisk,
+                RealizedNet = 0,
+                MfeR = 0,
+                MaeR = 0,
+                OpenTime = Server.Time
+            };
+            Print("MATH EDGE OPEN {0} cycle={1}/{2} BUY#{3}+SELL#{4} units={5} SL={6:F2}p TP={7:F2}p RR=2:1 normalizedSpread={8:F3} setup={9:F2} breakout={10}",
                 s.Name, _cyclesToday, MaxCyclesPerDay, buy.Position.Id, sell.Position.Id,
                 units, c.StopPips, tpPips, liveSpreadToStop, c.SetupQuality, c.BreakoutSide);
+        }
+
+        private bool IsCorrelatedFxBlocked(string symbolName)
+        {
+            bool isEur = symbolName.IndexOf("EURUSD", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isGbp = symbolName.IndexOf("GBPUSD", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!isEur && !isGbp) return false;
+
+            string other = isEur ? "GBPUSD" : "EURUSD";
+            return BotPositions().Any(p =>
+                p.SymbolName.IndexOf(other, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private void UpdatePairExperiments()
+        {
+            foreach (var kv in _pairExperiments.ToArray())
+            {
+                PairExperiment x = kv.Value;
+                double openNet = Positions
+                    .Where(p => p.Id == x.BuyId || p.Id == x.SellId)
+                    .Sum(p => p.NetProfit);
+                double pairNet = x.RealizedNet + openNet;
+                double r = x.LegRiskCash > 0 ? pairNet / x.LegRiskCash : 0;
+                x.MfeR = Math.Max(x.MfeR, r);
+                x.MaeR = Math.Min(x.MaeR, r);
+
+                bool buyOpen = Positions.Any(p => p.Id == x.BuyId);
+                bool sellOpen = Positions.Any(p => p.Id == x.SellId);
+                if (!buyOpen && !sellOpen)
+                    FinalizePairExperiment(x);
+            }
+        }
+
+        private void RecordPairLegClose(Position closed)
+        {
+            PairExperiment x;
+            if (!_pairExperiments.TryGetValue(closed.SymbolName, out x)) return;
+            if (closed.Id != x.BuyId && closed.Id != x.SellId) return;
+            x.RealizedNet += closed.NetProfit;
+        }
+
+        private void FinalizePairExperiment(PairExperiment x)
+        {
+            if (!_pairExperiments.ContainsKey(x.SymbolName)) return;
+            double finalR = x.LegRiskCash > 0 ? x.RealizedNet / x.LegRiskCash : 0;
+            _completedPairR.Add(finalR);
+            _pairExperiments.Remove(x.SymbolName);
+
+            int n = _completedPairR.Count;
+            double expectancy = _completedPairR.Average();
+            int wins = _completedPairR.Count(v => v > 0);
+            int losses = _completedPairR.Count(v => v < 0);
+            double grossWin = _completedPairR.Where(v => v > 0).Sum();
+            double grossLoss = -_completedPairR.Where(v => v < 0).Sum();
+            double pf = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? 999.0 : 0.0);
+
+            Print("MATH EDGE PAIR RESULT {0}: R={1:F2}, MFE={2:F2}R, MAE={3:F2}R | SAMPLE {4}/100 expectancy={5:F3}R W/L={6}/{7} PF={8:F2}",
+                x.SymbolName, finalR, x.MfeR, x.MaeR, n, expectancy, wins, losses, pf);
+
+            if (n == 100)
+                Print("MATH EDGE 100-PAIR CHECKPOINT: expectancy={0:F3}R, PF={1:F2}, wins={2}, losses={3}. Freeze settings and validate on a NEW sample before any live use.",
+                    expectancy, pf, wins, losses);
+        }
+
+        private double KaufmanEfficiencyRatio(Bars b, int period, int shift)
+        {
+            if (b.Count < period + shift + 2) return 0;
+            double change = Math.Abs(b.ClosePrices.Last(shift) - b.ClosePrices.Last(shift + period));
+            double noise = 0;
+            for (int i = shift; i < shift + period; i++)
+                noise += Math.Abs(b.ClosePrices.Last(i) - b.ClosePrices.Last(i + 1));
+            return noise > 0 ? change / noise : 0;
+        }
+
+        private double CalculateAdx(Bars b, int period, int shift)
+        {
+            if (b.Count < period * 2 + shift + 5) return 0;
+
+            double trSum = 0, plusSum = 0, minusSum = 0;
+            for (int i = shift; i < shift + period; i++)
+            {
+                double high = b.HighPrices.Last(i);
+                double low = b.LowPrices.Last(i);
+                double prevHigh = b.HighPrices.Last(i + 1);
+                double prevLow = b.LowPrices.Last(i + 1);
+                double prevClose = b.ClosePrices.Last(i + 1);
+
+                double tr = Math.Max(high - low, Math.Max(Math.Abs(high - prevClose), Math.Abs(low - prevClose)));
+                double upMove = high - prevHigh;
+                double downMove = prevLow - low;
+                double plusDm = upMove > downMove && upMove > 0 ? upMove : 0;
+                double minusDm = downMove > upMove && downMove > 0 ? downMove : 0;
+
+                trSum += tr;
+                plusSum += plusDm;
+                minusSum += minusDm;
+            }
+
+            if (trSum <= 0) return 0;
+            double plusDi = 100.0 * plusSum / trSum;
+            double minusDi = 100.0 * minusSum / trSum;
+            double denom = plusDi + minusDi;
+            return denom > 0 ? 100.0 * Math.Abs(plusDi - minusDi) / denom : 0;
+        }
+
+        private double AtrPercentile(Bars b, int period, int lookback)
+        {
+            double current = AverageTrueRangeWindow(b, 1, period);
+            if (current <= 0) return 0;
+            int below = 0, count = 0;
+            for (int shift = 2; shift < lookback + 2; shift++)
+            {
+                double v = AverageTrueRangeWindow(b, shift, period);
+                if (v <= 0) continue;
+                if (v <= current) below++;
+                count++;
+            }
+            return count > 0 ? 100.0 * below / count : 0;
+        }
+
+        private double BollingerExpansionRatio(Bars b, int period)
+        {
+            double current = BollingerWidth(b, period, 1);
+            if (current <= 0) return 0;
+            double avg = 0;
+            int count = 0;
+            for (int shift = 2; shift < 12; shift++)
+            {
+                double w = BollingerWidth(b, period, shift);
+                if (w <= 0) continue;
+                avg += w;
+                count++;
+            }
+            return count > 0 && avg > 0 ? current / (avg / count) : 1.0;
+        }
+
+        private double BollingerWidth(Bars b, int period, int shift)
+        {
+            if (b.Count < period + shift + 2) return 0;
+            double mean = 0;
+            for (int i = shift; i < shift + period; i++)
+                mean += b.ClosePrices.Last(i);
+            mean /= period;
+            if (mean == 0) return 0;
+
+            double variance = 0;
+            for (int i = shift; i < shift + period; i++)
+            {
+                double d = b.ClosePrices.Last(i) - mean;
+                variance += d * d;
+            }
+            variance /= period;
+            return 4.0 * Math.Sqrt(variance) / Math.Abs(mean);
         }
 
         private double AverageTrueRangeWindow(Bars b, int startLastIndex, int count)
@@ -1160,7 +1272,7 @@ namespace cAlgo.Robots
         {
             Positions.Closed -= OnPositionClosed;
             Timer.Stop();
-            Print("HEDGE-FAST V7.2 عملات رقمية stopped.");
+            Print("HEDGE MATH EDGE V6.2 stopped.");
         }
     }
 }
