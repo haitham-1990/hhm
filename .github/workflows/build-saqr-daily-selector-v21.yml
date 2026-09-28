@@ -1,0 +1,33 @@
+name: Build SAQR Daily Selector V2.1 25 Factors
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'SaqrDailySelectorV21/**'
+      - '.github/workflows/build-saqr-daily-selector-v21.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: SaqrDailySelectorV21
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build SAQR Daily Selector V2.1
+        run: dotnet build SaqrDailySelectorV21.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify algorithm file
+        run: |
+          find . -type f -name '*.algo' -print
+          find . -type f -name '*.algo' -print -quit | grep -q .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SAQR-Daily-Selector-V2-1-25-Factors
+          path: SaqrDailySelectorV21/**/*.algo
+          if-no-files-found: error
