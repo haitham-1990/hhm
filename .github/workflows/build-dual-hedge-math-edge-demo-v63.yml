@@ -1,0 +1,33 @@
+name: Build Dual Hedge Math Edge V6.3 Demo Trader
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'DualHedgeMathEdgeDemoV63/**'
+      - '.github/workflows/build-dual-hedge-math-edge-demo-v63.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: DualHedgeMathEdgeDemoV63
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build V6.3 demo trader
+        run: dotnet build DualHedgeMathEdgeDemoV63.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify algorithm file
+        run: |
+          find . -type f -name '*.algo' -print
+          find . -type f -name '*.algo' -print -quit | grep -q .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dual-Hedge-Math-Edge-V6-3-Demo-Trader
+          path: DualHedgeMathEdgeDemoV63/**/*.algo
+          if-no-files-found: error
