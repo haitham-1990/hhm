@@ -1,0 +1,33 @@
+name: Build Dual Hedge Math Edge V6.4 Quick
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'DualHedgeMathEdgeV64Quick/**'
+      - '.github/workflows/build-dual-hedge-math-edge-v64-quick.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: DualHedgeMathEdgeV64Quick
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build V6.4 Quick
+        run: dotnet build DualHedgeMathEdgeV64Quick.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify algorithm file
+        run: |
+          find . -type f -name '*.algo' -print
+          find . -type f -name '*.algo' -print -quit | grep -q .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dual-Hedge-Math-Edge-V6-4-Quick
+          path: DualHedgeMathEdgeV64Quick/**/*.algo
+          if-no-files-found: error
