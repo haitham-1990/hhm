@@ -1,3 +1,5 @@
+config_version=5
+
 [application]
 config/name="Khutwa Football Knowledge Match"
 run/main_scene="res://main.tscn"
@@ -11,6 +13,7 @@ window/stretch/mode="canvas_items"
 window/handheld/orientation=1
 
 [rendering]
+textures/vram_compression/import_etc2_astc=true
 renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="mobile"
 textures/default_filters/use_nearest_mipmap_filter=false
