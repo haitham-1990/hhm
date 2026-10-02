@@ -1,0 +1,51 @@
+name: Build Khutwa Football 3D APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'KhutwaFootball3D/**'
+      - '.github/workflows/build-khutwa-football-3d.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: KhutwaFootball3D
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch local 3D runtime assets
+        run: |
+          set -e
+          mkdir -p app/src/main/assets
+          curl -L --fail --retry 3 -o app/src/main/assets/three.min.js https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js
+          curl -L --fail --retry 3 -o app/src/main/assets/GLTFLoader.js https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/js/loaders/GLTFLoader.js
+          curl -L --fail --retry 3 -o app/src/main/assets/SkeletonUtils.js https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/js/utils/SkeletonUtils.js
+          curl -L --fail --retry 3 -o app/src/main/assets/Soldier.glb https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/models/gltf/Soldier.glb
+          test -s app/src/main/assets/Soldier.glb
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build 3D prototype APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Verify APK
+        run: test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Khutwa-Football-3D-Prototype
+          path: KhutwaFootball3D/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
