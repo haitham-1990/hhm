@@ -131,7 +131,7 @@ new THREE.GLTFLoader().load('player.glb',function(gltf){
  for(let t=0;t<2;t++)for(let i=0;i<6;i++){
    const rig=THREE.SkeletonUtils.clone(template);rig.scale.multiplyScalar(fitScale);rig.position.y=-fitMinY*fitScale;applyKit(rig,t,i===0);
    const root=new THREE.Group();root.add(rig);root.add(labelSprite(t,i));root.position.set(home[t][i][0],0,home[t][i][1]);root.rotation.y=t===0?Math.PI/2:-Math.PI/2;scene.add(root);
-   const mixer=new THREE.AnimationMixer(rig);mixers.push(mixer);rigData.set(root,{mixer:mixer,clips:clips,all:gltf.animations,active:null,rig:rig});players[t][i]=root;play(root,'Idle',true)
+   const mixer=new THREE.AnimationMixer(rig);mixers.push(mixer);rigData.set(root,{mixer:mixer,clips:clips,all:gltf.animations,active:null,rig:rig,pose:null,bones:{upperR:rig.getObjectByName('UpperLeg.R'),lowerR:rig.getObjectByName('LowerLeg.R'),footR:rig.getObjectByName('Foot.R'),upperL:rig.getObjectByName('UpperLeg.L'),torso:rig.getObjectByName('Torso')}});players[t][i]=root;play(root,'Idle',true)
  }
  ready=true;showKickoff()
 },undefined,function(err){Q.textContent='تعذر تحميل لاعب كرة القدم';SUB.textContent='أعد تشغيل التطبيق';console.log(err)});
@@ -170,19 +170,47 @@ function nextQ(){qi=(qi+1)%qs.length}
 function answer(i){audioStart();if(busy||pos<0)return;const good=i===qs[qi].ok;nextQ();if(stage>=3)shoot(good);else if(good)passBall();else steal()}
 function setBall(){const p=players[pos][holder].position;ballRoot.position.set(p.x,.36,p.z)}
 function face(p,x,z){p.rotation.y=Math.atan2(x,z)}
+function footballKick(p,phase,power){
+ const d=rigData.get(p);if(!d)return;d.pose={type:'kick',p:phase,power:power||1}
+}
+function footballTackle(p,phase){
+ const d=rigData.get(p);if(!d)return;d.pose={type:'tackle',p:phase}
+}
+function clearPose(p){const d=rigData.get(p);if(d)d.pose=null}
+function applyFootballPose(p,d){
+ if(!d||!d.pose)return;const k=d.pose.p,b=d.bones||{};
+ if(d.pose.type==='kick'){
+   const pow=d.pose.power||1;
+   let a=k<.32?(-.72*(k/.32)):(-.72+2.15*((k-.32)/.68));
+   a*=pow;
+   if(b.upperR)b.upperR.rotateX(a);
+   if(b.lowerR)b.lowerR.rotateX(Math.max(0,a)*-.34);
+   if(b.footR)b.footR.rotateX(Math.max(0,a)*.24);
+   if(b.upperL)b.upperL.rotateX(-.16*Math.sin(Math.PI*k));
+   if(b.torso)b.torso.rotateZ(-.12*Math.sin(Math.PI*k));
+ }
+ if(d.pose.type==='tackle'){
+   const s=Math.sin(Math.PI*k);
+   if(b.upperR)b.upperR.rotateX(-1.0*s);
+   if(b.lowerR)b.lowerR.rotateX(.35*s);
+   if(b.upperL)b.upperL.rotateX(.42*s);
+   if(b.torso)b.torso.rotateX(-.28*s);
+   p.rotation.z=.22*s*(p.rotation.y>0?1:-1);
+ }
+}
 function tween(ms,step,done){const s=performance.now();function f(n){let t=Math.min(1,(n-s)/ms),e=.5-.5*Math.cos(Math.PI*t);step(e,t);if(t<1)requestAnimationFrame(f);else if(done)done()}requestAnimationFrame(f)}
 function follow(x,z,close){const targetX=THREE.MathUtils.clamp(x,-19,19);const targetZ=z*.16;const px=targetX*.24,py=close?10.8:12.8,pz=close?21.5:25.5;camera.position.lerp(new THREE.Vector3(px,py,pz+targetZ*.08),.08);camLook.lerp(new THREE.Vector3(targetX*.58,.5,targetZ),.13)}
 function passBall(){
  busy=true;hideQ(true);const seq=route[pos],from=holder,to=seq[Math.min(stage+1,seq.length-1)],P=players[pos][from],R=players[pos][to],atk=pos===0?1:-1;
  const sx=P.position.x,sz=P.position.z,tx=R.position.x+atk*3.2,tz=R.position.z+(stage%2===0?1.3:-1.0);
- face(P,tx-sx,tz-sz);face(R,atk,0);play(P,'Punch',false);play(R,'Run',true);kickSound();eventText('إجابة صحيحة — تمريرة ناجحة!',950);
- tween(920,function(e){R.position.x=THREE.MathUtils.lerp(R.position.x,tx,.055);R.position.z=THREE.MathUtils.lerp(R.position.z,tz,.055);ballRoot.position.x=THREE.MathUtils.lerp(sx,tx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,tz,e);ballRoot.position.y=.36+Math.sin(Math.PI*e)*.48;ballRoot.rotation.x+=.19;follow(ballRoot.position.x,ballRoot.position.z,false)},function(){holder=to;stage++;play(P,'Idle',true);play(R,'Idle',true);setBall();BAR.style.width=(stage/4*100)+'%';busy=false;hideQ(false);showAnswers()})
+ face(P,tx-sx,tz-sz);face(R,atk,0);clearPose(P);play(P,'Idle',true);play(R,'Run',true);kickSound();eventText('إجابة صحيحة — تمريرة ناجحة!',950);
+ tween(920,function(e){footballKick(P,e,.88);R.position.x=THREE.MathUtils.lerp(R.position.x,tx,.055);R.position.z=THREE.MathUtils.lerp(R.position.z,tz,.055);ballRoot.position.x=THREE.MathUtils.lerp(sx,tx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,tz,e);ballRoot.position.y=.36+Math.sin(Math.PI*e)*.48;ballRoot.rotation.x+=.19;follow(ballRoot.position.x,ballRoot.position.z,false)},function(){holder=to;stage++;clearPose(P);play(P,'Idle',true);play(R,'Idle',true);setBall();BAR.style.width=(stage/4*100)+'%';busy=false;hideQ(false);showAnswers()})
 }
 function closest(other,x,z){let bi=1,bd=999;for(let i=1;i<6;i++){const p=players[other][i].position,d=(p.x-x)*(p.x-x)+(p.z-z)*(p.z-z);if(d<bd){bd=d;bi=i}}return bi}
 function steal(){
  busy=true;hideQ(true);const other=1-pos,P=players[pos][holder],idx=closest(other,P.position.x,P.position.z),D=players[other][idx];const sx=P.position.x,sz=P.position.z,tx=(P.position.x+D.position.x)*.5,tz=(P.position.z+D.position.z)*.5;
  play(D,'Run',true);face(D,tx-D.position.x,tz-D.position.z);eventText('خطأ! الخصم يقطع الكرة',1100);
- tween(720,function(e){D.position.x=THREE.MathUtils.lerp(D.position.x,tx,.075);D.position.z=THREE.MathUtils.lerp(D.position.z,tz,.075);ballRoot.position.x=THREE.MathUtils.lerp(sx,tx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,tz,e);ballRoot.position.y=.35+Math.sin(Math.PI*e)*.14;follow(ballRoot.position.x,ballRoot.position.z,true)},function(){play(D,'Punch',false);kickSound();setTimeout(function(){pos=other;holder=idx;stage=0;play(D,'Idle',true);setBall();BAR.style.width='0%';busy=false;hideQ(false);showAnswers()},220)})
+ tween(720,function(e){footballTackle(D,e);D.position.x=THREE.MathUtils.lerp(D.position.x,tx,.075);D.position.z=THREE.MathUtils.lerp(D.position.z,tz,.075);ballRoot.position.x=THREE.MathUtils.lerp(sx,tx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,tz,e);ballRoot.position.y=.35+Math.sin(Math.PI*e)*.14;follow(ballRoot.position.x,ballRoot.position.z,true)},function(){clearPose(D);D.rotation.z=0;play(D,'Idle',true);kickSound();setTimeout(function(){pos=other;holder=idx;stage=0;play(D,'Idle',true);setBall();BAR.style.width='0%';busy=false;hideQ(false);showAnswers()},220)})
 }
 function goalieDive(team,zTarget){
  const G=players[team][0];play(G,'Jump',false);const baseX=home[team][0][0],baseZ=home[team][0][1],dir=zTarget>=0?1:-1;
@@ -190,8 +218,8 @@ function goalieDive(team,zTarget){
 }
 function shoot(good){
  busy=true;hideQ(true);const P=players[pos][holder],def=1-pos,G=players[def][0],gx=pos===0?31.6:-31.6,gz=(Math.random()-.5)*6.2,sx=P.position.x,sz=P.position.z;
- face(P,gx-sx,gz-sz);play(P,'Punch',false);kickSound();goalieDive(def,gz);eventText(good?'تسديــــدة قوية!':'تسديدة تحت الضغط...',800);
- tween(820,function(e){ballRoot.position.x=THREE.MathUtils.lerp(sx,gx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,gz,e);ballRoot.position.y=.38+Math.sin(Math.PI*e)*2.05;ballRoot.rotation.x+=.33;follow(ballRoot.position.x,ballRoot.position.z,true)},function(){
+ face(P,gx-sx,gz-sz);play(P,'Idle',true);kickSound();goalieDive(def,gz);eventText(good?'تسديــــدة قوية!':'تسديدة تحت الضغط...',800);
+ tween(820,function(e){footballKick(P,e,1.18);ballRoot.position.x=THREE.MathUtils.lerp(sx,gx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,gz,e);ballRoot.position.y=.38+Math.sin(Math.PI*e)*2.05;ballRoot.rotation.x+=.33;follow(ballRoot.position.x,ballRoot.position.z,true)},function(){
    play(P,'Idle',true);
    if(good){if(pos===0)bs++;else rs++;SCORE.textContent=bs+' - '+rs;GOAL.classList.add('show');roar();players[pos].forEach(function(pp,i){if(i>0)play(pp,'Jump',false)});setTimeout(function(){GOAL.classList.remove('show')},1600);eventText('⚽ هــــدف! إجابة صحيحة',1800)}
    else eventText('الحارس يتصدى! الكرة للفريق الآخر',1500);
@@ -203,7 +231,7 @@ function resetKickoff(){for(let t=0;t<2;t++)for(let i=0;i<6;i++){const p=players
 let last=performance.now();
 function animate(now){
  requestAnimationFrame(animate);const dt=Math.min(.05,(now-last)/1000);last=now;mixers.forEach(function(m){m.update(dt)});
- const t=now*.001;scene.children.forEach(function(o){if(o.userData&&o.userData.phase!==undefined)o.position.y+=Math.sin(t*2.4+o.userData.phase)*.0007});
+ players.forEach(function(team){team.forEach(function(p){const d=rigData.get(p);if(d)applyFootballPose(p,d)})});const t=now*.001;scene.children.forEach(function(o){if(o.userData&&o.userData.phase!==undefined)o.position.y+=Math.sin(t*2.4+o.userData.phase)*.0007});
  if(!busy&&pos>=0){const p=players[pos][holder].position;follow(p.x,p.z,false)}
  camera.lookAt(camLook);
  const sec=Math.max(0,480-Math.floor((now-matchStart)/1000));CLOCK.textContent=String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0');
