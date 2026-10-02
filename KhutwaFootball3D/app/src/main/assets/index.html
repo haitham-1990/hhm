@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>خطوة - مباراة المعرفة 3D</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020710;font-family:Arial,"Noto Sans Arabic",sans-serif;color:#fff;touch-action:none}
+#game{position:fixed;inset:0}
+canvas{display:block}
+#topbar{position:fixed;top:10px;left:18px;right:18px;height:58px;display:grid;grid-template-columns:1fr 190px 1fr;gap:10px;z-index:10;direction:ltr}
+.team,.score{backdrop-filter:blur(12px);background:rgba(5,14,26,.78);border:1px solid rgba(255,255,255,.16);box-shadow:0 8px 30px rgba(0,0,0,.35)}
+.team{border-radius:16px;display:flex;align-items:center;padding:0 20px;font-size:20px;font-weight:800;direction:rtl}
+#blueBox{background:linear-gradient(90deg,rgba(11,91,190,.9),rgba(4,24,48,.82));justify-content:flex-start}
+#redBox{background:linear-gradient(270deg,rgba(188,38,38,.9),rgba(49,10,18,.82));justify-content:flex-start}
+.score{border-radius:16px;text-align:center;padding-top:5px}
+#scoreText{font-size:31px;font-weight:900;line-height:30px}
+#time{font-size:14px;opacity:.78;margin-top:5px}
+#question{position:fixed;z-index:12;top:82px;left:50%;transform:translateX(-50%);width:min(690px,62vw);background:rgba(5,18,33,.83);border:1px solid rgba(122,202,255,.28);border-radius:20px;box-shadow:0 14px 40px rgba(0,0,0,.34);padding:13px 16px 15px;text-align:center;transition:.28s}
+#question.hide{opacity:0;transform:translate(-50%,-20px);pointer-events:none}
+#qtext{font-size:21px;font-weight:900;margin-bottom:7px}
+#hint{font-size:12px;color:#a9d7ef;margin-bottom:9px}
+#answers{display:grid;grid-template-columns:1fr 1fr;gap:8px;direction:rtl}
+.btn{border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:13px;padding:11px 9px;background:linear-gradient(#183c5d,#102941);font-weight:800;font-size:17px;min-height:42px}
+.btn:active{transform:scale(.985)}
+.buzzer{font-size:18px;padding:15px}
+.blue{background:linear-gradient(#1b7ce1,#0a55aa)}
+.red{background:linear-gradient(#e04444,#9e2020)}
+#status{position:fixed;z-index:13;left:50%;bottom:33px;transform:translateX(-50%);min-width:300px;text-align:center;background:rgba(3,12,22,.77);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:10px 18px;font-weight:800;font-size:16px;box-shadow:0 8px 28px rgba(0,0,0,.35);opacity:0;transition:.25s}
+#status.show{opacity:1}
+#progress{position:fixed;z-index:10;bottom:10px;left:20%;right:20%;height:8px;border-radius:20px;background:rgba(255,255,255,.15);overflow:hidden}
+#bar{height:100%;width:0;background:linear-gradient(90deg,#33b5ff,#83e1ff);transition:.5s}
+#badge{position:fixed;z-index:9;right:20px;bottom:25px;background:rgba(3,12,22,.66);border:1px solid rgba(255,255,255,.13);border-radius:12px;padding:7px 11px;font-size:11px;color:#b7d0e2}
+.flash{animation:flash .35s}
+@keyframes flash{50%{filter:brightness(1.8)}}
+@media(max-width:900px){#topbar{grid-template-columns:1fr 130px 1fr}.team{font-size:14px;padding:0 12px}#scoreText{font-size:24px}#question{width:70vw;top:76px;padding:9px 12px}#qtext{font-size:16px}.btn{font-size:14px;padding:8px}}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="topbar">
+  <div class="team" id="blueBox">الفريق الأزرق</div>
+  <div class="score"><div id="scoreText">0 - 0</div><div id="time">08:00</div></div>
+  <div class="team" id="redBox">الفريق الأحمر</div>
+</div>
+<div id="question">
+  <div id="qtext">من يفوز بالكرة من المنتصف؟</div>
+  <div id="hint">السؤال هو التحكم الوحيد بالمباراة</div>
+  <div id="answers"></div>
+</div>
+<div id="status"></div>
+<div id="progress"><div id="bar"></div></div>
+<div id="badge">نموذج لعب 3D أولي — خطوة</div>
+
+<script src="three.min.js"></script>
+<script src="GLTFLoader.js"></script>
+<script src="SkeletonUtils.js"></script>
+<script>
+const GAME = document.getElementById('game');
+const QBOX = document.getElementById('question');
+const QTEXT = document.getElementById('qtext');
+const HINT = document.getElementById('hint');
+const ANSWERS = document.getElementById('answers');
+const STATUS = document.getElementById('status');
+const BAR = document.getElementById('bar');
+const SCORE = document.getElementById('scoreText');
+const TIME = document.getElementById('time');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07101c);
+scene.fog = new THREE.Fog(0x07101c, 44, 95);
+
+const renderer = new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+GAME.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.1,180);
+camera.position.set(0,25,32);
+let camTarget = new THREE.Vector3(0,0,0);
+camera.lookAt(camTarget);
+
+scene.add(new THREE.HemisphereLight(0xb9ddff,0x1a2a13,1.1));
+const key = new THREE.DirectionalLight(0xffffff,1.7);
+key.position.set(-20,34,18); key.castShadow=true; key.shadow.mapSize.set(2048,2048);
+key.shadow.camera.left=-38;key.shadow.camera.right=38;key.shadow.camera.top=30;key.shadow.camera.bottom=-30;
+scene.add(key);
+for(const x of [-27,27]) for(const z of [-18,18]){
+  const s=new THREE.SpotLight(0xe8f6ff,2.0,90,Math.PI/5,.45,1.2);
+  s.position.set(x,28,z);s.target.position.set(0,0,0);scene.add(s,s.target);
+}
+
+const field = new THREE.Mesh(
+ new THREE.PlaneGeometry(62,39),
+ new THREE.MeshStandardMaterial({color:0x18723d,roughness:.88,metalness:0})
+);
+field.rotation.x=-Math.PI/2;field.receiveShadow=true;scene.add(field);
+for(let i=0;i<10;i++){
+ const stripe=new THREE.Mesh(new THREE.PlaneGeometry(6.2,39),new THREE.MeshBasicMaterial({color:i%2?0x1b7c42:0x176e3a,transparent:true,opacity:.42}));
+ stripe.rotation.x=-Math.PI/2;stripe.position.set(-27.9+i*6.2,.006,0);scene.add(stripe);
+}
+const lineMat=new THREE.LineBasicMaterial({color:0xf3f7f4});
+function line(points){const g=new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(p[0],.035,p[1])));const l=new THREE.Line(g,lineMat);scene.add(l);return l}
+line([[-31,-19.5],[31,-19.5],[31,19.5],[-31,19.5],[-31,-19.5]]);
+line([[0,-19.5],[0,19.5]]);
+function circleLine(r,cx=0,cz=0){const pts=[];for(let i=0;i<=64;i++){let a=i/64*Math.PI*2;pts.push([cx+Math.cos(a)*r,cz+Math.sin(a)*r])}line(pts)}
+circleLine(5);
+line([[-31,-10],[-22,-10],[-22,10],[-31,10]]);
+line([[31,-10],[22,-10],[22,10],[31,10]]);
+line([[-31,-4.5],[-27,-4.5],[-27,4.5],[-31,4.5]]);
+line([[31,-4.5],[27,-4.5],[27,4.5],[31,4.5]]);
+
+function goal(x,side){
+ const mat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.5});
+ const post=(px,pz,h,w,d)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(px,h/2,pz);m.castShadow=true;scene.add(m)};
+ post(x,-4.6,2.6,.13,.13);post(x,4.6,2.6,.13,.13);
+ const bar=new THREE.Mesh(new THREE.BoxGeometry(.13,.13,9.2),mat);bar.position.set(x,2.57,0);scene.add(bar);
+ const back=side<0?x-.95:x+.95;
+ const netMat=new THREE.MeshBasicMaterial({color:0xbfe5ff,wireframe:true,transparent:true,opacity:.28});
+ const net=new THREE.Mesh(new THREE.BoxGeometry(.9,2.45,9.1),netMat);net.position.set((x+back)/2,1.25,0);scene.add(net);
+}
+goal(-31,-1);goal(31,1);
+
+const standMat=new THREE.MeshStandardMaterial({color:0x111b28,roughness:.9});
+for(const z of [-23,23]){
+ const st=new THREE.Mesh(new THREE.BoxGeometry(70,7,7),standMat);st.position.set(0,3.5,z);scene.add(st);
+ for(let row=0;row<5;row++)for(let i=0;i<48;i++){
+   const col=[0x2f74c8,0xd43a42,0xd9d9d2,0x6c7d91][(i+row*3)%4];
+   const fan=new THREE.Mesh(new THREE.SphereGeometry(.13,5,4),new THREE.MeshBasicMaterial({color:col}));
+   fan.position.set(-31+i*1.32,1.3+row*.62,z+(z<0?2.4-row*.36:-2.4+row*.36));scene.add(fan);
+ }
+}
+for(const x of [-35,35]){
+ const st=new THREE.Mesh(new THREE.BoxGeometry(7,7,42),standMat);st.position.set(x,3.5,0);scene.add(st);
+}
+const boardMat=new THREE.MeshBasicMaterial({color:0x0b4d8f});
+for(let i=-4;i<=4;i++){
+ const b=new THREE.Mesh(new THREE.BoxGeometry(5.5,1.15,.18),boardMat);b.position.set(i*6,0.62,-19.8);scene.add(b);
+ const b2=b.clone();b2.position.z=19.8;scene.add(b2);
+}
+
+const ballGroup=new THREE.Group();
+const ball=new THREE.Mesh(new THREE.SphereGeometry(.36,24,16),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.48}));
+ball.castShadow=true;ballGroup.add(ball);
+for(let i=0;i<8;i++){
+ const dot=new THREE.Mesh(new THREE.SphereGeometry(.07,8,6),new THREE.MeshBasicMaterial({color:0x111111}));
+ const a=i/8*Math.PI*2;dot.position.set(Math.cos(a)*.34,Math.sin(a*1.7)*.22,Math.sin(a)*.34);ballGroup.add(dot);
+}
+scene.add(ballGroup);ballGroup.position.set(0,.4,0);
+
+const players=[[],[]], mixers=[], animMap=new Map();
+const blueColor=new THREE.Color(0x1577d3), redColor=new THREE.Color(0xd63838);
+const positions=[
+ [[-27,0],[-17,-9],[-17,9],[-6,0],[4,-8],[4,8]],
+ [[27,0],[17,-9],[17,9],[6,0],[-4,-8],[-4,8]]
+];
+let loaded=false;
+
+function tintModel(root,team){
+ root.traverse(o=>{
+   if(o.isMesh){
+     o.castShadow=true;o.receiveShadow=true;
+     if(o.material){
+       o.material=o.material.clone();
+       if(o.material.color)o.material.color.lerp(team===0?blueColor:redColor,.68);
+       o.material.roughness=.62;
+     }
+   }
+ });
+}
+function actionFor(p,name){
+ const data=animMap.get(p); if(!data)return null;
+ const clip=data.clips.find(c=>c.name.toLowerCase()===name.toLowerCase()) ||
+            data.clips.find(c=>c.name.toLowerCase().includes(name.toLowerCase()));
+ if(!clip)return null;
+ return data.mixer.clipAction(clip);
+}
+function setAnim(p,name){
+ const data=animMap.get(p);if(!data)return;
+ if(data.current===name)return;
+ const next=actionFor(p,name)||actionFor(p,'Idle')||data.mixer.clipAction(data.clips[0]);
+ if(data.action && data.action!==next)data.action.fadeOut(.18);
+ next.reset().fadeIn(.18).play();data.action=next;data.current=name;
+}
+function addNamePlate(p,team,index){
+ const cv=document.createElement('canvas');cv.width=256;cv.height=64;
+ const ctx=cv.getContext('2d');ctx.fillStyle='rgba(3,9,16,.82)';ctx.roundRect(4,4,248,56,18);ctx.fill();
+ ctx.font='bold 28px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#fff';
+ const names=team===0?['سالم','خالد','مازن','أحمد','يوسف','طارق']:['راشد','فيصل','محمد','عبدالله','سعيد','نواف'];
+ ctx.fillText(names[index]+'  '+(index+1),128,33);
+ const tex=new THREE.CanvasTexture(cv);tex.encoding=THREE.sRGBEncoding;
+ const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+ sp.scale.set(3.4,.85,1);sp.position.set(0,2.65,0);p.add(sp);
+}
+new THREE.GLTFLoader().load('Soldier.glb',gltf=>{
+ for(let team=0;team<2;team++)for(let i=0;i<6;i++){
+   const clone=THREE.SkeletonUtils.clone(gltf.scene);
+   clone.scale.setScalar(1.08);
+   clone.position.set(positions[team][i][0],0,positions[team][i][1]);
+   clone.rotation.y=team===0?Math.PI/2:-Math.PI/2;
+   tintModel(clone,team);addNamePlate(clone,team,i);
+   scene.add(clone);players[team][i]=clone;
+   const mixer=new THREE.AnimationMixer(clone);mixers.push(mixer);
+   animMap.set(clone,{mixer,clips:gltf.animations,action:null,current:''});
+   setAnim(clone,'Idle');
+ }
+ loaded=true; showKickoff();
+},undefined,e=>{QTEXT.textContent='تعذر تحميل نموذج اللاعب';HINT.textContent='أعد تشغيل التطبيق';console.error(e)});
+
+const questions=[
+ {q:'كم ناتج 7 × 8 ؟',a:['54','56','63','48'],ok:1},
+ {q:'ما عاصمة سلطنة عُمان؟',a:['صحار','نزوى','مسقط','صلالة'],ok:2},
+ {q:'ما ناتج 45 ÷ 9 ؟',a:['4','5','6','9'],ok:1},
+ {q:'ما الكوكب المعروف بالكوكب الأحمر؟',a:['الزهرة','المريخ','عطارد','المشتري'],ok:1},
+ {q:'كم ضلعًا للمسدس؟',a:['5','6','7','8'],ok:1}
+];
+let qi=0, possession=-1, holder=3, routeStep=0, busy=false, blueScore=0,redScore=0;
+let elapsed=0,last=performance.now(),started=performance.now();
+const route=[[3,4,5,1],[3,4,5,1]];
+
+function status(txt,ms=1000){
+ STATUS.textContent=txt;STATUS.classList.add('show');
+ clearTimeout(status.t);status.t=setTimeout(()=>STATUS.classList.remove('show'),ms);
+}
+function hideQuestion(v){QBOX.classList.toggle('hide',v)}
+function showKickoff(){
+ if(!loaded)return;
+ QTEXT.textContent=questions[qi].q;
+ HINT.textContent='الأسرع يختار فريقه أولًا ثم يجيب';
+ ANSWERS.innerHTML='';
+ const b=document.createElement('button');b.className='btn buzzer blue';b.textContent='🔵 الأزرق يجيب';
+ const r=document.createElement('button');r.className='btn buzzer red';r.textContent='🔴 الأحمر يجيب';
+ b.onclick=()=>chooseTeam(0);r.onclick=()=>chooseTeam(1);ANSWERS.append(b,r);
+}
+function chooseTeam(t){
+ if(busy)return; possession=t;holder=3;routeStep=0;status(t===0?'استحواذ للأزرق':'استحواذ للأحمر',700);showAnswers();
+}
+function showAnswers(){
+ const item=questions[qi];QTEXT.textContent=item.q;
+ HINT.textContent=routeStep>=3?'إجابة صحيحة = تسديدة':'إجابة صحيحة = استمرار الهجمة • خطأ = قطع الكرة';
+ ANSWERS.innerHTML='';
+ item.a.forEach((x,i)=>{
+  const b=document.createElement('button');b.className='btn';b.textContent=x;
+  b.onclick=()=>answer(i);ANSWERS.appendChild(b);
+ });
+}
+function nextQ(){qi=(qi+1)%questions.length}
+function answer(i){
+ if(busy||possession<0)return;
+ const good=i===questions[qi].ok;
+ nextQ();
+ if(routeStep>=3){shot(good);return}
+ if(good)passPlay();else stealPlay();
+}
+function setBallAt(team,index){
+ const p=players[team][index].position;ballGroup.position.set(p.x,.4,p.z);
+}
+function tween(duration,update,done){
+ const st=performance.now();
+ function step(now){let t=Math.min(1,(now-st)/duration);let e=.5-.5*Math.cos(Math.PI*t);update(e,t);if(t<1)requestAnimationFrame(step);else if(done)done()}
+ requestAnimationFrame(step);
+}
+function faceDirection(p,dx,dz){p.rotation.y=Math.atan2(dx,dz)}
+function cameraMove(x,z,scale=1){
+ const cx=THREE.MathUtils.clamp(x,-15,15);camTarget.set(cx*.28,0,z*.08);
+ camera.position.x=THREE.MathUtils.lerp(camera.position.x,cx*.36,.16);
+ camera.position.z=THREE.MathUtils.lerp(camera.position.z,32+z*.05,.08);
+}
+function passPlay(){
+ busy=true;hideQuestion(true);
+ const seq=route[possession];const from=holder;const to=seq[Math.min(routeStep+1,seq.length-1)];
+ const P=players[possession][from],R=players[possession][to];
+ const sx=P.position.x,sz=P.position.z, attack=possession===0?1:-1;
+ const tx=R.position.x+attack*2.8,tz=R.position.z+(routeStep%2===0?1.1:-1.1);
+ setAnim(P,'Run');setAnim(R,'Run');faceDirection(P,tx-sx,tz-sz);faceDirection(R,attack,0);
+ status('تمريرة صحيحة — الهجمة مستمرة!',900);
+ tween(1050,(e,t)=>{
+   R.position.x=THREE.MathUtils.lerp(R.position.x,tx,.045+e*.03);
+   R.position.z=THREE.MathUtils.lerp(R.position.z,tz,.045+e*.03);
+   ballGroup.position.x=THREE.MathUtils.lerp(sx,tx,e);
+   ballGroup.position.z=THREE.MathUtils.lerp(sz,tz,e);
+   ballGroup.position.y=.38+Math.sin(Math.PI*e)*.65;
+   ballGroup.rotation.x+=.16;ballGroup.rotation.z+=.08;cameraMove(ballGroup.position.x,ballGroup.position.z);
+ },()=>{
+   holder=to;routeStep++;setAnim(P,'Idle');setAnim(R,'Idle');setBallAt(possession,holder);
+   BAR.style.width=(routeStep/4*100)+'%';busy=false;hideQuestion(false);showAnswers();
+ });
+}
+function nearestInterceptor(other,x,z){
+ let best=1,dist=999;
+ for(let i=1;i<6;i++){let p=players[other][i].position,d=(p.x-x)**2+(p.z-z)**2;if(d<dist){dist=d;best=i}}
+ return best;
+}
+function stealPlay(){
+ busy=true;hideQuestion(true);
+ const other=1-possession,P=players[possession][holder],idx=nearestInterceptor(other,P.position.x,P.position.z),D=players[other][idx];
+ const sx=P.position.x,sz=P.position.z,tx=(sx+D.position.x)/2,tz=(sz+D.position.z)/2;
+ setAnim(D,'Run');faceDirection(D,tx-D.position.x,tz-D.position.z);status('قطع الكرة! هجمة مرتدة',1100);
+ tween(800,(e)=>{
+   D.position.x=THREE.MathUtils.lerp(D.position.x,tx,.07+e*.04);
+   D.position.z=THREE.MathUtils.lerp(D.position.z,tz,.07+e*.04);
+   ballGroup.position.x=THREE.MathUtils.lerp(sx,tx,e);ballGroup.position.z=THREE.MathUtils.lerp(sz,tz,e);
+   ballGroup.position.y=.37+Math.sin(Math.PI*e)*.22;cameraMove(ballGroup.position.x,ballGroup.position.z);
+ },()=>{
+   possession=other;holder=idx;routeStep=0;setAnim(D,'Idle');setBallAt(possession,holder);BAR.style.width='0%';
+   busy=false;hideQuestion(false);showAnswers();
+ });
+}
+function shot(good){
+ busy=true;hideQuestion(true);
+ const P=players[possession][holder],goalX=possession===0?30.5:-30.5,goalZ=good?(Math.random()-.5)*5.5:(Math.random()<.5?-7:7);
+ const sx=P.position.x,sz=P.position.z;setAnim(P,'Run');faceDirection(P,goalX-sx,goalZ-sz);
+ status(good?'تسديــــدة!':'تسديدة تحت الضغط...',900);
+ tween(850,(e)=>{
+   ballGroup.position.x=THREE.MathUtils.lerp(sx,goalX,e);
+   ballGroup.position.z=THREE.MathUtils.lerp(sz,goalZ,e);
+   ballGroup.position.y=.38+Math.sin(Math.PI*e)*2.3;
+   ballGroup.rotation.x+=.28;cameraMove(ballGroup.position.x,ballGroup.position.z);
+ },()=>{
+   setAnim(P,'Idle');
+   if(good){if(possession===0)blueScore++;else redScore++;SCORE.textContent=blueScore+' - '+redScore;status('⚽ هــــــــدف!',1800);renderer.domElement.classList.add('flash');setTimeout(()=>renderer.domElement.classList.remove('flash'),400)}
+   else status('خارج المرمى — الكرة للخصم',1300);
+   setTimeout(()=>{possession=-1;holder=3;routeStep=0;BAR.style.width='0%';ballGroup.position.set(0,.4,0);camera.position.set(0,25,32);camTarget.set(0,0,0);busy=false;hideQuestion(false);showKickoff()},good?1900:1400);
+ });
+}
+
+function animate(now){
+ requestAnimationFrame(animate);
+ const dt=Math.min(.05,(now-last)/1000);last=now;
+ mixers.forEach(m=>m.update(dt));
+ camera.lookAt(THREE.Vector3.prototype.lerp.call(new THREE.Vector3(),camTarget,.8));
+ const total=Math.max(0,480-Math.floor((performance.now()-started)/1000));
+ TIME.textContent=String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
+ renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+</script>
+</body>
+</html>
