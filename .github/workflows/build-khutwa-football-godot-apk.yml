@@ -1,0 +1,80 @@
+name: Build Khutwa Football Godot APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'KhutwaFootballGodotPro/**'
+      - '.github/workflows/build-khutwa-football-godot-apk.yml'
+
+env:
+  GODOT_VERSION: "4.6"
+  PROJECT_PATH: "KhutwaFootballGodotPro"
+  EXPORT_NAME: "Khutwa-Football-Godot"
+
+jobs:
+  android-debug:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    container:
+      image: barichello/godot-ci:4.6
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Godot export templates
+        shell: bash
+        run: |
+          set -e
+          mkdir -p ~/.local/share/godot/export_templates
+          mkdir -p ~/.config/godot
+          if [ -d /root/.config/godot ]; then cp -a /root/.config/godot/. ~/.config/godot/; fi
+          if [ -d /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ]; then
+            cp -a /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/
+          fi
+          godot --version
+
+      - name: Fetch CC0 animated player asset
+        shell: bash
+        run: |
+          set -e
+          mkdir -p "${PROJECT_PATH}/assets"
+          curl -L --fail --retry 3             -o "${PROJECT_PATH}/assets/player.glb"             https://raw.githubusercontent.com/kendrekaran/striker-3d/main/assets/player.glb
+          curl -L --fail --retry 3             -o "${PROJECT_PATH}/assets/LICENSE-quaternius.txt"             https://raw.githubusercontent.com/kendrekaran/striker-3d/main/assets/LICENSE-quaternius.txt
+          test -s "${PROJECT_PATH}/assets/player.glb"
+
+      - name: Import and validate Godot project
+        shell: bash
+        run: |
+          set -e
+          cd "${PROJECT_PATH}"
+          godot --headless --editor --quit-after 5 --path . 2>&1 | tee /tmp/godot-import.log
+          if grep -E "SCRIPT ERROR|Parse Error|ERROR: Failed to load script" /tmp/godot-import.log; then
+            exit 1
+          fi
+
+      - name: Build Android debug APK
+        shell: bash
+        run: |
+          set -e
+          mkdir -p build/android
+          EXPORT_DIR="$(readlink -f build/android)"
+          cd "${PROJECT_PATH}"
+          godot --headless --verbose --path . --export-debug "Android Debug" "$EXPORT_DIR/${EXPORT_NAME}.apk"
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          test -s "build/android/${EXPORT_NAME}.apk"
+          ls -lh "build/android/${EXPORT_NAME}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Khutwa-Football-Godot-APK
+          path: build/android/Khutwa-Football-Godot.apk
+          if-no-files-found: error
