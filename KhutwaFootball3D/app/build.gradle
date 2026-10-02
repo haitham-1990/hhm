@@ -8,7 +8,7 @@ android {
         applicationId 'com.khutwa.football3d'
         minSdk 23
         targetSdk 35
-        versionCode 1
-        versionName '0.1'
+        versionCode 3
+        versionName '0.3'
     }
 }
