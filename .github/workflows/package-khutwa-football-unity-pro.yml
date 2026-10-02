@@ -1,0 +1,30 @@
+name: Package Khutwa Football Unity Pro
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'KhutwaFootballUnityPro/**'
+      - '.github/workflows/package-khutwa-football-unity-pro.yml'
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Unity project structure
+        run: |
+          test -f KhutwaFootballUnityPro/ProjectSettings/ProjectVersion.txt
+          test -f KhutwaFootballUnityPro/Packages/manifest.json
+          test -f KhutwaFootballUnityPro/Assets/KhutwaFootball/Scripts/Core/MatchDirector.cs
+          test -f KhutwaFootballUnityPro/Assets/KhutwaFootball/Editor/ProfessionalSceneBuilder.cs
+      - name: Package source
+        run: |
+          zip -r KhutwaFootballUnityPro-source.zip KhutwaFootballUnityPro             -x '*/Library/*' '*/Temp/*' '*/Logs/*' '*/obj/*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Khutwa-Football-Unity-Pro-Source
+          path: KhutwaFootballUnityPro-source.zip
+          if-no-files-found: error
