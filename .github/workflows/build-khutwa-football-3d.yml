@@ -47,6 +47,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Khutwa-Football-3D-Prototype
+          name: Khutwa-Football-3D-V3
           path: KhutwaFootball3D/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
