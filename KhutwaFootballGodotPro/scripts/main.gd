@@ -61,11 +61,11 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if camera:
-		var height := 12.5 if camera_close else 17.5
-		var depth := 20.0 if camera_close else 28.0
+		var height := 8.8 if camera_close else 11.8
+		var depth := 13.5 if camera_close else 18.5
 		var desired := Vector3(camera_focus.x, height, camera_focus.z + depth)
 		camera.global_position = camera.global_position.lerp(desired, 1.0 - exp(-4.0 * delta))
-		var look := Vector3(camera_focus.x, 1.0, camera_focus.z * 0.3)
+		var look := Vector3(camera_focus.x, 1.15, camera_focus.z * 0.72)
 		camera.look_at(look, Vector3.UP)
 
 	if timer_label:
@@ -219,12 +219,12 @@ func _build_players() -> void:
 		packed = load("res://assets/player.glb")
 
 	var formation := [
-		Vector3(-28, 0, 0),
-		Vector3(-18, 0, -8),
-		Vector3(-18, 0, 8),
-		Vector3(-7, 0, 0),
-		Vector3(3, 0, -7),
-		Vector3(3, 0, 7)
+		Vector3(-24, 0, 0),
+		Vector3(-15, 0, -6.2),
+		Vector3(-15, 0, 6.2),
+		Vector3(-5.5, 0, 0),
+		Vector3(4.5, 0, -5.2),
+		Vector3(4.5, 0, 5.2)
 	]
 
 	for team in [BLUE, RED]:
@@ -232,7 +232,7 @@ func _build_players() -> void:
 			var root: Node3D
 			if packed:
 				root = packed.instantiate() as Node3D
-				root.scale = Vector3.ONE
+				root.scale = Vector3(1.45, 1.45, 1.45)
 				_apply_kit(root, team, i == 0)
 			else:
 				root = _fallback_player(team, i == 0)
@@ -251,8 +251,8 @@ func _fallback_player(team: int, goalkeeper: bool) -> Node3D:
 	var root := Node3D.new()
 	var body := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.35
-	capsule.height = 1.35
+	capsule.radius = 0.42
+	capsule.height = 1.55
 	body.mesh = capsule
 	body.position.y = 1.05
 	body.material_override = _mat(GK_COLOR if goalkeeper else (BLUE_COLOR if team == BLUE else RED_COLOR), 0.6)
@@ -262,7 +262,7 @@ func _fallback_player(team: int, goalkeeper: bool) -> Node3D:
 	sphere.radius = 0.27
 	sphere.height = 0.54
 	head.mesh = sphere
-	head.position.y = 2.05
+	head.position.y = 2.25
 	head.material_override = _mat(Color("#c99774"))
 	root.add_child(head)
 	return root
@@ -322,8 +322,8 @@ func _build_ball() -> void:
 
 	camera = Camera3D.new()
 	camera.name = "BroadcastCamera"
-	camera.fov = 42.0
-	camera.position = Vector3(0, 17.5, 28)
+	camera.fov = 36.0
+	camera.position = Vector3(0, 11.8, 18.5)
 	add_child(camera)
 	camera.current = true
 
