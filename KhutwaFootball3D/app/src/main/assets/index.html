@@ -1,370 +1,216 @@
 <!doctype html>
 <html lang="ar" dir="rtl">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>خطوة - مباراة المعرفة 3D</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>خطوة | مباراة المعرفة 3D</title>
 <style>
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020710;font-family:Arial,"Noto Sans Arabic",sans-serif;color:#fff;touch-action:none}
-#game{position:fixed;inset:0}
-canvas{display:block}
-#topbar{position:fixed;top:10px;left:18px;right:18px;height:58px;display:grid;grid-template-columns:1fr 190px 1fr;gap:10px;z-index:10;direction:ltr}
-.team,.score{backdrop-filter:blur(12px);background:rgba(5,14,26,.78);border:1px solid rgba(255,255,255,.16);box-shadow:0 8px 30px rgba(0,0,0,.35)}
-.team{border-radius:16px;display:flex;align-items:center;padding:0 20px;font-size:20px;font-weight:800;direction:rtl}
-#blueBox{background:linear-gradient(90deg,rgba(11,91,190,.9),rgba(4,24,48,.82));justify-content:flex-start}
-#redBox{background:linear-gradient(270deg,rgba(188,38,38,.9),rgba(49,10,18,.82));justify-content:flex-start}
-.score{border-radius:16px;text-align:center;padding-top:5px}
-#scoreText{font-size:31px;font-weight:900;line-height:30px}
-#time{font-size:14px;opacity:.78;margin-top:5px}
-#question{position:fixed;z-index:12;top:76px;left:50%;transform:translateX(-50%);width:min(520px,48vw);background:rgba(4,16,29,.72);backdrop-filter:blur(10px);border:1px solid rgba(122,202,255,.25);border-radius:16px;box-shadow:0 12px 34px rgba(0,0,0,.28);padding:9px 12px 11px;text-align:center;transition:.28s}
-#question.hide{opacity:0;transform:translate(-50%,-20px);pointer-events:none}
-#qtext{font-size:18px;font-weight:900;margin-bottom:5px}
-#hint{font-size:10px;color:#b8d8e9;margin-bottom:7px}
-#answers{display:grid;grid-template-columns:1fr 1fr;gap:8px;direction:rtl}
-.btn{border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:13px;padding:8px 8px;background:linear-gradient(#183c5d,#102941);font-weight:800;font-size:14px;min-height:34px}
-.btn:active{transform:scale(.985)}
-.buzzer{font-size:15px;padding:10px}
-.blue{background:linear-gradient(#1b7ce1,#0a55aa)}
-.red{background:linear-gradient(#e04444,#9e2020)}
-#status{position:fixed;z-index:13;left:50%;bottom:33px;transform:translateX(-50%);min-width:300px;text-align:center;background:rgba(3,12,22,.77);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:10px 18px;font-weight:800;font-size:16px;box-shadow:0 8px 28px rgba(0,0,0,.35);opacity:0;transition:.25s}
-#status.show{opacity:1}
-#progress{position:fixed;z-index:10;bottom:10px;left:20%;right:20%;height:8px;border-radius:20px;background:rgba(255,255,255,.15);overflow:hidden}
-#bar{height:100%;width:0;background:linear-gradient(90deg,#33b5ff,#83e1ff);transition:.5s}
-#badge{position:fixed;z-index:9;right:20px;bottom:25px;background:rgba(3,12,22,.66);border:1px solid rgba(255,255,255,.13);border-radius:12px;padding:7px 11px;font-size:11px;color:#b7d0e2}
-.flash{animation:flash .35s}
-@keyframes flash{50%{filter:brightness(1.8)}}
-@media(max-width:900px){#topbar{grid-template-columns:1fr 130px 1fr}.team{font-size:14px;padding:0 12px}#scoreText{font-size:24px}#question{width:70vw;top:76px;padding:9px 12px}#qtext{font-size:16px}.btn{font-size:14px;padding:8px}}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020810;color:#fff;font-family:Arial,"Noto Sans Arabic",sans-serif;touch-action:none}
+#game,canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+#hud{position:fixed;z-index:20;top:10px;left:18px;right:18px;height:58px;display:grid;grid-template-columns:1fr 180px 1fr;gap:10px;direction:ltr;pointer-events:none}
+.team,.score{background:rgba(5,15,28,.84);border:1px solid rgba(255,255,255,.17);backdrop-filter:blur(12px);box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.team{border-radius:16px;display:flex;align-items:center;padding:0 20px;font-weight:900;font-size:19px;direction:rtl}
+#blue{background:linear-gradient(90deg,rgba(12,91,191,.96),rgba(4,22,42,.88))}
+#red{background:linear-gradient(270deg,rgba(186,42,42,.96),rgba(42,8,15,.88))}
+.score{border-radius:16px;text-align:center;padding:5px 8px}
+#score{font-size:30px;font-weight:900;line-height:31px}#clock{font-size:13px;color:#bed4e3;margin-top:3px}
+#question{position:fixed;z-index:25;top:78px;left:50%;transform:translateX(-50%);width:min(620px,48vw);background:rgba(4,16,29,.88);border:1px solid rgba(113,203,255,.3);border-radius:17px;padding:10px 12px 12px;box-shadow:0 12px 36px rgba(0,0,0,.38);transition:.22s}
+#question.hide{opacity:0;transform:translate(-50%,-16px);pointer-events:none}
+#q{font-size:18px;font-weight:900;text-align:center;margin:1px 0 5px}
+#sub{font-size:11px;text-align:center;color:#b9d8e8;margin-bottom:7px}
+#answers{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;direction:rtl}
+.a{min-height:39px;border:1px solid rgba(255,255,255,.14);border-radius:11px;background:linear-gradient(#173a58,#0d273d);color:#fff;font-size:15px;font-weight:900}
+.a:active{transform:scale(.98)}
+#answers.kickoff{grid-template-columns:1fr 1fr}.buzz{font-size:16px;min-height:44px}.buzz.b{background:linear-gradient(#2388ed,#0e5ab2)}.buzz.r{background:linear-gradient(#ec4e4e,#a51f28)}
+#event{position:fixed;z-index:24;left:50%;bottom:42px;transform:translateX(-50%);background:rgba(3,12,22,.86);border:1px solid rgba(255,255,255,.17);border-radius:15px;padding:10px 20px;min-width:280px;text-align:center;font-weight:900;font-size:17px;opacity:0;transition:.2s}
+#event.show{opacity:1}
+#attack{position:fixed;z-index:22;left:24%;right:24%;bottom:15px;height:8px;border-radius:20px;background:rgba(255,255,255,.16);overflow:hidden}
+#attackBar{width:0;height:100%;background:linear-gradient(90deg,#39bdff,#8ee8ff);transition:.4s}
+#goal{position:fixed;z-index:30;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0;background:radial-gradient(circle,rgba(20,125,230,.15),transparent 50%);transition:.15s}
+#goal.show{opacity:1}
+#goalText{font-size:min(11vw,110px);font-weight:1000;text-shadow:0 8px 30px #000,0 0 25px rgba(66,183,255,.8);transform:scale(.75);transition:.25s}
+#goal.show #goalText{transform:scale(1)}
+#tag{position:fixed;z-index:18;right:18px;bottom:20px;padding:6px 10px;border-radius:10px;background:rgba(3,12,22,.65);border:1px solid rgba(255,255,255,.12);font-size:10px;color:#b7cada;pointer-events:none}
+#startHint{position:fixed;z-index:21;left:18px;bottom:20px;background:rgba(3,12,22,.55);padding:5px 9px;border-radius:9px;font-size:10px;color:#b8d0de}
+@media(max-width:900px){
+#hud{grid-template-columns:1fr 128px 1fr;height:48px}.team{font-size:13px;padding:0 10px}.score{padding-top:2px}#score{font-size:24px}#clock{font-size:11px}
+#question{top:65px;width:57vw;padding:7px 9px 9px}#q{font-size:14px}#sub{font-size:9px;margin-bottom:5px}.a{font-size:12px;min-height:31px}.buzz{font-size:13px;min-height:35px}
+}
 </style>
 </head>
 <body>
 <div id="game"></div>
-<div id="topbar">
-  <div class="team" id="blueBox">الفريق الأزرق</div>
-  <div class="score"><div id="scoreText">0 - 0</div><div id="time">08:00</div></div>
-  <div class="team" id="redBox">الفريق الأحمر</div>
-</div>
-<div id="question">
-  <div id="qtext">من يفوز بالكرة من المنتصف؟</div>
-  <div id="hint">السؤال هو التحكم الوحيد بالمباراة</div>
-  <div id="answers"></div>
-</div>
-<div id="status"></div>
-<div id="progress"><div id="bar"></div></div>
-<div id="badge">نموذج لعب 3D أولي — خطوة</div>
+<div id="hud"><div class="team" id="blue">الفريق الأزرق</div><div class="score"><div id="score">0 - 0</div><div id="clock">08:00</div></div><div class="team" id="red">الفريق الأحمر</div></div>
+<div id="question"><div id="q">استعد لبداية المباراة</div><div id="sub">المعرفة هي يد التحكم</div><div id="answers"></div></div>
+<div id="event"></div><div id="attack"><div id="attackBar"></div></div>
+<div id="goal"><div id="goalText">هــــدف!</div></div>
+<div id="tag">مباراة المعرفة 3D • خطوة</div><div id="startHint">اضغط أي إجابة لتفعيل صوت الجمهور</div>
 
 <script src="three.min.js"></script>
 <script src="GLTFLoader.js"></script>
 <script src="SkeletonUtils.js"></script>
 <script>
-const GAME = document.getElementById('game');
-const QBOX = document.getElementById('question');
-const QTEXT = document.getElementById('qtext');
-const HINT = document.getElementById('hint');
-const ANSWERS = document.getElementById('answers');
-const STATUS = document.getElementById('status');
-const BAR = document.getElementById('bar');
-const SCORE = document.getElementById('scoreText');
-const TIME = document.getElementById('time');
+(function(){
+const GAME=document.getElementById('game'),QBOX=document.getElementById('question'),Q=document.getElementById('q'),SUB=document.getElementById('sub'),ANS=document.getElementById('answers');
+const EVENT=document.getElementById('event'),BAR=document.getElementById('attackBar'),SCORE=document.getElementById('score'),CLOCK=document.getElementById('clock'),GOAL=document.getElementById('goal'),START=document.getElementById('startHint');
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x07101c);
-scene.fog = new THREE.Fog(0x07101c, 44, 95);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x07101b);scene.fog=new THREE.Fog(0x07101b,48,105);
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;GAME.appendChild(renderer.domElement);
+const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.1,180);camera.position.set(0,13.5,26);let camLook=new THREE.Vector3(0,0,0);
 
-const renderer = new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));
-renderer.setSize(innerWidth,innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputEncoding = THREE.sRGBEncoding;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.12;
-GAME.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xc9e7ff,0x12200d,1.05));
+const sun=new THREE.DirectionalLight(0xffffff,1.65);sun.position.set(-18,31,15);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-38;sun.shadow.camera.right=38;sun.shadow.camera.top=27;sun.shadow.camera.bottom=-27;scene.add(sun);
+[-30,30].forEach(function(x){[-21,21].forEach(function(z){const s=new THREE.SpotLight(0xf1f8ff,2.4,95,Math.PI/5,.5,1.15);s.position.set(x,26,z);s.target.position.set(0,0,0);scene.add(s,s.target)})});
 
-const camera = new THREE.PerspectiveCamera(46,innerWidth/innerHeight,.1,180);
-camera.position.set(0,13.5,25);
-let camTarget = new THREE.Vector3(0,1.0,0);
-camera.lookAt(camTarget);
+const pitchMat=new THREE.MeshStandardMaterial({color:0x176d39,roughness:.93});
+const pitch=new THREE.Mesh(new THREE.PlaneGeometry(64,40),pitchMat);pitch.rotation.x=-Math.PI/2;pitch.receiveShadow=true;scene.add(pitch);
+for(let i=0;i<12;i++){const m=new THREE.Mesh(new THREE.PlaneGeometry(64/12,40),new THREE.MeshBasicMaterial({color:i%2?0x1d7d43:0x176c38,transparent:true,opacity:.36}));m.rotation.x=-Math.PI/2;m.position.set(-29.333+i*(64/12),.006,0);scene.add(m)}
+const lm=new THREE.LineBasicMaterial({color:0xf5f7f5});
+function fieldLine(a){const g=new THREE.BufferGeometry().setFromPoints(a.map(function(v){return new THREE.Vector3(v[0],.035,v[1])}));scene.add(new THREE.Line(g,lm))}
+fieldLine([[-32,-20],[32,-20],[32,20],[-32,20],[-32,-20]]);fieldLine([[0,-20],[0,20]]);
+function ring(r,cx,cz){const p=[];for(let i=0;i<=72;i++){const a=i/72*Math.PI*2;p.push([cx+Math.cos(a)*r,cz+Math.sin(a)*r])}fieldLine(p)}
+ring(5,0,0);
+fieldLine([[-32,-10],[-22,-10],[-22,10],[-32,10]]);fieldLine([[32,-10],[22,-10],[22,10],[32,10]]);
+fieldLine([[-32,-4.7],[-27.2,-4.7],[-27.2,4.7],[-32,4.7]]);fieldLine([[32,-4.7],[27.2,-4.7],[27.2,4.7],[32,4.7]]);
 
-scene.add(new THREE.HemisphereLight(0xb9ddff,0x1a2a13,1.1));
-const key = new THREE.DirectionalLight(0xffffff,1.7);
-key.position.set(-20,34,18); key.castShadow=true; key.shadow.mapSize.set(2048,2048);
-key.shadow.camera.left=-38;key.shadow.camera.right=38;key.shadow.camera.top=30;key.shadow.camera.bottom=-30;
-scene.add(key);
-for(const x of [-27,27]) for(const z of [-18,18]){
-  const s=new THREE.SpotLight(0xe8f6ff,2.0,90,Math.PI/5,.45,1.2);
-  s.position.set(x,28,z);s.target.position.set(0,0,0);scene.add(s,s.target);
+function goalFrame(x,dir){
+ const white=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.5});
+ function box(sx,sy,sz,px,py,pz){const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),white);m.position.set(px,py,pz);m.castShadow=true;scene.add(m)}
+ box(.13,2.7,.13,x,1.35,-4.8);box(.13,2.7,.13,x,1.35,4.8);box(.13,.13,9.7,x,2.67,0);
+ const net=new THREE.Mesh(new THREE.BoxGeometry(1.25,2.5,9.45),new THREE.MeshBasicMaterial({color:0xcfeeff,wireframe:true,transparent:true,opacity:.21}));
+ net.position.set(x+dir*.62,1.25,0);scene.add(net)
 }
+goalFrame(-32,-1);goalFrame(32,1);
 
-const field = new THREE.Mesh(
- new THREE.PlaneGeometry(62,39),
- new THREE.MeshStandardMaterial({color:0x176b36,roughness:.9,metalness:0})
-);
-field.rotation.x=-Math.PI/2;field.receiveShadow=true;scene.add(field);
-for(let i=0;i<10;i++){
- const stripe=new THREE.Mesh(new THREE.PlaneGeometry(6.2,39),new THREE.MeshBasicMaterial({color:i%2?0x1b7c42:0x176e3a,transparent:true,opacity:.42}));
- stripe.rotation.x=-Math.PI/2;stripe.position.set(-27.9+i*6.2,.006,0);scene.add(stripe);
-}
-const lineMat=new THREE.LineBasicMaterial({color:0xf3f7f4});
-function line(points){const g=new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(p[0],.035,p[1])));const l=new THREE.Line(g,lineMat);scene.add(l);return l}
-line([[-31,-19.5],[31,-19.5],[31,19.5],[-31,19.5],[-31,-19.5]]);
-line([[0,-19.5],[0,19.5]]);
-function circleLine(r,cx=0,cz=0){const pts=[];for(let i=0;i<=64;i++){let a=i/64*Math.PI*2;pts.push([cx+Math.cos(a)*r,cz+Math.sin(a)*r])}line(pts)}
-circleLine(5);
-line([[-31,-10],[-22,-10],[-22,10],[-31,10]]);
-line([[31,-10],[22,-10],[22,10],[31,10]]);
-line([[-31,-4.5],[-27,-4.5],[-27,4.5],[-31,4.5]]);
-line([[31,-4.5],[27,-4.5],[27,4.5],[31,4.5]]);
+const stand=new THREE.MeshStandardMaterial({color:0x111a25,roughness:.9});
+[[-0,0,-24,72,8,8],[-0,0,24,72,8,8],[-37,0,0,8,8,46],[37,0,0,8,8,46]].forEach(function(v){const m=new THREE.Mesh(new THREE.BoxGeometry(v[3],v[4],v[5]),stand);m.position.set(v[0],4,v[2]);scene.add(m)});
+const crowdGeo=new THREE.BoxGeometry(.16,.35,.16),crowdMat=[0x236ac4,0xca353e,0xd2d4d5,0x697d8e,0x202b36].map(function(c){return new THREE.MeshBasicMaterial({color:c})});
+for(let side=0;side<2;side++){const z=side?22.1:-22.1;for(let row=0;row<7;row++)for(let i=0;i<75;i++){const f=new THREE.Mesh(crowdGeo,crowdMat[(i+row*2)%crowdMat.length]);f.position.set(-34+i*.92,1.05+row*.58,z+(side?-row*.30:row*.30));f.userData.phase=(i+row)*.37;scene.add(f)}}
+const boardMat=new THREE.MeshBasicMaterial({color:0x0a4b8d});
+for(let i=-5;i<=5;i++){[-20.35,20.35].forEach(function(z){const b=new THREE.Mesh(new THREE.BoxGeometry(5.3,.9,.18),boardMat);b.position.set(i*5.7,.47,z);scene.add(b)})}
 
-function goal(x,side){
- const mat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.5});
- const post=(px,pz,h,w,d)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(px,h/2,pz);m.castShadow=true;scene.add(m)};
- post(x,-4.6,2.6,.13,.13);post(x,4.6,2.6,.13,.13);
- const bar=new THREE.Mesh(new THREE.BoxGeometry(.13,.13,9.2),mat);bar.position.set(x,2.57,0);scene.add(bar);
- const back=side<0?x-.95:x+.95;
- const netMat=new THREE.MeshBasicMaterial({color:0xbfe5ff,wireframe:true,transparent:true,opacity:.28});
- const net=new THREE.Mesh(new THREE.BoxGeometry(.9,2.45,9.1),netMat);net.position.set((x+back)/2,1.25,0);scene.add(net);
-}
-goal(-31,-1);goal(31,1);
+const ballRoot=new THREE.Group(),ball=new THREE.Mesh(new THREE.SphereGeometry(.34,24,16),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.45}));ball.castShadow=true;ballRoot.add(ball);
+for(let i=0;i<8;i++){const d=new THREE.Mesh(new THREE.SphereGeometry(.06,8,6),new THREE.MeshBasicMaterial({color:0x111111}));const a=i/8*Math.PI*2;d.position.set(Math.cos(a)*.32,Math.sin(a*2)*.18,Math.sin(a)*.32);ballRoot.add(d)}scene.add(ballRoot);ballRoot.position.set(0,.36,0);
 
-const standMat=new THREE.MeshStandardMaterial({color:0x111b28,roughness:.9});
-for(const z of [-23,23]){
- const st=new THREE.Mesh(new THREE.BoxGeometry(70,7,7),standMat);st.position.set(0,3.5,z);scene.add(st);
- for(let row=0;row<5;row++)for(let i=0;i<48;i++){
-   const col=[0x2f74c8,0xd43a42,0xd9d9d2,0x6c7d91][(i+row*3)%4];
-   const fan=new THREE.Mesh(new THREE.SphereGeometry(.13,5,4),new THREE.MeshBasicMaterial({color:col}));
-   fan.position.set(-31+i*1.32,1.3+row*.62,z+(z<0?2.4-row*.36:-2.4+row*.36));scene.add(fan);
- }
-}
-for(const x of [-35,35]){
- const st=new THREE.Mesh(new THREE.BoxGeometry(7,7,42),standMat);st.position.set(x,3.5,0);scene.add(st);
-}
-const boardMat=new THREE.MeshBasicMaterial({color:0x0b4d8f});
-for(let i=-4;i<=4;i++){
- const b=new THREE.Mesh(new THREE.BoxGeometry(5.5,1.15,.18),boardMat);b.position.set(i*6,0.62,-19.8);scene.add(b);
- const b2=b.clone();b2.position.z=19.8;scene.add(b2);
-}
-
-const ballGroup=new THREE.Group();
-const ball=new THREE.Mesh(new THREE.SphereGeometry(.36,24,16),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.48}));
-ball.castShadow=true;ballGroup.add(ball);
-for(let i=0;i<8;i++){
- const dot=new THREE.Mesh(new THREE.SphereGeometry(.07,8,6),new THREE.MeshBasicMaterial({color:0x111111}));
- const a=i/8*Math.PI*2;dot.position.set(Math.cos(a)*.34,Math.sin(a*1.7)*.22,Math.sin(a)*.34);ballGroup.add(dot);
-}
-scene.add(ballGroup);ballGroup.position.set(0,.4,0);
-
-const players=[[],[]], mixers=[], animMap=new Map();
-const blueColor=new THREE.Color(0x1577d3), redColor=new THREE.Color(0xd63838);
-const positions=[
- [[-27,0],[-17,-9],[-17,9],[-6,0],[4,-8],[4,8]],
- [[27,0],[17,-9],[17,9],[6,0],[-4,-8],[-4,8]]
+const teamCfg=[
+ {name:'الأزرق',color:0x176fd0,shorts:0xffffff,socks:0x176fd0,gk:0xf2c84b},
+ {name:'الأحمر',color:0xd53a3a,shorts:0xffffff,socks:0xd53a3a,gk:0x61c06a}
 ];
-let loaded=false;
+const names=[['سالم','خالد','مازن','أحمد','يوسف','طارق'],['راشد','فيصل','محمد','عبدالله','سعيد','نواف']];
+const home=[
+ [[-28,0],[-18,-9],[-18,9],[-7,0],[3,-8],[3,8]],
+ [[28,0],[18,-9],[18,9],[7,0],[-3,-8],[-3,8]]
+];
+const players=[[],[]],mixers=[],rigData=new Map();
+let template=null,fitScale=1,fitMinY=0,ready=false;
 
-function tintModel(root,team,index){
- const isGK=index===0;
- const shirt=isGK?0xf3c623:(team===0?0x156fce:0xc92b31);
- const shirt2=isGK?0xd6a916:(team===0?0x0e4d99:0x8d1820);
- const shorts=isGK?0x20242b:(team===0?0xf3f5f7:0x20242b);
- const socks=isGK?0xf3c623:(team===0?0x156fce:0xc92b31);
- root.traverse(o=>{
-   if(!o.isMesh)return;
-   o.castShadow=true;o.receiveShadow=true;
-   const arr=Array.isArray(o.material)?o.material:[o.material];
-   const mapped=arr.map(m=>{
-     if(!m)return m;
-     const n=(m.name||'').toLowerCase();
-     const c=m.clone();
-     if(n==='shirt')c.color.setHex(shirt);
-     else if(n==='shirt2')c.color.setHex(shirt2);
-     else if(n==='pants')c.color.setHex(shorts);
-     else if(n==='socks')c.color.setHex(socks);
-     else if(n==='shoes')c.color.setHex(0x15181d);
-     c.roughness=.72;
-     return c;
-   });
-   o.material=Array.isArray(o.material)?mapped:mapped[0];
- });
+function kitMat(color){return new THREE.MeshStandardMaterial({color:color,roughness:.78})}
+function applyKit(root,team,isGK){
+ const cfg=teamCfg[team],jersey=kitMat(isGK?cfg.gk:cfg.color),pants=kitMat(isGK?0x1b2932:cfg.shorts),socks=kitMat(isGK?cfg.gk:cfg.socks),shoes=kitMat(0x15181b);
+ root.traverse(function(o){
+   if(!o.isMesh)return;o.castShadow=true;o.receiveShadow=true;
+   function swap(m){if(!m)return m;const n=(m.name||'').toLowerCase();if(n.indexOf('shirt')>=0)return jersey;if(n.indexOf('pants')>=0)return pants;if(n.indexOf('socks')>=0)return socks;if(n.indexOf('shoes')>=0)return shoes;return m.clone()}
+   o.material=Array.isArray(o.material)?o.material.map(swap):swap(o.material)
+ })
 }
-function actionFor(p,name){
- const data=animMap.get(p); if(!data)return null;
- const clip=data.clips.find(c=>c.name.toLowerCase()===name.toLowerCase()) ||
-            data.clips.find(c=>c.name.toLowerCase().includes(name.toLowerCase()));
- if(!clip)return null;
- return data.mixer.clipAction(clip);
+function labelSprite(team,index){
+ const cv=document.createElement('canvas');cv.width=320;cv.height=78;const c=cv.getContext('2d');c.fillStyle='rgba(2,9,15,.82)';c.beginPath();c.roundRect(7,7,306,64,20);c.fill();c.font='bold 31px Arial';c.textAlign='center';c.textBaseline='middle';c.fillStyle='#fff';c.fillText(names[team][index]+'  '+(index+1),160,40);
+ const tex=new THREE.CanvasTexture(cv);const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));sp.scale.set(3.2,.78,1);sp.position.set(0,2.3,0);return sp
 }
-function setAnim(p,name){
- const data=animMap.get(p);if(!data)return;
- if(data.current===name)return;
- const next=actionFor(p,name)||actionFor(p,'Idle')||data.mixer.clipAction(data.clips[0]);
- if(data.action && data.action!==next)data.action.fadeOut(.18);
- next.reset().fadeIn(.18).play();data.action=next;data.current=name;
+function clipMap(anims){const m={};anims.forEach(function(c){m[c.name.replace(/^HumanArmature\|Man_/,'')]=c});return m}
+function play(p,key,loop){
+ const d=rigData.get(p);if(!d)return;let clip=d.clips[key]||d.clips.Idle||d.all[0];if(!clip)return;
+ let a=d.mixer.clipAction(clip);if(d.active!==a){if(d.active)d.active.fadeOut(.14);a.reset().fadeIn(.14);a.enabled=true;a.setLoop(loop===false?THREE.LoopOnce:THREE.LoopRepeat);a.clampWhenFinished=loop===false;a.play();d.active=a}
+ if(key==='Run')a.timeScale=1.25;else a.timeScale=1
 }
-function addNamePlate(p,team,index){
- const cv=document.createElement('canvas');cv.width=256;cv.height=64;
- const ctx=cv.getContext('2d');ctx.fillStyle='rgba(3,9,16,.82)';ctx.roundRect(4,4,248,56,18);ctx.fill();
- ctx.font='bold 28px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#fff';
- const names=team===0?['سالم','خالد','مازن','أحمد','يوسف','طارق']:['راشد','فيصل','محمد','عبدالله','سعيد','نواف'];
- ctx.fillText(names[index]+'  '+(index+1),128,33);
- const tex=new THREE.CanvasTexture(cv);tex.encoding=THREE.sRGBEncoding;
- const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
- sp.scale.set(3.4,.85,1);sp.position.set(0,2.65,0);p.add(sp);
-}
-new THREE.GLTFLoader().load('player.glb',gltf=>{
- for(let team=0;team<2;team++)for(let i=0;i<6;i++){
-   const clone=THREE.SkeletonUtils.clone(gltf.scene);
-   const box=new THREE.Box3().setFromObject(gltf.scene);
-   const size=new THREE.Vector3(); box.getSize(size);
-   const fit=size.y>0.001?2.15/size.y:1;
-   clone.scale.setScalar(fit);
-   clone.position.set(positions[team][i][0],0,positions[team][i][1]);
-   clone.rotation.y=team===0?Math.PI/2:-Math.PI/2;
-   tintModel(clone,team,i);addNamePlate(clone,team,i);
-   scene.add(clone);players[team][i]=clone;
-   const mixer=new THREE.AnimationMixer(clone);mixers.push(mixer);
-   animMap.set(clone,{mixer,clips:gltf.animations,action:null,current:''});
-   setAnim(clone,'Idle');
+new THREE.GLTFLoader().load('player.glb',function(gltf){
+ template=gltf.scene;const clips=clipMap(gltf.animations);
+ template.updateMatrixWorld(true);
+ const box=new THREE.Box3().setFromObject(template);const h=box.max.y-box.min.y;fitScale=h>0?1.82/h:1;fitMinY=box.min.y;
+ for(let t=0;t<2;t++)for(let i=0;i<6;i++){
+   const rig=THREE.SkeletonUtils.clone(template);rig.scale.multiplyScalar(fitScale);rig.position.y=-fitMinY*fitScale;applyKit(rig,t,i===0);
+   const root=new THREE.Group();root.add(rig);root.add(labelSprite(t,i));root.position.set(home[t][i][0],0,home[t][i][1]);root.rotation.y=t===0?Math.PI/2:-Math.PI/2;scene.add(root);
+   const mixer=new THREE.AnimationMixer(rig);mixers.push(mixer);rigData.set(root,{mixer:mixer,clips:clips,all:gltf.animations,active:null,rig:rig});players[t][i]=root;play(root,'Idle',true)
  }
- loaded=true; showKickoff();
-},undefined,e=>{QTEXT.textContent='تعذر تحميل نموذج اللاعب';HINT.textContent='أعد تشغيل التطبيق';console.error(e)});
+ ready=true;showKickoff()
+},undefined,function(err){Q.textContent='تعذر تحميل لاعب كرة القدم';SUB.textContent='أعد تشغيل التطبيق';console.log(err)});
 
-const questions=[
+const qs=[
  {q:'كم ناتج 7 × 8 ؟',a:['54','56','63','48'],ok:1},
  {q:'ما عاصمة سلطنة عُمان؟',a:['صحار','نزوى','مسقط','صلالة'],ok:2},
  {q:'ما ناتج 45 ÷ 9 ؟',a:['4','5','6','9'],ok:1},
- {q:'ما الكوكب المعروف بالكوكب الأحمر؟',a:['الزهرة','المريخ','عطارد','المشتري'],ok:1},
- {q:'كم ضلعًا للمسدس؟',a:['5','6','7','8'],ok:1}
+ {q:'ما الكوكب الأحمر؟',a:['الزهرة','المريخ','عطارد','المشتري'],ok:1},
+ {q:'كم ضلعًا للمسدس؟',a:['5','6','7','8'],ok:1},
+ {q:'ما ناتج 9 × 6 ؟',a:['45','54','56','63'],ok:1}
 ];
-let qi=0, possession=-1, holder=3, routeStep=0, busy=false, blueScore=0,redScore=0;
-let elapsed=0,last=performance.now(),started=performance.now();
+let qi=0,pos=-1,holder=3,stage=0,busy=false,bs=0,rs=0,matchStart=performance.now();
 const route=[[3,4,5,1],[3,4,5,1]];
 
-function status(txt,ms=1000){
- STATUS.textContent=txt;STATUS.classList.add('show');
- clearTimeout(status.t);status.t=setTimeout(()=>STATUS.classList.remove('show'),ms);
+let audio=null,crowdGain=null;
+function audioStart(){
+ if(audio)return;audio=new (window.AudioContext||window.webkitAudioContext)();
+ const len=audio.sampleRate*2,buf=audio.createBuffer(1,len,audio.sampleRate),arr=buf.getChannelData(0);for(let i=0;i<len;i++)arr[i]=(Math.random()*2-1)*(.2+.15*Math.sin(i*.0009));
+ const src=audio.createBufferSource();src.buffer=buf;src.loop=true;const lp=audio.createBiquadFilter();lp.type='lowpass';lp.frequency.value=1200;crowdGain=audio.createGain();crowdGain.gain.value=.035;src.connect(lp).connect(crowdGain).connect(audio.destination);src.start()
 }
-function hideQuestion(v){QBOX.classList.toggle('hide',v)}
-function showKickoff(){
- if(!loaded)return;
- QTEXT.textContent=questions[qi].q;
- HINT.textContent='الأسرع يختار فريقه أولًا ثم يجيب';
- ANSWERS.innerHTML='';
- const b=document.createElement('button');b.className='btn buzzer blue';b.textContent='🔵 الأزرق يجيب';
- const r=document.createElement('button');r.className='btn buzzer red';r.textContent='🔴 الأحمر يجيب';
- b.onclick=()=>chooseTeam(0);r.onclick=()=>chooseTeam(1);ANSWERS.append(b,r);
+function roar(){
+ audioStart();if(!crowdGain)return;const n=audio.currentTime;crowdGain.gain.cancelScheduledValues(n);crowdGain.gain.setValueAtTime(.05,n);crowdGain.gain.linearRampToValueAtTime(.28,n+.2);crowdGain.gain.exponentialRampToValueAtTime(.04,n+2.2)
 }
-function chooseTeam(t){
- if(busy)return; possession=t;holder=3;routeStep=0;status(t===0?'استحواذ للأزرق':'استحواذ للأحمر',700);showAnswers();
-}
-function showAnswers(){
- const item=questions[qi];QTEXT.textContent=item.q;
- HINT.textContent=routeStep>=3?'إجابة صحيحة = تسديدة':'إجابة صحيحة = استمرار الهجمة • خطأ = قطع الكرة';
- ANSWERS.innerHTML='';
- item.a.forEach((x,i)=>{
-  const b=document.createElement('button');b.className='btn';b.textContent=x;
-  b.onclick=()=>answer(i);ANSWERS.appendChild(b);
- });
-}
-function nextQ(){qi=(qi+1)%questions.length}
-function answer(i){
- if(busy||possession<0)return;
- const good=i===questions[qi].ok;
- nextQ();
- if(routeStep>=3){shot(good);return}
- if(good)passPlay();else stealPlay();
-}
-function setBallAt(team,index){
- const p=players[team][index].position;ballGroup.position.set(p.x,.4,p.z);
-}
-function tween(duration,update,done){
- const st=performance.now();
- function step(now){let t=Math.min(1,(now-st)/duration);let e=.5-.5*Math.cos(Math.PI*t);update(e,t);if(t<1)requestAnimationFrame(step);else if(done)done()}
- requestAnimationFrame(step);
-}
-function faceDirection(p,dx,dz){p.rotation.y=Math.atan2(dx,dz)}
-function cameraMove(x,z,scale=1){
- const cx=THREE.MathUtils.clamp(x,-20,20);
- camTarget.set(cx*.42,1.05,z*.16);
- camera.position.x=THREE.MathUtils.lerp(camera.position.x,cx*.48,.13);
- camera.position.y=THREE.MathUtils.lerp(camera.position.y,13.0,.08);
- camera.position.z=THREE.MathUtils.lerp(camera.position.z,24.0+z*.10,.08);
-}
-function passPlay(){
- busy=true;hideQuestion(true);
- const seq=route[possession];const from=holder;const to=seq[Math.min(routeStep+1,seq.length-1)];
- const P=players[possession][from],R=players[possession][to];
- const sx=P.position.x,sz=P.position.z, attack=possession===0?1:-1;
- const tx=R.position.x+attack*2.8,tz=R.position.z+(routeStep%2===0?1.1:-1.1);
- setAnim(P,'Punch');setAnim(R,'Run');faceDirection(P,tx-sx,tz-sz);faceDirection(R,attack,0);setTimeout(()=>setAnim(P,'Idle'),420);
- status('تمريرة صحيحة — الهجمة مستمرة!',900);
- tween(1050,(e,t)=>{
-   R.position.x=THREE.MathUtils.lerp(R.position.x,tx,.045+e*.03);
-   R.position.z=THREE.MathUtils.lerp(R.position.z,tz,.045+e*.03);
-   ballGroup.position.x=THREE.MathUtils.lerp(sx,tx,e);
-   ballGroup.position.z=THREE.MathUtils.lerp(sz,tz,e);
-   ballGroup.position.y=.38+Math.sin(Math.PI*e)*.65;
-   ballGroup.rotation.x+=.16;ballGroup.rotation.z+=.08;cameraMove(ballGroup.position.x,ballGroup.position.z);
- },()=>{
-   holder=to;routeStep++;setAnim(P,'Idle');setAnim(R,'Idle');setBallAt(possession,holder);
-   BAR.style.width=(routeStep/4*100)+'%';busy=false;hideQuestion(false);showAnswers();
- });
-}
-function nearestInterceptor(other,x,z){
- let best=1,dist=999;
- for(let i=1;i<6;i++){let p=players[other][i].position,d=(p.x-x)**2+(p.z-z)**2;if(d<dist){dist=d;best=i}}
- return best;
-}
-function stealPlay(){
- busy=true;hideQuestion(true);
- const other=1-possession,P=players[possession][holder],idx=nearestInterceptor(other,P.position.x,P.position.z),D=players[other][idx];
- const sx=P.position.x,sz=P.position.z,tx=(sx+D.position.x)/2,tz=(sz+D.position.z)/2;
- setAnim(D,'Run');faceDirection(D,tx-D.position.x,tz-D.position.z);status('قطع الكرة! هجمة مرتدة',1100);
- tween(800,(e)=>{
-   D.position.x=THREE.MathUtils.lerp(D.position.x,tx,.07+e*.04);
-   D.position.z=THREE.MathUtils.lerp(D.position.z,tz,.07+e*.04);
-   ballGroup.position.x=THREE.MathUtils.lerp(sx,tx,e);ballGroup.position.z=THREE.MathUtils.lerp(sz,tz,e);
-   ballGroup.position.y=.37+Math.sin(Math.PI*e)*.22;cameraMove(ballGroup.position.x,ballGroup.position.z);
- },()=>{
-   possession=other;holder=idx;routeStep=0;setAnim(D,'Idle');setBallAt(possession,holder);BAR.style.width='0%';
-   busy=false;hideQuestion(false);showAnswers();
- });
-}
-function shot(good){
- busy=true;hideQuestion(true);
- const P=players[possession][holder],goalX=possession===0?30.5:-30.5,goalZ=good?(Math.random()-.5)*5.5:(Math.random()<.5?-7:7);
- const sx=P.position.x,sz=P.position.z;setAnim(P,'Punch');faceDirection(P,goalX-sx,goalZ-sz);setTimeout(()=>setAnim(P,'Idle'),520);
- status(good?'تسديــــدة!':'تسديدة تحت الضغط...',900);
- tween(850,(e)=>{
-   ballGroup.position.x=THREE.MathUtils.lerp(sx,goalX,e);
-   ballGroup.position.z=THREE.MathUtils.lerp(sz,goalZ,e);
-   ballGroup.position.y=.38+Math.sin(Math.PI*e)*2.3;
-   ballGroup.rotation.x+=.28;cameraMove(ballGroup.position.x,ballGroup.position.z);
- },()=>{
-   setAnim(P,'Idle');
-   if(good){
-     if(possession===0)blueScore++;else redScore++;
-     SCORE.textContent=blueScore+' - '+redScore;
-     status('⚽ هــــــــدف!',1800);
-     players[possession].forEach(p=>setAnim(p,'Jump'));
-     setTimeout(()=>players[possession].forEach(p=>setAnim(p,'Idle')),1500);
-     renderer.domElement.classList.add('flash');setTimeout(()=>renderer.domElement.classList.remove('flash'),400)
-   }
-   else status('خارج المرمى — الكرة للخصم',1300);
-   setTimeout(()=>{possession=-1;holder=3;routeStep=0;BAR.style.width='0%';ballGroup.position.set(0,.4,0);camera.position.set(0,13.5,25);camTarget.set(0,1.0,0);busy=false;hideQuestion(false);showKickoff()},good?1900:1400);
- });
-}
+function kickSound(){audioStart();if(!audio)return;const o=audio.createOscillator(),g=audio.createGain();o.frequency.setValueAtTime(90,audio.currentTime);o.frequency.exponentialRampToValueAtTime(45,audio.currentTime+.09);g.gain.setValueAtTime(.22,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.11);o.connect(g).connect(audio.destination);o.start();o.stop(audio.currentTime+.12)}
 
+function eventText(s,ms){EVENT.textContent=s;EVENT.classList.add('show');clearTimeout(eventText.t);eventText.t=setTimeout(function(){EVENT.classList.remove('show')},ms||900)}
+function hideQ(v){QBOX.classList.toggle('hide',v)}
+function showKickoff(){
+ if(!ready)return;Q.textContent=qs[qi].q;SUB.textContent='الأسرع يختار فريقه ثم يجيب';ANS.className='kickoff';ANS.innerHTML='';
+ const b=document.createElement('button'),r=document.createElement('button');b.className='a buzz b';r.className='a buzz r';b.textContent='🔵 الأزرق يجيب';r.textContent='🔴 الأحمر يجيب';b.onclick=function(){choose(0)};r.onclick=function(){choose(1)};ANS.append(b,r)
+}
+function choose(t){audioStart();START.style.display='none';if(busy)return;pos=t;holder=3;stage=0;eventText(t===0?'استحواذ للفريق الأزرق':'استحواذ للفريق الأحمر',700);showAnswers();setBall()}
+function showAnswers(){const item=qs[qi];Q.textContent=item.q;SUB.textContent=stage>=3?'الإجابة الصحيحة = تسديدة على المرمى':'الصحيح = تمريرة • الخطأ = قطع الكرة';ANS.className='';ANS.innerHTML='';item.a.forEach(function(x,i){const b=document.createElement('button');b.className='a';b.textContent=x;b.onclick=function(){answer(i)};ANS.appendChild(b)})}
+function nextQ(){qi=(qi+1)%qs.length}
+function answer(i){audioStart();if(busy||pos<0)return;const good=i===qs[qi].ok;nextQ();if(stage>=3)shoot(good);else if(good)passBall();else steal()}
+function setBall(){const p=players[pos][holder].position;ballRoot.position.set(p.x,.36,p.z)}
+function face(p,x,z){p.rotation.y=Math.atan2(x,z)}
+function tween(ms,step,done){const s=performance.now();function f(n){let t=Math.min(1,(n-s)/ms),e=.5-.5*Math.cos(Math.PI*t);step(e,t);if(t<1)requestAnimationFrame(f);else if(done)done()}requestAnimationFrame(f)}
+function follow(x,z,close){const targetX=THREE.MathUtils.clamp(x,-19,19);const targetZ=z*.16;const px=targetX*.24,py=close?10.8:12.8,pz=close?21.5:25.5;camera.position.lerp(new THREE.Vector3(px,py,pz+targetZ*.08),.08);camLook.lerp(new THREE.Vector3(targetX*.58,.5,targetZ),.13)}
+function passBall(){
+ busy=true;hideQ(true);const seq=route[pos],from=holder,to=seq[Math.min(stage+1,seq.length-1)],P=players[pos][from],R=players[pos][to],atk=pos===0?1:-1;
+ const sx=P.position.x,sz=P.position.z,tx=R.position.x+atk*3.2,tz=R.position.z+(stage%2===0?1.3:-1.0);
+ face(P,tx-sx,tz-sz);face(R,atk,0);play(P,'Punch',false);play(R,'Run',true);kickSound();eventText('إجابة صحيحة — تمريرة ناجحة!',950);
+ tween(920,function(e){R.position.x=THREE.MathUtils.lerp(R.position.x,tx,.055);R.position.z=THREE.MathUtils.lerp(R.position.z,tz,.055);ballRoot.position.x=THREE.MathUtils.lerp(sx,tx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,tz,e);ballRoot.position.y=.36+Math.sin(Math.PI*e)*.48;ballRoot.rotation.x+=.19;follow(ballRoot.position.x,ballRoot.position.z,false)},function(){holder=to;stage++;play(P,'Idle',true);play(R,'Idle',true);setBall();BAR.style.width=(stage/4*100)+'%';busy=false;hideQ(false);showAnswers()})
+}
+function closest(other,x,z){let bi=1,bd=999;for(let i=1;i<6;i++){const p=players[other][i].position,d=(p.x-x)*(p.x-x)+(p.z-z)*(p.z-z);if(d<bd){bd=d;bi=i}}return bi}
+function steal(){
+ busy=true;hideQ(true);const other=1-pos,P=players[pos][holder],idx=closest(other,P.position.x,P.position.z),D=players[other][idx];const sx=P.position.x,sz=P.position.z,tx=(P.position.x+D.position.x)*.5,tz=(P.position.z+D.position.z)*.5;
+ play(D,'Run',true);face(D,tx-D.position.x,tz-D.position.z);eventText('خطأ! الخصم يقطع الكرة',1100);
+ tween(720,function(e){D.position.x=THREE.MathUtils.lerp(D.position.x,tx,.075);D.position.z=THREE.MathUtils.lerp(D.position.z,tz,.075);ballRoot.position.x=THREE.MathUtils.lerp(sx,tx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,tz,e);ballRoot.position.y=.35+Math.sin(Math.PI*e)*.14;follow(ballRoot.position.x,ballRoot.position.z,true)},function(){play(D,'Punch',false);kickSound();setTimeout(function(){pos=other;holder=idx;stage=0;play(D,'Idle',true);setBall();BAR.style.width='0%';busy=false;hideQ(false);showAnswers()},220)})
+}
+function goalieDive(team,zTarget){
+ const G=players[team][0];play(G,'Jump',false);const baseX=home[team][0][0],baseZ=home[team][0][1],dir=zTarget>=0?1:-1;
+ tween(650,function(e){G.position.z=baseZ+dir*2.25*Math.sin(Math.PI*e*.8);G.position.y=.12+Math.sin(Math.PI*e)*.65;G.rotation.z=dir*.9*Math.sin(Math.PI*e)},function(){setTimeout(function(){G.position.set(baseX,0,baseZ);G.rotation.z=0;G.rotation.y=team===0?Math.PI/2:-Math.PI/2;play(G,'Idle',true)},500)})
+}
+function shoot(good){
+ busy=true;hideQ(true);const P=players[pos][holder],def=1-pos,G=players[def][0],gx=pos===0?31.6:-31.6,gz=(Math.random()-.5)*6.2,sx=P.position.x,sz=P.position.z;
+ face(P,gx-sx,gz-sz);play(P,'Punch',false);kickSound();goalieDive(def,gz);eventText(good?'تسديــــدة قوية!':'تسديدة تحت الضغط...',800);
+ tween(820,function(e){ballRoot.position.x=THREE.MathUtils.lerp(sx,gx,e);ballRoot.position.z=THREE.MathUtils.lerp(sz,gz,e);ballRoot.position.y=.38+Math.sin(Math.PI*e)*2.05;ballRoot.rotation.x+=.33;follow(ballRoot.position.x,ballRoot.position.z,true)},function(){
+   play(P,'Idle',true);
+   if(good){if(pos===0)bs++;else rs++;SCORE.textContent=bs+' - '+rs;GOAL.classList.add('show');roar();players[pos].forEach(function(pp,i){if(i>0)play(pp,'Jump',false)});setTimeout(function(){GOAL.classList.remove('show')},1600);eventText('⚽ هــــدف! إجابة صحيحة',1800)}
+   else eventText('الحارس يتصدى! الكرة للفريق الآخر',1500);
+   setTimeout(resetKickoff,good?2000:1600)
+ })
+}
+function resetKickoff(){for(let t=0;t<2;t++)for(let i=0;i<6;i++){const p=players[t][i];p.position.set(home[t][i][0],0,home[t][i][1]);p.rotation.z=0;p.rotation.y=t===0?Math.PI/2:-Math.PI/2;play(p,'Idle',true)}pos=-1;holder=3;stage=0;BAR.style.width='0%';ballRoot.position.set(0,.36,0);camera.position.set(0,13.5,26);camLook.set(0,0,0);busy=false;hideQ(false);showKickoff()}
+
+let last=performance.now();
 function animate(now){
- requestAnimationFrame(animate);
- const dt=Math.min(.05,(now-last)/1000);last=now;
- mixers.forEach(m=>m.update(dt));
- camera.lookAt(THREE.Vector3.prototype.lerp.call(new THREE.Vector3(),camTarget,.8));
- const total=Math.max(0,480-Math.floor((performance.now()-started)/1000));
- TIME.textContent=String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
- renderer.render(scene,camera);
+ requestAnimationFrame(animate);const dt=Math.min(.05,(now-last)/1000);last=now;mixers.forEach(function(m){m.update(dt)});
+ const t=now*.001;scene.children.forEach(function(o){if(o.userData&&o.userData.phase!==undefined)o.position.y+=Math.sin(t*2.4+o.userData.phase)*.0007});
+ if(!busy&&pos>=0){const p=players[pos][holder].position;follow(p.x,p.z,false)}
+ camera.lookAt(camLook);
+ const sec=Math.max(0,480-Math.floor((now-matchStart)/1000));CLOCK.textContent=String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0');
+ renderer.render(scene,camera)
 }
 requestAnimationFrame(animate);
-addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+addEventListener('resize',function(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+})();
 </script>
-</body>
-</html>
+</body></html>
