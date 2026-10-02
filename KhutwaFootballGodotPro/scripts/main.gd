@@ -151,8 +151,9 @@ func _build_pitch() -> void:
 	_box("LeftGoalLine", Vector3(0.08, 0.025, 39), Vector3(-31.45, 0.025, 0), white)
 	_box("RightGoalLine", Vector3(0.08, 0.025, 39), Vector3(31.45, 0.025, 0), white)
 
-	for side in [-1.0, 1.0]:
-		var x := side * 26.0
+	for side_index in range(2):
+		var side: float = -1.0 if side_index == 0 else 1.0
+		var x: float = side * 26.0
 		_box("PenaltyTop", Vector3(10.8, 0.025, 0.08), Vector3(side * 28.15, 0.025, -10), white)
 		_box("PenaltyBottom", Vector3(10.8, 0.025, 0.08), Vector3(side * 28.15, 0.025, 10), white)
 		_box("PenaltyInner", Vector3(0.08, 0.025, 20), Vector3(x, 0.025, 0), white)
@@ -177,13 +178,15 @@ func _build_stadium() -> void:
 	_box("StandWest", Vector3(7, 7, 42), Vector3(-36, 3.2, 0), stand_color)
 	_box("StandEast", Vector3(7, 7, 42), Vector3(36, 3.2, 0), stand_color)
 
-	for z in [-20.4, 20.4]:
+	for z_index in range(2):
+		var z: float = -20.4 if z_index == 0 else 20.4
 		for i in range(11):
 			var board_color := BLUE_COLOR if i % 2 == 0 else RED_COLOR
 			_box("AdBoard", Vector3(5.2, 0.9, 0.12), Vector3(-26 + i * 5.2, 0.48, z), board_color)
 
 	var crowd_colors := [Color("#d44747"), Color("#4b85da"), Color("#ded7c6"), Color("#72869c")]
-	for side_z in [-22.0, 22.0]:
+	for side_index in range(2):
+		var side_z: float = -22.0 if side_index == 0 else 22.0
 		for row in range(5):
 			for i in range(34):
 				var person := MeshInstance3D.new()
@@ -196,8 +199,9 @@ func _build_stadium() -> void:
 				add_child(person)
 
 func _build_goals() -> void:
-	for side in [-1.0, 1.0]:
-		var gx := side * 31.5
+	for side_index in range(2):
+		var side: float = -1.0 if side_index == 0 else 1.0
+		var gx: float = side * 31.5
 		_cylinder("GoalPost", 0.08, 2.6, Vector3(gx, 1.3, -4.6), Color.WHITE)
 		_cylinder("GoalPost", 0.08, 2.6, Vector3(gx, 1.3, 4.6), Color.WHITE)
 		var bar := _cylinder("GoalBar", 0.08, 9.2, Vector3(gx, 2.6, 0), Color.WHITE)
