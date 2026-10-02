@@ -26,8 +26,9 @@ jobs:
           curl -L --fail --retry 3 -o app/src/main/assets/three.min.js https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js
           curl -L --fail --retry 3 -o app/src/main/assets/GLTFLoader.js https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/js/loaders/GLTFLoader.js
           curl -L --fail --retry 3 -o app/src/main/assets/SkeletonUtils.js https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/js/utils/SkeletonUtils.js
-          curl -L --fail --retry 3 -o app/src/main/assets/Soldier.glb https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/models/gltf/Soldier.glb
-          test -s app/src/main/assets/Soldier.glb
+          curl -L --fail --retry 3 -o app/src/main/assets/player.glb https://raw.githubusercontent.com/kendrekaran/striker-3d/main/assets/player.glb
+          curl -L --fail --retry 3 -o app/src/main/assets/LICENSE-quaternius.txt https://raw.githubusercontent.com/kendrekaran/striker-3d/main/assets/LICENSE-quaternius.txt
+          test -s app/src/main/assets/player.glb
 
       - uses: actions/setup-java@v5
         with:
