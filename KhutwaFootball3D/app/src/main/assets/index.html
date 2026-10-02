@@ -16,14 +16,14 @@ canvas{display:block}
 .score{border-radius:16px;text-align:center;padding-top:5px}
 #scoreText{font-size:31px;font-weight:900;line-height:30px}
 #time{font-size:14px;opacity:.78;margin-top:5px}
-#question{position:fixed;z-index:12;top:82px;left:50%;transform:translateX(-50%);width:min(690px,62vw);background:rgba(5,18,33,.83);border:1px solid rgba(122,202,255,.28);border-radius:20px;box-shadow:0 14px 40px rgba(0,0,0,.34);padding:13px 16px 15px;text-align:center;transition:.28s}
+#question{position:fixed;z-index:12;top:76px;left:50%;transform:translateX(-50%);width:min(520px,48vw);background:rgba(4,16,29,.72);backdrop-filter:blur(10px);border:1px solid rgba(122,202,255,.25);border-radius:16px;box-shadow:0 12px 34px rgba(0,0,0,.28);padding:9px 12px 11px;text-align:center;transition:.28s}
 #question.hide{opacity:0;transform:translate(-50%,-20px);pointer-events:none}
-#qtext{font-size:21px;font-weight:900;margin-bottom:7px}
-#hint{font-size:12px;color:#a9d7ef;margin-bottom:9px}
+#qtext{font-size:18px;font-weight:900;margin-bottom:5px}
+#hint{font-size:10px;color:#b8d8e9;margin-bottom:7px}
 #answers{display:grid;grid-template-columns:1fr 1fr;gap:8px;direction:rtl}
-.btn{border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:13px;padding:11px 9px;background:linear-gradient(#183c5d,#102941);font-weight:800;font-size:17px;min-height:42px}
+.btn{border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:13px;padding:8px 8px;background:linear-gradient(#183c5d,#102941);font-weight:800;font-size:14px;min-height:34px}
 .btn:active{transform:scale(.985)}
-.buzzer{font-size:18px;padding:15px}
+.buzzer{font-size:15px;padding:10px}
 .blue{background:linear-gradient(#1b7ce1,#0a55aa)}
 .red{background:linear-gradient(#e04444,#9e2020)}
 #status{position:fixed;z-index:13;left:50%;bottom:33px;transform:translateX(-50%);min-width:300px;text-align:center;background:rgba(3,12,22,.77);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:10px 18px;font-weight:800;font-size:16px;box-shadow:0 8px 28px rgba(0,0,0,.35);opacity:0;transition:.25s}
@@ -80,9 +80,9 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
 GAME.appendChild(renderer.domElement);
 
-const camera = new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.1,180);
-camera.position.set(0,25,32);
-let camTarget = new THREE.Vector3(0,0,0);
+const camera = new THREE.PerspectiveCamera(46,innerWidth/innerHeight,.1,180);
+camera.position.set(0,13.5,25);
+let camTarget = new THREE.Vector3(0,1.0,0);
 camera.lookAt(camTarget);
 
 scene.add(new THREE.HemisphereLight(0xb9ddff,0x1a2a13,1.1));
@@ -97,7 +97,7 @@ for(const x of [-27,27]) for(const z of [-18,18]){
 
 const field = new THREE.Mesh(
  new THREE.PlaneGeometry(62,39),
- new THREE.MeshStandardMaterial({color:0x18723d,roughness:.88,metalness:0})
+ new THREE.MeshStandardMaterial({color:0x176b36,roughness:.9,metalness:0})
 );
 field.rotation.x=-Math.PI/2;field.receiveShadow=true;scene.add(field);
 for(let i=0;i<10;i++){
@@ -161,16 +161,29 @@ const positions=[
 ];
 let loaded=false;
 
-function tintModel(root,team){
+function tintModel(root,team,index){
+ const isGK=index===0;
+ const shirt=isGK?0xf3c623:(team===0?0x156fce:0xc92b31);
+ const shirt2=isGK?0xd6a916:(team===0?0x0e4d99:0x8d1820);
+ const shorts=isGK?0x20242b:(team===0?0xf3f5f7:0x20242b);
+ const socks=isGK?0xf3c623:(team===0?0x156fce:0xc92b31);
  root.traverse(o=>{
-   if(o.isMesh){
-     o.castShadow=true;o.receiveShadow=true;
-     if(o.material){
-       o.material=o.material.clone();
-       if(o.material.color)o.material.color.lerp(team===0?blueColor:redColor,.68);
-       o.material.roughness=.62;
-     }
-   }
+   if(!o.isMesh)return;
+   o.castShadow=true;o.receiveShadow=true;
+   const arr=Array.isArray(o.material)?o.material:[o.material];
+   const mapped=arr.map(m=>{
+     if(!m)return m;
+     const n=(m.name||'').toLowerCase();
+     const c=m.clone();
+     if(n==='shirt')c.color.setHex(shirt);
+     else if(n==='shirt2')c.color.setHex(shirt2);
+     else if(n==='pants')c.color.setHex(shorts);
+     else if(n==='socks')c.color.setHex(socks);
+     else if(n==='shoes')c.color.setHex(0x15181d);
+     c.roughness=.72;
+     return c;
+   });
+   o.material=Array.isArray(o.material)?mapped:mapped[0];
  });
 }
 function actionFor(p,name){
@@ -197,13 +210,16 @@ function addNamePlate(p,team,index){
  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
  sp.scale.set(3.4,.85,1);sp.position.set(0,2.65,0);p.add(sp);
 }
-new THREE.GLTFLoader().load('Soldier.glb',gltf=>{
+new THREE.GLTFLoader().load('player.glb',gltf=>{
  for(let team=0;team<2;team++)for(let i=0;i<6;i++){
    const clone=THREE.SkeletonUtils.clone(gltf.scene);
-   clone.scale.setScalar(1.08);
+   const box=new THREE.Box3().setFromObject(gltf.scene);
+   const size=new THREE.Vector3(); box.getSize(size);
+   const fit=size.y>0.001?2.15/size.y:1;
+   clone.scale.setScalar(fit);
    clone.position.set(positions[team][i][0],0,positions[team][i][1]);
    clone.rotation.y=team===0?Math.PI/2:-Math.PI/2;
-   tintModel(clone,team);addNamePlate(clone,team,i);
+   tintModel(clone,team,i);addNamePlate(clone,team,i);
    scene.add(clone);players[team][i]=clone;
    const mixer=new THREE.AnimationMixer(clone);mixers.push(mixer);
    animMap.set(clone,{mixer,clips:gltf.animations,action:null,current:''});
@@ -267,9 +283,11 @@ function tween(duration,update,done){
 }
 function faceDirection(p,dx,dz){p.rotation.y=Math.atan2(dx,dz)}
 function cameraMove(x,z,scale=1){
- const cx=THREE.MathUtils.clamp(x,-15,15);camTarget.set(cx*.28,0,z*.08);
- camera.position.x=THREE.MathUtils.lerp(camera.position.x,cx*.36,.16);
- camera.position.z=THREE.MathUtils.lerp(camera.position.z,32+z*.05,.08);
+ const cx=THREE.MathUtils.clamp(x,-20,20);
+ camTarget.set(cx*.42,1.05,z*.16);
+ camera.position.x=THREE.MathUtils.lerp(camera.position.x,cx*.48,.13);
+ camera.position.y=THREE.MathUtils.lerp(camera.position.y,13.0,.08);
+ camera.position.z=THREE.MathUtils.lerp(camera.position.z,24.0+z*.10,.08);
 }
 function passPlay(){
  busy=true;hideQuestion(true);
@@ -277,7 +295,7 @@ function passPlay(){
  const P=players[possession][from],R=players[possession][to];
  const sx=P.position.x,sz=P.position.z, attack=possession===0?1:-1;
  const tx=R.position.x+attack*2.8,tz=R.position.z+(routeStep%2===0?1.1:-1.1);
- setAnim(P,'Run');setAnim(R,'Run');faceDirection(P,tx-sx,tz-sz);faceDirection(R,attack,0);
+ setAnim(P,'Punch');setAnim(R,'Run');faceDirection(P,tx-sx,tz-sz);faceDirection(R,attack,0);setTimeout(()=>setAnim(P,'Idle'),420);
  status('تمريرة صحيحة — الهجمة مستمرة!',900);
  tween(1050,(e,t)=>{
    R.position.x=THREE.MathUtils.lerp(R.position.x,tx,.045+e*.03);
@@ -314,7 +332,7 @@ function stealPlay(){
 function shot(good){
  busy=true;hideQuestion(true);
  const P=players[possession][holder],goalX=possession===0?30.5:-30.5,goalZ=good?(Math.random()-.5)*5.5:(Math.random()<.5?-7:7);
- const sx=P.position.x,sz=P.position.z;setAnim(P,'Run');faceDirection(P,goalX-sx,goalZ-sz);
+ const sx=P.position.x,sz=P.position.z;setAnim(P,'Punch');faceDirection(P,goalX-sx,goalZ-sz);setTimeout(()=>setAnim(P,'Idle'),520);
  status(good?'تسديــــدة!':'تسديدة تحت الضغط...',900);
  tween(850,(e)=>{
    ballGroup.position.x=THREE.MathUtils.lerp(sx,goalX,e);
@@ -323,9 +341,16 @@ function shot(good){
    ballGroup.rotation.x+=.28;cameraMove(ballGroup.position.x,ballGroup.position.z);
  },()=>{
    setAnim(P,'Idle');
-   if(good){if(possession===0)blueScore++;else redScore++;SCORE.textContent=blueScore+' - '+redScore;status('⚽ هــــــــدف!',1800);renderer.domElement.classList.add('flash');setTimeout(()=>renderer.domElement.classList.remove('flash'),400)}
+   if(good){
+     if(possession===0)blueScore++;else redScore++;
+     SCORE.textContent=blueScore+' - '+redScore;
+     status('⚽ هــــــــدف!',1800);
+     players[possession].forEach(p=>setAnim(p,'Jump'));
+     setTimeout(()=>players[possession].forEach(p=>setAnim(p,'Idle')),1500);
+     renderer.domElement.classList.add('flash');setTimeout(()=>renderer.domElement.classList.remove('flash'),400)
+   }
    else status('خارج المرمى — الكرة للخصم',1300);
-   setTimeout(()=>{possession=-1;holder=3;routeStep=0;BAR.style.width='0%';ballGroup.position.set(0,.4,0);camera.position.set(0,25,32);camTarget.set(0,0,0);busy=false;hideQuestion(false);showKickoff()},good?1900:1400);
+   setTimeout(()=>{possession=-1;holder=3;routeStep=0;BAR.style.width='0%';ballGroup.position.set(0,.4,0);camera.position.set(0,13.5,25);camTarget.set(0,1.0,0);busy=false;hideQuestion(false);showKickoff()},good?1900:1400);
  });
 }
 
