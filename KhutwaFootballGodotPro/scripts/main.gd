@@ -61,8 +61,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if camera:
-		var height := 9.0 if camera_close else 13.5
-		var depth := 15.0 if camera_close else 24.0
+		var height := 12.5 if camera_close else 17.5
+		var depth := 20.0 if camera_close else 28.0
 		var desired := Vector3(camera_focus.x, height, camera_focus.z + depth)
 		camera.global_position = camera.global_position.lerp(desired, 1.0 - exp(-4.0 * delta))
 		var look := Vector3(camera_focus.x, 1.0, camera_focus.z * 0.3)
@@ -322,8 +322,8 @@ func _build_ball() -> void:
 
 	camera = Camera3D.new()
 	camera.name = "BroadcastCamera"
-	camera.fov = 48.0
-	camera.position = Vector3(0, 13.5, 24)
+	camera.fov = 42.0
+	camera.position = Vector3(0, 17.5, 28)
 	add_child(camera)
 	camera.current = true
 
@@ -383,10 +383,10 @@ func _build_ui() -> void:
 
 	question_panel = PanelContainer.new()
 	question_panel.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	question_panel.offset_left = -280
-	question_panel.offset_right = 280
-	question_panel.offset_top = 86
-	question_panel.offset_bottom = 248
+	question_panel.offset_left = -330
+	question_panel.offset_right = 330
+	question_panel.offset_top = 92
+	question_panel.offset_bottom = 286
 	question_panel.add_theme_stylebox_override("panel", _style_box(Color(0.02,0.075,0.13,0.84), 18))
 	ui_layer.add_child(question_panel)
 
@@ -397,13 +397,13 @@ func _build_ui() -> void:
 	question_label = Label.new()
 	question_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	question_label.layout_direction = Control.LAYOUT_DIRECTION_RTL
-	question_label.add_theme_font_size_override("font_size", 22)
+	question_label.add_theme_font_size_override("font_size", 27)
 	qv.add_child(question_label)
 
 	hint_label = Label.new()
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_label.layout_direction = Control.LAYOUT_DIRECTION_RTL
-	hint_label.add_theme_font_size_override("font_size", 13)
+	hint_label.add_theme_font_size_override("font_size", 16)
 	hint_label.add_theme_color_override("font_color", Color("#b3d8ea"))
 	qv.add_child(hint_label)
 
@@ -457,15 +457,15 @@ func _show_kickoff_question() -> void:
 
 	var blue_btn := Button.new()
 	blue_btn.text = "🔵 الأزرق يجيب"
-	blue_btn.custom_minimum_size = Vector2(250, 48)
-	blue_btn.add_theme_font_size_override("font_size", 18)
+	blue_btn.custom_minimum_size = Vector2(300, 54)
+	blue_btn.add_theme_font_size_override("font_size", 20)
 	blue_btn.pressed.connect(_on_buzz.bind(BLUE))
 	answers_box.add_child(blue_btn)
 
 	var red_btn := Button.new()
 	red_btn.text = "🔴 الأحمر يجيب"
-	red_btn.custom_minimum_size = Vector2(250, 48)
-	red_btn.add_theme_font_size_override("font_size", 18)
+	red_btn.custom_minimum_size = Vector2(300, 54)
+	red_btn.add_theme_font_size_override("font_size", 20)
 	red_btn.pressed.connect(_on_buzz.bind(RED))
 	answers_box.add_child(red_btn)
 	question_panel.visible = true
@@ -484,8 +484,8 @@ func _show_answer_buttons() -> void:
 	for i in range(4):
 		var btn := Button.new()
 		btn.text = str(current_question["a"][i])
-		btn.custom_minimum_size = Vector2(250, 42)
-		btn.add_theme_font_size_override("font_size", 17)
+		btn.custom_minimum_size = Vector2(300, 48)
+		btn.add_theme_font_size_override("font_size", 20)
 		btn.pressed.connect(_on_answer.bind(i))
 		answers_box.add_child(btn)
 
