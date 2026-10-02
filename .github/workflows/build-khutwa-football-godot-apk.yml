@@ -42,7 +42,26 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -y curl fontconfig
+          apt-get install -y curl fontconfig openjdk-17-jdk-headless
+
+      - name: Configure Android SDK and signing environment
+        shell: bash
+        run: |
+          set -e
+          JAVA_HOME_DIR="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-4.6.tres <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "/usr/lib/android-sdk"
+          export/android/java_sdk_path = "$JAVA_HOME_DIR"
+          export/android/debug_keystore = ""
+          export/android/debug_keystore_user = ""
+          export/android/debug_keystore_pass = ""
+          EOF
+          echo "JAVA_HOME_DIR=$JAVA_HOME_DIR"
+          ls /usr/lib/android-sdk/build-tools
 
       - name: Fetch CC0 animated player asset
         shell: bash
@@ -63,14 +82,25 @@ jobs:
             exit 1
           fi
 
-      - name: Build Android debug APK
+      - name: Build unsigned Android APK
         shell: bash
         run: |
           set -e
           mkdir -p build/android
           EXPORT_DIR="$(readlink -f build/android)"
           cd "${PROJECT_PATH}"
-          godot --headless --verbose --path . --export-debug "Android Debug" "$EXPORT_DIR/${EXPORT_NAME}.apk"
+          godot --headless --verbose --path . --export-release "Android Debug" "$EXPORT_DIR/${EXPORT_NAME}-unsigned.apk"
+
+      - name: Sign Android APK
+        shell: bash
+        run: |
+          set -e
+          BUILD_TOOLS="$(ls -1 /usr/lib/android-sdk/build-tools | sort -V | tail -1)"
+          TOOLS="/usr/lib/android-sdk/build-tools/$BUILD_TOOLS"
+          keytool -genkeypair -v             -keystore /tmp/khutwa-debug.keystore             -storepass android             -alias androiddebugkey             -keypass android             -dname "CN=Khutwa Debug,O=Khutwa,C=OM"             -keyalg RSA -keysize 2048 -validity 10000
+          "$TOOLS/zipalign" -f -p 4             "build/android/${EXPORT_NAME}-unsigned.apk"             "build/android/${EXPORT_NAME}-aligned.apk"
+          "$TOOLS/apksigner" sign             --ks /tmp/khutwa-debug.keystore             --ks-key-alias androiddebugkey             --ks-pass pass:android             --key-pass pass:android             --out "build/android/${EXPORT_NAME}.apk"             "build/android/${EXPORT_NAME}-aligned.apk"
+          "$TOOLS/apksigner" verify --verbose "build/android/${EXPORT_NAME}.apk"
 
       - name: Verify APK
         shell: bash
