@@ -38,6 +38,12 @@ jobs:
           fi
           godot --version
 
+      - name: Install build utilities
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y curl fontconfig
+
       - name: Fetch CC0 animated player asset
         shell: bash
         run: |
