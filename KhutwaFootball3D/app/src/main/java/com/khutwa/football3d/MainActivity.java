@@ -22,7 +22,9 @@ public class MainActivity extends Activity {
     s.setJavaScriptEnabled(true);
     s.setDomStorageEnabled(true);
     s.setAllowFileAccess(true);
-    s.setAllowContentAccess(true);\n    s.setAllowFileAccessFromFileURLs(true);\n    s.setAllowUniversalAccessFromFileURLs(true);
+    s.setAllowContentAccess(true);
+    s.setAllowFileAccessFromFileURLs(true);
+    s.setAllowUniversalAccessFromFileURLs(true);
     s.setMediaPlaybackRequiresUserGesture(false);
     web.setWebChromeClient(new WebChromeClient());
     web.loadUrl("file:///android_asset/index.html");
