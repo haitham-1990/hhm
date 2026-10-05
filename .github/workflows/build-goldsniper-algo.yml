@@ -1,0 +1,32 @@
+name: Build GoldSniper .algo
+
+on:
+  push:
+    branches:
+      - goldsniper-algo-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build cTrader .algo
+        run: dotnet build goldsniper/GoldSniperXAUUSD.csproj --configuration Release -p:IncludeSource=True
+
+      - name: Show output
+        run: find goldsniper -type f \( -name '*.algo' -o -name '*.dll' \) -print
+
+      - name: Upload .algo
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoldSniper-XAUUSD-algo
+          path: '**/*.algo'
+          if-no-files-found: error
