@@ -510,7 +510,8 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if (autoAwaitingSave && url.contains("/teacher/courses/preparations_index")) {
+        if (autoAwaitingSave && (url.contains("/teacher/courses/preparations_index")
+                || url.contains("/teacher/courses/browse_content"))) {
             markAutoLessonSaved();
             return;
         }
@@ -732,20 +733,23 @@ public class MainActivity extends Activity {
                 + "var es=[].slice.call(document.querySelectorAll('input[id^=publishdate-]')).filter(function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;});"
                 + "if(es.length>=" + dates.size() + ")return String(es.length);"
                 + "var first=document.getElementById('publishdate-1'),global=document.getElementById('global');"
-                + "var y1=first?first.getBoundingClientRect().top+window.scrollY:-1,y2=global?global.getBoundingClientRect().top+window.scrollY:1e12;"
-                + "var a=[].slice.call(document.querySelectorAll('a'));for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;"
-                + "var y=r.top+window.scrollY,t=(a[i].innerText||a[i].textContent||'').replace(/\\s+/g,' ').trim();"
-                + "if(t==='إضافة'&&y>y1&&y<y2){a[i].click();return '0';}}return '-1';})()";
+                + "var y1=first?first.getBoundingClientRect().top+window.scrollY:0,y2=global?global.getBoundingClientRect().top+window.scrollY:1e12;"
+                + "var links=[].slice.call(document.querySelectorAll('a'));var best=null,dist=1e12;"
+                + "for(var i=0;i<links.length;i++){var r=links[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;"
+                + "var y=r.top+window.scrollY,t=(links[i].innerText||links[i].textContent||'').replace(/\\s+/g,' ').trim();"
+                + "if(t!=='إضافة'||y>=y2)continue;var d=Math.abs(y-y1);if(d<dist){dist=d;best=links[i];}}"
+                + "if(best){best.click();return '0';}return '-1';})()";
         webView.evaluateJavascript(js, raw -> {
             int count = parseJsInt(raw);
             if (count >= dates.size()) {
                 configureAutoPublicationRow(lesson, dates, 0, 0);
-            } else if (count == 0 && attempt < 12) {
-                webView.postDelayed(() -> ensurePublicationRows(lesson, dates, attempt + 1), 600);
-            } else if (count > 0 && count < dates.size() && attempt < 12) {
-                webView.postDelayed(() -> ensurePublicationRows(lesson, dates, attempt + 1), 450);
+            } else if (count == 0 && attempt < 16) {
+                webView.postDelayed(() -> ensurePublicationRows(lesson, dates, attempt + 1), 650);
+            } else if (count > 0 && count < dates.size() && attempt < 16) {
+                webView.postDelayed(() -> ensurePublicationRows(lesson, dates, attempt + 1), 500);
             } else {
-                stopAutoWithError("تعذر إنشاء العدد المطلوب من أسطر «تاريخ النشر».");
+                stopAutoWithError("تعذر إنشاء العدد المطلوب من أسطر «تاريخ النشر». وجد التطبيق "
+                        + Math.max(0, count) + " سطرًا بينما يحتاج " + dates.size() + ".");
             }
         });
     }
