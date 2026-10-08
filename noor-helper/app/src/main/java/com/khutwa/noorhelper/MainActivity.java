@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         String level = lesson == null ? "الفهم" : lesson.level;
         int periods = lesson == null ? 0 : lesson.periods;
         int week = lesson == null ? 0 : lesson.weekStart;
-        String startDate = lesson == null ? "" : lesson.periodStart;
+        String startDate = lesson == null ? "" : lesson.periodStart; // reserved for timetable-aware exact date in next step
 
         return "(function(){" + baseHelpers()
                 + "var oc=0,arr=objectiveBoxes();for(var i=0;i<arr.length;i++){if(!arr[i].checked)arr[i].click();if(arr[i].checked)oc++;}"
@@ -700,7 +700,7 @@ public class MainActivity extends Activity {
                 + "ed+=setEditor('ملاحظات ضمن خطة الدراسة الأسبوعية'," + JSONObject.quote(toHtml(p.weeklyNote)) + ");"
                 + "var weekSet=" + week + ">0?setWeek(" + week + "):0;"
                 + "var durationSet=" + periods + ">0?setLabeledValue(['وقت تنفيذ الحصة','مدة تنفيذ الحصة','عدد الحصص']," + JSONObject.quote(String.valueOf(periods)) + "):0;"
-                + "var dateSet=setExecutionDate(" + JSONObject.quote(startDate) + ");"
+                + "var dateSet=0;"
                 + "var allTables=enableByLabel('تعميم التحضير على كافة الجداول');"
                 + "disableByLabel('نشر التحضير للطلبة في خطة الدراسة الأسبوعية');disableByLabel('السماح للمعلمين بنسخ و استخدام تحضيري');"
                 + "return JSON.stringify({objectives:oc,checks:checks,levels:levels,editors:ed,week:weekSet,duration:durationSet,date:dateSet,allTables:allTables});"
