@@ -778,8 +778,8 @@ public class MainActivity extends Activity {
     private void selectAutoTimeslots(Grade9Curriculum.Lesson lesson, List<String> dates, int index, int attempt) {
         if (!autoActive) return;
         int row = index + 1;
-        String js = "(function(){var q='input[type=checkbox][name=\\"data[plane][date" + row + "][timeslot][]\\"]';"
-                + "var a=[].slice.call(document.querySelectorAll(q)).filter(function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;});"
+        String js = "(function(){var target='data[plane][date" + row + "][timeslot][]';"
+                + "var a=[].slice.call(document.querySelectorAll('input[type=checkbox]')).filter(function(e){var r=e.getBoundingClientRect();return e.name===target&&r.width>0&&r.height>0;});"
                 + "var n=0;for(var i=0;i<a.length;i++){if(!a[i].checked)a[i].click();if(a[i].checked)n++;}return String(n);})()";
         webView.evaluateJavascript(js, raw -> {
             int selected = parseJsInt(raw);
