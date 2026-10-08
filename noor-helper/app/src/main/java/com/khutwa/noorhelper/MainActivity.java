@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.text.method.ScrollingMovementMethod;
@@ -447,6 +448,11 @@ public class MainActivity extends Activity {
                 .apply();
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        try {
+            Intent keepAlive = new Intent(this, AutoRunService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(keepAlive);
+            else startService(keepAlive);
+        } catch (Exception ignored) {}
         status.setText("بدأ التشغيل التلقائي — " + autoLessons.get(autoCurrentIndex).displayName());
         updateAutoProgressText(getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1));
         handleAutoPage(webView.getUrl());
@@ -457,6 +463,7 @@ public class MainActivity extends Activity {
         autoAwaitingSave = false;
         autoPreparingIndex = -1;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        try { stopService(new Intent(this, AutoRunService.class)); } catch (Exception ignored) {}
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putBoolean(KEY_AUTO_ACTIVE, false)
                 .apply();
@@ -480,6 +487,7 @@ public class MainActivity extends Activity {
         autoAwaitingSave = false;
         autoPreparingIndex = -1;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        try { stopService(new Intent(this, AutoRunService.class)); } catch (Exception ignored) {}
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putBoolean(KEY_AUTO_ACTIVE, false)
                 .putInt(KEY_AUTO_PENDING_INDEX, autoCurrentIndex)
@@ -1743,6 +1751,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try { stopService(new Intent(this, AutoRunService.class)); } catch (Exception ignored) {}
         recycleExerciseImages();
         worker.shutdownNow();
         super.onDestroy();
