@@ -3,6 +3,7 @@ package com.khutwa.noorhelper;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 
 final class Grade9Curriculum {
@@ -170,6 +171,19 @@ final class Grade9Curriculum {
 
     static int lessonCount() {
         return LESSONS.size();
+    }
+
+    static List<Lesson> allLessons() {
+        return new ArrayList<>(LESSONS.values());
+    }
+
+    static int indexOfCode(String code) {
+        int i = 0;
+        for (String key : LESSONS.keySet()) {
+            if (key.equals(code)) return i;
+            i++;
+        }
+        return -1;
     }
 
     static int totalPlannedLessonPeriods() {
