@@ -110,7 +110,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.6.0");
+        title.setText("مساعد نور - التاسع 0.6.1");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
