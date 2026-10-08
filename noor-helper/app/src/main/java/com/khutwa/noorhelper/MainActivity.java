@@ -606,7 +606,7 @@ public class MainActivity extends Activity {
         if (!autoActive) return;
         String js = "(function(){var t=document.getElementById('PreparationTitle');"
                 + "var v=t?(t.value||''):'';"
-                + "var n=document.querySelectorAll('input[name^=\\"Preparation[criteria]\\"]').length;"
+                + "var xs=document.querySelectorAll('input'),n=0;for(var xi=0;xi<xs.length;xi++){if((xs[xi].name||'').indexOf('Preparation[criteria]')===0)n++;}";
                 + "return JSON.stringify({title:v,criteria:n});})()";
         webView.evaluateJavascript(js, raw -> {
             boolean ready = false;
