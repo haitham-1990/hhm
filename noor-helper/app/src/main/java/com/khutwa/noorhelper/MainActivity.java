@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
     private TextView status;
     private String currentTitle = "";
     private final List<String> currentOutcomes = new ArrayList<>();
-    private LessonPreparation currentPreparation;
+    private LessonPreparation currentPreparation;\n    private AiPreparationClient aiClient;
 
     private Uri exercisePdfUri;
     private final List<Bitmap> exerciseImages = new ArrayList<>();
@@ -79,7 +79,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور التجريبي 0.2.0");
+        title.setText("مساعد نور الشخصي 0.3.0");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -113,7 +113,7 @@ public class MainActivity extends Activity {
         select.setOnClickListener(v -> selectAllObjectives());
         actions.addView(select, weightedButton());
 
-        Button prepare = makeButton("تجهيز");
+        Button prepare = makeButton("تجهيز AI");
         prepare.setOnClickListener(v -> generatePreview());
         actions.addView(prepare, weightedButton());
 
@@ -300,12 +300,46 @@ public class MainActivity extends Activity {
     private void generatePreview() {
         if (currentTitle.isEmpty()) {
             scanLesson(false);
-            toast("اضغط تجهيز مرة أخرى بعد اكتمال الفحص.");
+            toast("اضغط تجهيز AI مرة أخرى بعد اكتمال الفحص.");
             return;
         }
-        currentPreparation = LessonGenerator.generate(currentTitle, currentOutcomes);
+
+        LessonPreparation cached = aiClient.getCached(currentTitle);
+        if (cached != null) {
+            currentPreparation = cached;
+            status.setText("التحضير الذكي محفوظ لهذا الدرس — بدون طلب AI جديد.");
+            showPreparationPreview("من الذاكرة المحلية — صفر استهلاك جديد");
+            return;
+        }
+
+        status.setText("أجهز التحضير بالذكاء الاصطناعي لأول مرة لهذا الدرس...");
+        final String title = currentTitle;
+        final List<String> outcomes = new ArrayList<>(currentOutcomes);
+
+        worker.execute(() -> {
+            try {
+                LessonPreparation generated = aiClient.generateAndCache(title, outcomes);
+                runOnUiThread(() -> {
+                    if (!title.equals(currentTitle)) return;
+                    currentPreparation = generated;
+                    status.setText("تم إنشاء التحضير وحفظه محليًا. المرات القادمة لن تحتاج طلب AI جديد.");
+                    showPreparationPreview("ذكاء اصطناعي — تم التخزين للاستخدام القادم");
+                });
+            } catch (Exception e) {
+                LessonPreparation fallback = LessonGenerator.generate(title, outcomes);
+                runOnUiThread(() -> {
+                    if (!title.equals(currentTitle)) return;
+                    currentPreparation = fallback;
+                    status.setText("تعذر اتصال الذكاء؛ استخدمت التحضير المحلي المؤقت.");
+                    showPreparationPreview("قالب محلي مؤقت — تعذر الاتصال بالذكاء");
+                });
+            }
+        });
+    }
+
+    private void showPreparationPreview(String source) {
         TextView preview = new TextView(this);
-        preview.setText(currentPreparation.preview());
+        preview.setText("المصدر: " + source + "\n\n" + currentPreparation.preview());
         preview.setTextSize(15);
         preview.setPadding(dp(20), dp(10), dp(20), dp(10));
         preview.setTextDirection(View.TEXT_DIRECTION_RTL);
@@ -329,7 +363,10 @@ public class MainActivity extends Activity {
             toast("تم تشغيل الفحص. بعد ظهور الدرس اضغط تعبئة مرة أخرى.");
             return;
         }
-        if (currentPreparation == null) currentPreparation = LessonGenerator.generate(currentTitle, currentOutcomes);
+        if (currentPreparation == null) {
+            currentPreparation = aiClient.getCached(currentTitle);
+            if (currentPreparation == null) currentPreparation = LessonGenerator.generate(currentTitle, currentOutcomes);
+        }
         status.setText("أعبئ التحضير داخل نور...");
         webView.evaluateJavascript(fillScript(currentPreparation), raw -> {
             try {
@@ -460,7 +497,7 @@ public class MainActivity extends Activity {
         TextView info = new TextView(this);
         info.setText("الدرس: " + currentTitle
                 + "\nالصفحات: " + result.startPage + "–" + result.endPage
-                + "\nالطريقة: " + (result.automatic ? "مطابقة تلقائية" : "تحديد يدوي"));
+                + "\nالطريقة: " + (result.automatic ? "خريطة جاهزة/مطابقة تلقائية" : "تحديد يدوي")\n                + "\n" + result.matchedText);
         info.setTextSize(14);
         info.setTextDirection(View.TEXT_DIRECTION_RTL);
         list.addView(info);
