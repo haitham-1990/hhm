@@ -693,8 +693,8 @@ public class MainActivity extends Activity {
             return;
         }
         String html = (index == 0 ? "<hr><p><strong>تمارين الدرس من ملف خطواتي نحو التميز</strong></p>" : "")
-                + "<p><img src=\\"data:image/jpeg;base64," + images.get(index)
-                + "\\" style=\\"max-width:100%;height:auto;display:block;margin:12px auto;\\" /></p>";
+                + "<p><img src='data:image/jpeg;base64," + images.get(index)
+                + "' style='max-width:100%;height:auto;display:block;margin:12px auto;' /></p>";
         String js = "(function(){" + baseHelpers()
                 + "return appendToEditor('إجراءات سير الدرس'," + JSONObject.quote(html) + ");"
                 + "})()";
