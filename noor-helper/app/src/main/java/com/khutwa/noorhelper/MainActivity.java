@@ -15,6 +15,7 @@ import android.text.method.ScrollingMovementMethod;
 import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
@@ -27,6 +28,8 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
+import android.widget.ArrayAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -51,6 +54,10 @@ public class MainActivity extends Activity {
     private static final int REQUEST_EXPORT_REPORT = 302;
     private static final String PREFS = "noor_helper";
     private static final String KEY_PDF_URI = "exercise_pdf_uri";
+    private static final String KEY_AUTO_LAST_INDEX = "auto_last_index";
+    private static final String KEY_AUTO_TARGET_INDEX = "auto_target_index";
+    private static final String KEY_AUTO_PENDING_INDEX = "auto_pending_index";
+    private static final String KEY_AUTO_ACTIVE = "auto_active";
 
     private WebView webView;
     private TextView status;
@@ -65,6 +72,13 @@ public class MainActivity extends Activity {
     private volatile String lastLoadedUrl = "";
     private boolean guidedLearningWaiting = false;
     private String guidedFilledTitle = "";
+    private Spinner autoTargetSpinner;
+    private TextView autoProgress;
+    private boolean autoActive = false;
+    private boolean autoAwaitingSave = false;
+    private int autoCurrentIndex = -1;
+    private int autoTargetIndex = -1;
+    private final List<Grade9Curriculum.Lesson> autoLessons = Grade9Curriculum.allLessons();
 
     private Uri exercisePdfUri;
     private final List<Bitmap> exerciseImages = new ArrayList<>();
@@ -78,6 +92,7 @@ public class MainActivity extends Activity {
         learningRecorder = new NoorLearningRecorder(this);
         buildUi();
         loadSavedPdf();
+        restoreAutoUi();
         configureWebView();
         webView.loadUrl(NOOR_URL);
     }
@@ -93,7 +108,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.5.1");
+        title.setText("مساعد نور - التاسع 0.6.0");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -175,6 +190,51 @@ public class MainActivity extends Activity {
         learningActions.addView(exportLearning, weightedButton());
 
         root.addView(learningActions);
+
+        LinearLayout autoTargetRow = new LinearLayout(this);
+        autoTargetRow.setOrientation(LinearLayout.HORIZONTAL);
+        autoTargetRow.setGravity(Gravity.CENTER_VERTICAL);
+        autoTargetRow.setPadding(dp(4), dp(2), dp(4), dp(2));
+
+        TextView untilLabel = new TextView(this);
+        untilLabel.setText("حضّر حتى:");
+        untilLabel.setTextSize(13);
+        untilLabel.setPadding(dp(6), 0, dp(6), 0);
+        autoTargetRow.addView(untilLabel, new LinearLayout.LayoutParams(dp(82), dp(48)));
+
+        autoTargetSpinner = new Spinner(this);
+        List<String> lessonNames = new ArrayList<>();
+        for (Grade9Curriculum.Lesson l : autoLessons) lessonNames.add(l.displayName());
+        ArrayAdapter<String> lessonAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, lessonNames);
+        lessonAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        autoTargetSpinner.setAdapter(lessonAdapter);
+        autoTargetRow.addView(autoTargetSpinner, new LinearLayout.LayoutParams(0, dp(48), 1));
+        root.addView(autoTargetRow);
+
+        autoProgress = new TextView(this);
+        autoProgress.setTextSize(12);
+        autoProgress.setTextColor(Color.DKGRAY);
+        autoProgress.setPadding(dp(12), dp(2), dp(12), dp(4));
+        autoProgress.setTextDirection(View.TEXT_DIRECTION_RTL);
+        root.addView(autoProgress);
+
+        LinearLayout autoButtons = new LinearLayout(this);
+        autoButtons.setOrientation(LinearLayout.HORIZONTAL);
+        autoButtons.setPadding(dp(4), dp(1), dp(4), dp(6));
+
+        Button autoStart = makeButton("ابدأ تلقائي");
+        autoStart.setOnClickListener(v -> startAutoRun(false));
+        autoButtons.addView(autoStart, weightedButton());
+
+        Button autoResume = makeButton("متابعة");
+        autoResume.setOnClickListener(v -> startAutoRun(true));
+        autoButtons.addView(autoResume, weightedButton());
+
+        Button autoStop = makeButton("إيقاف");
+        autoStop.setOnClickListener(v -> stopAutoRun(false));
+        autoButtons.addView(autoStop, weightedButton());
+
+        root.addView(autoButtons);
         setContentView(root);
     }
 
@@ -225,13 +285,18 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 lastLoadedUrl = url == null ? "" : url;
-                String pdf = exercisePdfUri == null ? "لا يوجد PDF مرتبط." : "PDF التمارين مرتبط: " + pdfName(exercisePdfUri);
-                status.setText("نور مفتوح. اختر درس الصف التاسع ثم اضغط «تجهيز كامل». " + pdf);
+                if (!autoActive) {
+                    String pdf = exercisePdfUri == null ? "لا يوجد PDF مرتبط." : "PDF التمارين مرتبط: " + pdfName(exercisePdfUri);
+                    status.setText("نور مفتوح. اختر درس الصف التاسع أو استخدم التشغيل التلقائي. " + pdf);
+                }
                 if (learningRecorder != null && learningRecorder.isActive() && isNoorUrl(url)) {
                     webView.postDelayed(() -> {
                         injectLearningScript();
                         if (guidedLearningWaiting) watchForGuidedLesson(0);
                     }, 650);
+                }
+                if (autoActive && isNoorUrl(url)) {
+                    webView.postDelayed(() -> handleAutoPage(url), 850);
                 }
             }
         });
