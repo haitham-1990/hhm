@@ -20,10 +20,15 @@ final class Grade9SchedulePlanner {
         int offset = 0;
         int total = 0;
 
+        boolean beforeTarget = true;
         for (Grade9Curriculum.Lesson l : all) {
             if (sameUnit(l, target)) {
                 unit.add(l);
-                if (!l.code.equals(target.code)) offset += l.periods;
+                if (l.code.equals(target.code)) {
+                    beforeTarget = false;
+                } else if (beforeTarget) {
+                    offset += l.periods;
+                }
                 total += l.periods;
             }
         }
