@@ -162,7 +162,7 @@ final class NoorLearningRecorder {
         } catch (Exception ignored) {}
     }
 
-    private static void sanitize(JSONObject o) {
+    private static void sanitize(JSONObject o) throws Exception {
         JSONObject el = o.optJSONObject("element");
         if (el != null) {
             String type = el.optString("type", "");
