@@ -10,8 +10,8 @@ android {
         applicationId 'com.khutwa.noorhelper.compat'
         minSdk 23
         targetSdk 34
-        versionCode 2
-        versionName '0.1.1'
+        versionCode 3
+        versionName '0.2.0'
     }
 
     signingConfigs {
@@ -30,4 +30,8 @@ android {
             minifyEnabled false
         }
     }
+}
+
+dependencies {
+    implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
 }
