@@ -39,6 +39,15 @@ final class Grade9Curriculum {
             this.resources = resources;
         }
 
+        String noorCode() {
+            String[] p = code.split("-");
+            return p.length == 2 ? p[1] + "-" + p[0] : code;
+        }
+
+        String displayName() {
+            return noorCode() + " — " + title;
+        }
+
         String planSummary() {
             String week = weekStart == weekEnd ? "الأسبوع " + weekStart : "الأسابيع " + weekStart + "–" + weekEnd;
             return unit + "\nعدد الحصص الرسمي: " + periods
