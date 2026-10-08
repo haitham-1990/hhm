@@ -40,8 +40,7 @@ final class Grade9Curriculum {
         }
 
         String noorCode() {
-            String[] p = code.split("-");
-            return p.length == 2 ? p[1] + "-" + p[0] : code;
+            return code;
         }
 
         String displayName() {
