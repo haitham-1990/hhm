@@ -63,6 +63,8 @@ public class MainActivity extends Activity {
     private Button learnButton;
     private String pendingReport = "";
     private volatile String lastLoadedUrl = "";
+    private boolean guidedLearningWaiting = false;
+    private String guidedFilledTitle = "";
 
     private Uri exercisePdfUri;
     private final List<Bitmap> exerciseImages = new ArrayList<>();
@@ -91,7 +93,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.5.0");
+        title.setText("مساعد نور - التاسع 0.5.1");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -157,7 +159,7 @@ public class MainActivity extends Activity {
         learningActions.setOrientation(LinearLayout.HORIZONTAL);
         learningActions.setPadding(dp(4), dp(1), dp(4), dp(6));
 
-        learnButton = makeButton(learningRecorder.isActive() ? "إيقاف تعلم نور" : "بدء تعلم نور");
+        learnButton = makeButton(learningRecorder.isActive() ? "إيقاف التعلم" : "تعلم موجه");
         learnButton.setOnClickListener(v -> {
             if (learningRecorder.isActive()) stopNoorLearning();
             else startNoorLearning();
@@ -226,7 +228,10 @@ public class MainActivity extends Activity {
                 String pdf = exercisePdfUri == null ? "لا يوجد PDF مرتبط." : "PDF التمارين مرتبط: " + pdfName(exercisePdfUri);
                 status.setText("نور مفتوح. اختر درس الصف التاسع ثم اضغط «تجهيز كامل». " + pdf);
                 if (learningRecorder != null && learningRecorder.isActive() && isNoorUrl(url)) {
-                    webView.postDelayed(() -> injectLearningScript(), 650);
+                    webView.postDelayed(() -> {
+                        injectLearningScript();
+                        if (guidedLearningWaiting) watchForGuidedLesson(0);
+                    }, 650);
                 }
             }
         });
@@ -291,13 +296,18 @@ public class MainActivity extends Activity {
             return;
         }
         learningRecorder.startSession(webView.getUrl());
-        if (learnButton != null) learnButton.setText("إيقاف تعلم نور");
+        guidedLearningWaiting = true;
+        guidedFilledTitle = "";
+        if (learnButton != null) learnButton.setText("إيقاف التعلم");
         injectLearningScript();
-        status.setText("تعلم نور يعمل. نفّذ تحضيرًا واحدًا يدويًا حتى الحفظ، وأنا أسجل تسلسل الواجهة محليًا.");
+        status.setText("التعلم الموجه يعمل: اختر درسًا من شجرة نور فقط، وسأملأ محتوى التحضير تلقائيًا.");
         new AlertDialog.Builder(this)
-                .setTitle("بدأ تعلم نور")
-                .setMessage("نفّذ تحضيرًا واحدًا بالطريقة الطبيعية حتى النهاية. لن يتم تسجيل كلمة المرور أو محتوى النص الذي تكتبه، بل بنية الحقول والاختيارات وتسلسل ظهور العناصر والطلبات الفنية فقط.")
-                .setPositiveButton("ابدأ", null)
+                .setTitle("التعلم الموجه")
+                .setMessage("1) اختر درسًا واحدًا من شجرة نور.\n\n"
+                        + "2) التطبيق سيملأ تلقائيًا الأهداف والمستويات والاستراتيجيات والمصادر والمفاهيم والتهيئة والإجراءات والتقويمين والملاحظة الأسبوعية.\n\n"
+                        + "3) بعد أن تظهر رسالة «تم تجهيز المحتوى»، نفّذ أنت فقط: تاريخ النشر ← أسبوع العمل ← تحديد الحصص ← تعميم التحضير ← حفظ.\n\n"
+                        + "لا تحتاج أن تكتب شرحًا أو تعبئ حقول التحضير يدويًا.")
+                .setPositiveButton("ابدأ", (d, w) -> watchForGuidedLesson(0))
                 .show();
     }
 
@@ -307,13 +317,131 @@ public class MainActivity extends Activity {
             webView.evaluateJavascript("(function(){try{if(window.__khutwaNoorLearningStop)window.__khutwaNoorLearningStop();}catch(e){}return 'ok';})()", raw -> {});
         }
         learningRecorder.stopSession(webView.getUrl());
-        if (learnButton != null) learnButton.setText("بدء تعلم نور");
+        guidedLearningWaiting = false;
+        if (learnButton != null) learnButton.setText("تعلم موجه");
         status.setText("تم إيقاف تعلم نور. تم تسجيل " + learningRecorder.eventCount() + " حدثًا محليًا.");
         new AlertDialog.Builder(this)
                 .setTitle("تم حفظ جلسة التعلم")
                 .setMessage("تم تسجيل " + learningRecorder.eventCount() + " حدثًا. اضغط «تقرير نور» لحفظ ملف JSON وإرساله لي، أو «اختبار التعلم» لفحص العناصر التي تعلمها التطبيق.")
                 .setPositiveButton("حسنًا", null)
                 .show();
+    }
+
+    private void watchForGuidedLesson(int attempt) {
+        if (!guidedLearningWaiting || learningRecorder == null || !learningRecorder.isActive() || !isNoorPage()) return;
+
+        webView.evaluateJavascript(scanScript(), raw -> {
+            try {
+                JSONObject obj = new JSONObject(decodeJsString(raw));
+                String title = obj.optString("title", "").trim();
+                int editorCount = obj.optInt("editorCount", 0);
+
+                currentOutcomes.clear();
+                JSONArray arr = obj.optJSONArray("outcomes");
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) currentOutcomes.add(arr.optString(i));
+                }
+
+                if (!title.isEmpty()) {
+                    currentTitle = title;
+                    currentLesson = Grade9Curriculum.find(title);
+                    currentPreparation = Grade9PreparationBank.get(title);
+
+                    if (currentLesson != null && currentPreparation != null && !title.equals(guidedFilledTitle)) {
+                        if (editorCount < 4 && attempt < 20) {
+                            status.setText("تعرفت على " + currentLesson.code + " — أنتظر حقول التحضير حتى تكتمل...");
+                            webView.postDelayed(() -> watchForGuidedLesson(attempt + 1), 700);
+                            return;
+                        }
+                        fillGuidedLearningContent(title, currentLesson, currentPreparation);
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            if (guidedLearningWaiting && attempt < 120) {
+                status.setText("التعلم الموجه يعمل — اختر الدرس من شجرة نور.");
+                webView.postDelayed(() -> watchForGuidedLesson(attempt + 1), 800);
+            } else if (guidedLearningWaiting) {
+                toast("لم أتعرف على درس من الصف التاسع. افتح إضافة تحضير واختر الدرس ثم اضغط «تعلم موجه» من جديد.");
+            }
+        });
+    }
+
+    private void fillGuidedLearningContent(String title, Grade9Curriculum.Lesson lesson, LessonPreparation prep) {
+        guidedFilledTitle = title;
+        status.setText("تعرفت على " + lesson.code + " — أملأ محتوى التحضير تلقائيًا...");
+        webView.evaluateJavascript(guidedContentScript(prep, lesson), raw -> {
+            int filled = 0;
+            int objectives = 0;
+            int checks = 0;
+            int levels = 0;
+            try {
+                JSONObject result = new JSONObject(decodeJsString(raw));
+                filled = result.optInt("editors", 0);
+                objectives = result.optInt("objectives", 0);
+                checks = result.optInt("checks", 0);
+                levels = result.optInt("levels", 0);
+            } catch (Exception ignored) {}
+
+            if (filled < 4) {
+                guidedFilledTitle = "";
+                status.setText("بعض حقول التحضير لم تظهر بعد؛ سأعيد المحاولة...");
+                webView.postDelayed(() -> watchForGuidedLesson(0), 900);
+                return;
+            }
+
+            guidedLearningWaiting = false;
+            status.setText("تم تجهيز محتوى " + lesson.code + ". الآن نفّذ يدويًا: التاريخ ← الأسبوع ← الحصص ← التعميم ← حفظ.");
+            final String summary = "تمت تعبئة المحتوى تلقائيًا بدون توكنات:\n"
+                    + "الأهداف: " + objectives
+                    + "\nالاستراتيجيات/المصادر: " + checks
+                    + "\nالمستويات: " + levels
+                    + "\nحقول المحتوى: " + filled
+                    + "\n\nالآن لا تكتب أي شرح. نفّذ يدويًا فقط:\n"
+                    + "1. تاريخ النشر\n"
+                    + "2. أسبوع العمل\n"
+                    + "3. انتظر ظهور الحصص وحددها\n"
+                    + "4. تعميم التحضير على كافة الجداول\n"
+                    + "5. حفظ\n\n"
+                    + "بعد نجاح الحفظ اضغط «إيقاف التعلم»، ثم «تقرير نور».";
+            new AlertDialog.Builder(this)
+                    .setTitle("المحتوى جاهز")
+                    .setMessage(summary)
+                    .setPositiveButton("أكمل الخطوات", null)
+                    .show();
+        });
+    }
+
+    private String guidedContentScript(LessonPreparation p, Grade9Curriculum.Lesson lesson) {
+        List<String> strategyList = lesson == null
+                ? Arrays.asList("التعلم التعاوني", "التعلم بالاكتشاف", "التعلم المبني على حل المشكلات", "التعلم المتمايز")
+                : lesson.strategies;
+        List<String> resourceList = lesson == null
+                ? Arrays.asList("الكتاب", "السبورة التقليدية", "جهاز عرض البيانات")
+                : lesson.resources;
+
+        String strategies = new JSONArray(strategyList).toString();
+        String resources = new JSONArray(resourceList).toString();
+        String level = lesson == null ? "الفهم" : lesson.level;
+
+        return "(function(){" + baseHelpers()
+                + "window.__khutwaNoorLearningMute=true;"
+                + "try{"
+                + "var oc=0,arr=objectiveBoxes();for(var i=0;i<arr.length;i++){if(!arr[i].checked)arr[i].click();if(arr[i].checked)oc++;}"
+                + "var checks=0;function checkNames(names){for(var a=0;a<names.length;a++){var target=norm(names[a]);var cbs=[].slice.call(document.querySelectorAll('input[type=checkbox]'));for(var b=0;b<cbs.length;b++){var tx=norm(labelText(cbs[b]));if(tx&&tx.indexOf(target)>=0){if(!cbs[b].checked)cbs[b].click();if(cbs[b].checked)checks++;break;}}}}"
+                + "checkNames(" + strategies + ");checkNames(" + resources + ");"
+                + "var levels=setLevels(" + JSONObject.quote(level) + ");"
+                + "var ed=0;ed+=setEditor('المفاهيم'," + JSONObject.quote(toHtml(p.concepts)) + ");"
+                + "ed+=setEditor('التهيئة'," + JSONObject.quote(toHtml(p.intro)) + ");"
+                + "ed+=setEditor('إجراءات سير الدرس'," + JSONObject.quote(toHtml(p.procedures)) + ");"
+                + "ed+=setEditor('التقويم التكويني'," + JSONObject.quote(toHtml(p.formative)) + ");"
+                + "ed+=setEditor('التقويم الختامي'," + JSONObject.quote(toHtml(p.summative)) + ");"
+                + "ed+=setEditor('ملاحظات ضمن خطة الدراسة الأسبوعية'," + JSONObject.quote(toHtml(p.weeklyNote)) + ");"
+                + "disableByLabel('نشر التحضير للطلبة في خطة الدراسة الأسبوعية');disableByLabel('السماح للمعلمين بنسخ و استخدام تحضيري');"
+                + "return JSON.stringify({objectives:oc,checks:checks,levels:levels,editors:ed});"
+                + "}finally{window.__khutwaNoorLearningMute=false;}"
+                + "})()";
     }
 
     private void injectLearningScript() {
@@ -417,7 +545,7 @@ public class MainActivity extends Activity {
                 + "window.__khutwaNoorLearningInstalled=true;window.__khutwaNoorLearningActive=true;"
                 + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670]/g,'').replace(/\\s+/g,' ').trim();}"
                 + "function safeUrl(u){try{var x=new URL(u,location.href);return x.origin+x.pathname;}catch(e){return '';}}"
-                + "function send(o){try{if(!window.__khutwaNoorLearningActive||!window.KhutwaNoorBridge)return;o.url=location.origin+location.pathname;o.time=Date.now();window.KhutwaNoorBridge.record(JSON.stringify(o));}catch(e){}}"
+                + "function send(o){try{if(!window.__khutwaNoorLearningActive||window.__khutwaNoorLearningMute||!window.KhutwaNoorBridge)return;o.url=location.origin+location.pathname;o.time=Date.now();window.KhutwaNoorBridge.record(JSON.stringify(o));}catch(e){}}"
                 + "function labelFor(el){if(!el)return '';var t='';if(el.id){var ls=document.querySelectorAll('label');for(var i=0;i<ls.length;i++){if(ls[i].htmlFor===el.id){t=ls[i].innerText||ls[i].textContent||'';break;}}}if(!t&&el.closest&&el.closest('label'))t=el.closest('label').innerText||el.closest('label').textContent||'';if(!t&&el.parentElement)t=el.parentElement.innerText||el.parentElement.textContent||'';return norm(t).substring(0,180);}"
                 + "function cssPath(el){try{if(!el||!el.tagName)return '';if(el.id)return '#'+CSS.escape(el.id);var p=[],n=el;while(n&&n.nodeType===1&&p.length<5){var tag=n.tagName.toLowerCase(),i=1,s=n;while((s=s.previousElementSibling))if(s.tagName===n.tagName)i++;p.unshift(tag+':nth-of-type('+i+')');n=n.parentElement;}return p.join('>');}catch(e){return '';}}"
                 + "function desc(el){if(!el||!el.tagName)return null;var tag=el.tagName.toUpperCase(),type=(el.type||'').toLowerCase();var d={tag:tag,id:el.id||'',name:el.name||'',type:type,placeholder:el.placeholder||'',label:labelFor(el),text:norm(el.innerText||el.textContent||'').substring(0,180),path:cssPath(el)};if(tag==='SELECT'){d.value=el.value||'';d.selectedText=el.options&&el.selectedIndex>=0?norm(el.options[el.selectedIndex].text):'';}else if(type==='checkbox'||type==='radio'){d.checked=!!el.checked;d.value=el.value||'';}else if(type==='date'||type==='number'){d.value=el.value||'';}else if(type==='password'){d.value_redacted=true;}else if('value' in el&&el.value){d.value_length=String(el.value).length;}return d;}"
