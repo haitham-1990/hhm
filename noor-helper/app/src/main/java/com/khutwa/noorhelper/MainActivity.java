@@ -16,6 +16,7 @@ import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -36,6 +37,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -45,6 +48,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
     private static final String NOOR_URL = "https://lms.moe.gov.om/teacher#networkfirst";
     private static final int REQUEST_PICK_PDF = 301;
+    private static final int REQUEST_EXPORT_REPORT = 302;
     private static final String PREFS = "noor_helper";
     private static final String KEY_PDF_URI = "exercise_pdf_uri";
 
@@ -55,6 +59,10 @@ public class MainActivity extends Activity {
     private LessonPreparation currentPreparation;
     private Grade9Curriculum.Lesson currentLesson;
     private AiPreparationClient aiClient;
+    private NoorLearningRecorder learningRecorder;
+    private Button learnButton;
+    private String pendingReport = "";
+    private volatile String lastLoadedUrl = "";
 
     private Uri exercisePdfUri;
     private final List<Bitmap> exerciseImages = new ArrayList<>();
@@ -65,6 +73,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         PDFBoxResourceLoader.init(getApplicationContext());
         aiClient = new AiPreparationClient(this);
+        learningRecorder = new NoorLearningRecorder(this);
         buildUi();
         loadSavedPdf();
         configureWebView();
@@ -82,7 +91,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.4.2");
+        title.setText("مساعد نور - التاسع 0.5.0");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -143,6 +152,27 @@ public class MainActivity extends Activity {
         pdfActions.addView(aiImprove, weightedButton());
 
         root.addView(pdfActions);
+
+        LinearLayout learningActions = new LinearLayout(this);
+        learningActions.setOrientation(LinearLayout.HORIZONTAL);
+        learningActions.setPadding(dp(4), dp(1), dp(4), dp(6));
+
+        learnButton = makeButton(learningRecorder.isActive() ? "إيقاف تعلم نور" : "بدء تعلم نور");
+        learnButton.setOnClickListener(v -> {
+            if (learningRecorder.isActive()) stopNoorLearning();
+            else startNoorLearning();
+        });
+        learningActions.addView(learnButton, weightedButton());
+
+        Button testLearning = makeButton("اختبار التعلم");
+        testLearning.setOnClickListener(v -> testNoorLearning());
+        learningActions.addView(testLearning, weightedButton());
+
+        Button exportLearning = makeButton("تقرير نور");
+        exportLearning.setOnClickListener(v -> exportNoorReport());
+        learningActions.addView(exportLearning, weightedButton());
+
+        root.addView(learningActions);
         setContentView(root);
     }
 
@@ -179,6 +209,7 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
         webView.setWebChromeClient(new WebChromeClient());
+        webView.addJavascriptInterface(new LearningBridge(), "KhutwaNoorBridge");
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -191,8 +222,12 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                lastLoadedUrl = url == null ? "" : url;
                 String pdf = exercisePdfUri == null ? "لا يوجد PDF مرتبط." : "PDF التمارين مرتبط: " + pdfName(exercisePdfUri);
                 status.setText("نور مفتوح. اختر درس الصف التاسع ثم اضغط «تجهيز كامل». " + pdf);
+                if (learningRecorder != null && learningRecorder.isActive() && isNoorUrl(url)) {
+                    webView.postDelayed(() -> injectLearningScript(), 650);
+                }
             }
         });
     }
@@ -230,7 +265,195 @@ public class MainActivity extends Activity {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_PDF_URI, uri.toString()).apply();
             status.setText("تم ربط ملف التمارين: " + pdfName(uri));
             toast("تم حفظ ملف التمارين لهذا التطبيق.");
+            return;
         }
+
+        if (requestCode == REQUEST_EXPORT_REPORT && resultCode == RESULT_OK
+                && data != null && data.getData() != null && !pendingReport.isEmpty()) {
+            try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+                if (out != null) {
+                    out.write(pendingReport.getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                    toast("تم حفظ تقرير تعلم نور.");
+                    status.setText("تم تصدير تقرير نور. يمكنك إرساله لي لفهم المنصة بدقة.");
+                }
+            } catch (Exception e) {
+                toast("تعذر حفظ تقرير نور.");
+            } finally {
+                pendingReport = "";
+            }
+        }
+    }
+
+    private void startNoorLearning() {
+        if (!isNoorPage()) {
+            toast("افتح منصة نور أولاً.");
+            return;
+        }
+        learningRecorder.startSession(webView.getUrl());
+        if (learnButton != null) learnButton.setText("إيقاف تعلم نور");
+        injectLearningScript();
+        status.setText("تعلم نور يعمل. نفّذ تحضيرًا واحدًا يدويًا حتى الحفظ، وأنا أسجل تسلسل الواجهة محليًا.");
+        new AlertDialog.Builder(this)
+                .setTitle("بدأ تعلم نور")
+                .setMessage("نفّذ تحضيرًا واحدًا بالطريقة الطبيعية حتى النهاية. لن يتم تسجيل كلمة المرور أو محتوى النص الذي تكتبه، بل بنية الحقول والاختيارات وتسلسل ظهور العناصر والطلبات الفنية فقط.")
+                .setPositiveButton("ابدأ", null)
+                .show();
+    }
+
+    private void stopNoorLearning() {
+        if (!learningRecorder.isActive()) return;
+        if (isNoorPage()) {
+            webView.evaluateJavascript("(function(){try{if(window.__khutwaNoorLearningStop)window.__khutwaNoorLearningStop();}catch(e){}return 'ok';})()", raw -> {});
+        }
+        learningRecorder.stopSession(webView.getUrl());
+        if (learnButton != null) learnButton.setText("بدء تعلم نور");
+        status.setText("تم إيقاف تعلم نور. تم تسجيل " + learningRecorder.eventCount() + " حدثًا محليًا.");
+        new AlertDialog.Builder(this)
+                .setTitle("تم حفظ جلسة التعلم")
+                .setMessage("تم تسجيل " + learningRecorder.eventCount() + " حدثًا. اضغط «تقرير نور» لحفظ ملف JSON وإرساله لي، أو «اختبار التعلم» لفحص العناصر التي تعلمها التطبيق.")
+                .setPositiveButton("حسنًا", null)
+                .show();
+    }
+
+    private void injectLearningScript() {
+        if (!isNoorPage() || learningRecorder == null || !learningRecorder.isActive()) return;
+        webView.evaluateJavascript(learningScript(), raw -> {});
+    }
+
+    private void exportNoorReport() {
+        if (learningRecorder == null || learningRecorder.eventCount() == 0) {
+            toast("لا توجد جلسة تعلم مسجلة بعد.");
+            return;
+        }
+
+        if (!isNoorPage()) {
+            launchReportSave();
+            return;
+        }
+
+        webView.evaluateJavascript(pageSnapshotScript(), raw -> {
+            try {
+                String json = decodeJsString(raw);
+                learningRecorder.appendSnapshot(json);
+            } catch (Exception ignored) {}
+            launchReportSave();
+        });
+    }
+
+    private void launchReportSave() {
+        pendingReport = learningRecorder.buildReport(webView.getUrl());
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, "Noor-Learning-Report.json");
+        startActivityForResult(intent, REQUEST_EXPORT_REPORT);
+    }
+
+    private void testNoorLearning() {
+        if (!isNoorPage()) {
+            toast("افتح صفحة في نور أولاً.");
+            return;
+        }
+        JSONArray learned = learningRecorder.learnedDescriptors();
+        if (learned.length() == 0) {
+            toast("ابدأ «تعلم نور» ونفّذ خطوات يدوية أولاً.");
+            return;
+        }
+
+        status.setText("أختبر العناصر التي تعلمها التطبيق دون الضغط عليها...");
+        webView.evaluateJavascript(testLearnedScript(learned), raw -> {
+            try {
+                JSONObject result = new JSONObject(decodeJsString(raw));
+                int total = result.optInt("total", 0);
+                int found = result.optInt("found", 0);
+                JSONArray missing = result.optJSONArray("missing");
+                StringBuilder msg = new StringBuilder();
+                msg.append("تم العثور على ").append(found).append(" من ").append(total).append(" عنصرًا تعلمها التطبيق.");
+                if (missing != null && missing.length() > 0) {
+                    msg.append("\n\nأمثلة على العناصر غير الموجودة الآن:");
+                    for (int i = 0; i < Math.min(8, missing.length()); i++) {
+                        msg.append("\n• ").append(missing.optString(i));
+                    }
+                }
+                status.setText("اختبار التعلم: " + found + "/" + total + " عنصر موجود.");
+                new AlertDialog.Builder(this)
+                        .setTitle("اختبار تعلم نور")
+                        .setMessage(msg.toString())
+                        .setPositiveButton("حسنًا", null)
+                        .show();
+            } catch (Exception e) {
+                toast("تعذر تحليل اختبار التعلم.");
+            }
+        });
+    }
+
+    private boolean isNoorUrl(String url) {
+        try {
+            Uri uri = Uri.parse(url == null ? "" : url);
+            String host = uri.getHost();
+            return host != null && (host.equals("lms.moe.gov.om") || host.endsWith(".lms.moe.gov.om"));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private final class LearningBridge {
+        @JavascriptInterface
+        public void record(String json) {
+            if (learningRecorder == null || !learningRecorder.isActive()) return;
+            if (!isNoorUrl(lastLoadedUrl)) return;
+            learningRecorder.record(json);
+            int count = learningRecorder.eventCount();
+            if (count % 10 == 0) {
+                runOnUiThread(() -> status.setText("تعلم نور يعمل — تم تسجيل " + count + " حدثًا."));
+            }
+        }
+    }
+
+    private String learningScript() {
+        return "(function(){"
+                + "if(window.__khutwaNoorLearningInstalled){window.__khutwaNoorLearningActive=true;return 'active';}"
+                + "window.__khutwaNoorLearningInstalled=true;window.__khutwaNoorLearningActive=true;"
+                + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670]/g,'').replace(/\\s+/g,' ').trim();}"
+                + "function safeUrl(u){try{var x=new URL(u,location.href);return x.origin+x.pathname;}catch(e){return '';}}"
+                + "function send(o){try{if(!window.__khutwaNoorLearningActive||!window.KhutwaNoorBridge)return;o.url=location.origin+location.pathname;o.time=Date.now();window.KhutwaNoorBridge.record(JSON.stringify(o));}catch(e){}}"
+                + "function labelFor(el){if(!el)return '';var t='';if(el.id){var ls=document.querySelectorAll('label');for(var i=0;i<ls.length;i++){if(ls[i].htmlFor===el.id){t=ls[i].innerText||ls[i].textContent||'';break;}}}if(!t&&el.closest&&el.closest('label'))t=el.closest('label').innerText||el.closest('label').textContent||'';if(!t&&el.parentElement)t=el.parentElement.innerText||el.parentElement.textContent||'';return norm(t).substring(0,180);}"
+                + "function cssPath(el){try{if(!el||!el.tagName)return '';if(el.id)return '#'+CSS.escape(el.id);if(el.name)return el.tagName.toLowerCase()+'[name=\\"'+String(el.name).replace(/\\"/g,'')+'\\"]';var p=[],n=el;while(n&&n.nodeType===1&&p.length<5){var tag=n.tagName.toLowerCase(),i=1,s=n;while((s=s.previousElementSibling))if(s.tagName===n.tagName)i++;p.unshift(tag+':nth-of-type('+i+')');n=n.parentElement;}return p.join('>');}catch(e){return '';}}"
+                + "function desc(el){if(!el||!el.tagName)return null;var tag=el.tagName.toUpperCase(),type=(el.type||'').toLowerCase();var d={tag:tag,id:el.id||'',name:el.name||'',type:type,placeholder:el.placeholder||'',label:labelFor(el),text:norm(el.innerText||el.textContent||'').substring(0,180),path:cssPath(el)};if(tag==='SELECT'){d.value=el.value||'';d.selectedText=el.options&&el.selectedIndex>=0?norm(el.options[el.selectedIndex].text):'';}else if(type==='checkbox'||type==='radio'){d.checked=!!el.checked;d.value=el.value||'';}else if(type==='date'||type==='number'){d.value=el.value||'';}else if(type==='password'){d.value_redacted=true;}else if('value' in el&&el.value){d.value_length=String(el.value).length;}return d;}"
+                + "document.addEventListener('click',function(e){var el=e.target&&e.target.closest?e.target.closest('button,a,input,select,label,[role=button]'):e.target;send({kind:'click',element:desc(el)});},true);"
+                + "document.addEventListener('change',function(e){send({kind:'change',element:desc(e.target)});},true);"
+                + "document.addEventListener('focusin',function(e){var el=e.target;if(el&&/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))send({kind:'focus',element:desc(el)});},true);"
+                + "var mo=new MutationObserver(function(ms){var added=[];for(var i=0;i<ms.length;i++){var ns=ms[i].addedNodes||[];for(var j=0;j<ns.length;j++){var n=ns[j];if(!n||n.nodeType!==1)continue;var els=[];if(n.matches&&n.matches('input,select,textarea,button'))els.push(n);if(n.querySelectorAll){var q=n.querySelectorAll('input,select,textarea,button');for(var k=0;k<q.length&&els.length<12;k++)els.push(q[k]);}for(var z=0;z<els.length&&added.length<12;z++){var d=desc(els[z]);if(d)added.push(d);}}}if(added.length)send({kind:'dom_added',count:added.length,elements:added});});"
+                + "try{mo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}"
+                + "var oldFetch=window.fetch;if(oldFetch&&!window.__khutwaFetchWrapped){window.__khutwaFetchWrapped=true;window.fetch=function(){try{var a=arguments[0],m=(arguments[1]&&arguments[1].method)||'GET',u=typeof a==='string'?a:(a&&a.url)||'';send({kind:'fetch',method:m,url_path:safeUrl(u)});}catch(e){}return oldFetch.apply(this,arguments);};}"
+                + "if(window.XMLHttpRequest&&!window.__khutwaXhrWrapped){window.__khutwaXhrWrapped=true;var op=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){try{send({kind:'xhr',method:m||'GET',url_path:safeUrl(u)});}catch(e){}return op.apply(this,arguments);};}"
+                + "function route(){send({kind:'route',route:location.pathname+location.hash});}window.addEventListener('hashchange',route);window.addEventListener('popstate',route);"
+                + "window.__khutwaNoorLearningStop=function(){window.__khutwaNoorLearningActive=false;try{mo.disconnect();}catch(e){}};"
+                + "send({kind:'page_ready',title:document.title,controls:document.querySelectorAll('input,select,textarea,button').length});"
+                + "return 'installed';"
+                + "})()";
+    }
+
+    private String pageSnapshotScript() {
+        return "(function(){"
+                + "function norm(s){return (s||'').replace(/\\s+/g,' ').trim();}"
+                + "function lab(el){if(!el)return '';if(el.id){var l=document.querySelector('label[for=\\"'+String(el.id).replace(/\\"/g,'')+'\\"]');if(l)return norm(l.innerText||l.textContent).substring(0,160);}return el.closest&&el.closest('label')?norm(el.closest('label').innerText||el.closest('label').textContent).substring(0,160):'';}"
+                + "var els=[].slice.call(document.querySelectorAll('input,select,textarea,button,a'));var out=[];"
+                + "for(var i=0;i<els.length&&out.length<300;i++){var e=els[i],r=e.getBoundingClientRect();if(r.width===0&&r.height===0)continue;var type=(e.type||'').toLowerCase();var o={tag:e.tagName,id:e.id||'',name:e.name||'',type:type,label:lab(e),placeholder:e.placeholder||'',text:norm(e.innerText||e.textContent||'').substring(0,160)};if(e.tagName==='SELECT'){o.selectedText=e.options&&e.selectedIndex>=0?norm(e.options[e.selectedIndex].text):'';o.optionCount=e.options?e.options.length:0;}else if(type==='checkbox'||type==='radio'){o.checked=!!e.checked;}else if(type==='date'||type==='number'){o.value=e.value||'';}else if(type==='password'){o.redacted=true;}out.push(o);}"
+                + "return JSON.stringify({url:location.origin+location.pathname,title:document.title,visible_controls:out});"
+                + "})()";
+    }
+
+    private String testLearnedScript(JSONArray descriptors) {
+        return "(function(){"
+                + "var ds=" + descriptors.toString() + ";"
+                + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670]/g,'').replace(/\\s+/g,' ').trim();}"
+                + "function lab(el){if(!el)return '';if(el.id){var ls=document.querySelectorAll('label');for(var i=0;i<ls.length;i++){if(ls[i].htmlFor===el.id)return norm(ls[i].innerText||ls[i].textContent);}}return el.closest&&el.closest('label')?norm(el.closest('label').innerText||el.closest('label').textContent):'';}"
+                + "function find(d){var el=null;try{if(d.id)el=document.getElementById(d.id);if(!el&&d.name)el=document.querySelector((d.tag||'*').toLowerCase()+'[name=\\"'+String(d.name).replace(/\\"/g,'')+'\\"]');if(!el&&d.path)el=document.querySelector(d.path);}catch(e){}if(el)return el;var all=[].slice.call(document.querySelectorAll((d.tag||'*').toLowerCase()));for(var i=0;i<all.length;i++){var e=all[i],l=lab(e),p=norm(e.placeholder||''),t=norm(e.innerText||e.textContent||'');if(d.label&&l.indexOf(norm(d.label))>=0)return e;if(d.placeholder&&p.indexOf(norm(d.placeholder))>=0)return e;if(d.text&&t&&t.indexOf(norm(d.text))>=0)return e;}return null;}"
+                + "var found=0,missing=[];for(var i=0;i<ds.length;i++){if(find(ds[i]))found++;else if(missing.length<20)missing.push(ds[i].label||ds[i].text||ds[i].name||ds[i].id||ds[i].tag);}"
+                + "return JSON.stringify({total:ds.length,found:found,missing:missing});"
+                + "})()";
     }
 
     private String pdfName(Uri uri) {
