@@ -31,14 +31,18 @@ jobs:
       - name: Build debug APK
         working-directory: noor-helper
         run: gradle :app:assembleDebug --stacktrace
-      - name: Verify APK signature
+      - name: Verify APK signature and zip alignment
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs noor-helper/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 noor-helper/app/build/outputs/apk/debug/app-debug.apk
+      - name: Inspect manifest
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging noor-helper/app/build/outputs/apk/debug/app-debug.apk | head -n 8
       - name: Copy APK
-        run: cp noor-helper/app/build/outputs/apk/debug/app-debug.apk NoorHelper-0.2.0.apk
+        run: cp noor-helper/app/build/outputs/apk/debug/app-debug.apk NoorHelper-0.2.1-clean-install.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NoorHelper-0.2.0
-          path: NoorHelper-0.2.0.apk
+          name: NoorHelper-0.2.1-clean-install
+          path: NoorHelper-0.2.1-clean-install.apk
           if-no-files-found: error
