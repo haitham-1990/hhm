@@ -35,7 +35,7 @@ final class PdfExerciseExtractor {
         }
     }
 
-    private static final int MAX_PAGES = 4;
+    private static final int MAX_FALLBACK_PAGES = 4;
     private static final int MAX_WIDTH = 1200;
 
     private PdfExerciseExtractor() {}
@@ -45,74 +45,120 @@ final class PdfExerciseExtractor {
              PDDocument doc = PDDocument.load(in)) {
             if (doc.getNumberOfPages() == 0) throw new IllegalStateException("ملف PDF فارغ");
 
-            LessonKey key = LessonKey.from(lessonTitle);
-            int bestPage = -1;
-            int bestScore = -1;
-            String bestText = "";
-
-            for (int i = 0; i < doc.getNumberOfPages(); i++) {
-                String text = pageText(doc, i);
-                int score = score(text, key);
-                if (score > bestScore || (score == bestScore && score > 0 && i > bestPage)) {
-                    bestScore = score;
-                    bestPage = i;
-                    bestText = text;
-                }
+            ExerciseMap.Lesson mapped = ExerciseMap.find(lessonTitle);
+            if (mapped != null && doc.getNumberOfPages() >= 109) {
+                return extractMapped(doc, mapped);
             }
 
-            if (bestPage < 0 || bestScore < 18) {
-                throw new IllegalStateException("لم أتمكن من مطابقة الدرس تلقائيًا داخل ملف التمارين");
-            }
-
-            PageLocator startLocator = PageLocator.locate(doc, bestPage, key);
-            float startY = startLocator.bestStartY;
-            int lastPage = Math.min(doc.getNumberOfPages() - 1, bestPage + MAX_PAGES - 1);
-            float endY = -1f;
-
-            if (!key.nextCode.isEmpty()) {
-                boolean foundEnd = false;
-                for (int p = bestPage; p <= lastPage; p++) {
-                    PageLocator locator = PageLocator.locateNext(doc, p, key.nextCode, p == bestPage ? startY + 20f : 0f);
-                    if (locator.bestNextY >= 0) {
-                        lastPage = p;
-                        endY = locator.bestNextY;
-                        foundEnd = true;
-                        break;
-                    }
-                }
-                if (!foundEnd) endY = -1f;
-            }
-
-            PDFRenderer renderer = new PDFRenderer(doc);
-            List<Bitmap> images = new ArrayList<>();
-            for (int p = bestPage; p <= lastPage; p++) {
-                Bitmap page = renderer.renderImageWithDPI(p, 130, ImageType.RGB);
-                float pageHeightPt = doc.getPage(p).getCropBox().getHeight();
-
-                int top = 0;
-                int bottom = page.getHeight();
-
-                if (p == bestPage && startY > 0) {
-                    top = Math.max(0, Math.round((startY - 26f) / pageHeightPt * page.getHeight()));
-                }
-                if (p == lastPage && endY > 0) {
-                    bottom = Math.min(page.getHeight(), Math.round((endY - 18f) / pageHeightPt * page.getHeight()));
-                }
-
-                if (bottom - top < page.getHeight() / 5) {
-                    top = Math.max(0, top - page.getHeight() / 10);
-                    bottom = Math.min(page.getHeight(), bottom + page.getHeight() / 4);
-                }
-
-                Bitmap crop = Bitmap.createBitmap(page, 0, top, page.getWidth(), Math.max(1, bottom - top));
-                if (crop != page) page.recycle();
-                crop = downscale(crop, MAX_WIDTH);
-                images.add(crop);
-            }
-
-            if (images.isEmpty()) throw new IllegalStateException("تعذر إنشاء صور تمارين الدرس");
-            return new ExtractResult(images, bestPage + 1, lastPage + 1, cleanSnippet(bestText), true);
+            return extractByTextSearch(doc, lessonTitle);
         }
+    }
+
+    private static ExtractResult extractMapped(PDDocument doc, ExerciseMap.Lesson lesson) throws Exception {
+        PDFRenderer renderer = new PDFRenderer(doc);
+        List<Bitmap> images = new ArrayList<>();
+        int first = Integer.MAX_VALUE;
+        int last = -1;
+
+        for (ExerciseMap.Segment segment : lesson.segments) {
+            int pageIndex = segment.pdfPage - 1;
+            if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) continue;
+
+            Bitmap page = renderer.renderImageWithDPI(pageIndex, 135, ImageType.RGB);
+            Bitmap crop = page;
+
+            if (segment.side != ExerciseMap.Side.FULL) {
+                int half = page.getWidth() / 2;
+                int x = segment.side == ExerciseMap.Side.LEFT ? 0 : half;
+                int width = segment.side == ExerciseMap.Side.LEFT ? half : page.getWidth() - half;
+                crop = Bitmap.createBitmap(page, x, 0, width, page.getHeight());
+                if (crop != page) page.recycle();
+            }
+
+            crop = downscale(crop, MAX_WIDTH);
+            images.add(crop);
+            first = Math.min(first, segment.pdfPage);
+            last = Math.max(last, segment.pdfPage);
+        }
+
+        if (images.isEmpty()) throw new IllegalStateException("لم أتمكن من استخراج صفحات الدرس من الخريطة المحفوظة");
+        return new ExtractResult(
+                images,
+                first,
+                last,
+                "خريطة ثابتة: " + lesson.code + " " + lesson.title,
+                true
+        );
+    }
+
+    private static ExtractResult extractByTextSearch(PDDocument doc, String lessonTitle) throws Exception {
+        LessonKey key = LessonKey.from(lessonTitle);
+        int bestPage = -1;
+        int bestScore = -1;
+        String bestText = "";
+
+        for (int i = 0; i < doc.getNumberOfPages(); i++) {
+            String text = pageText(doc, i);
+            int score = score(text, key);
+            if (score > bestScore || (score == bestScore && score > 0 && i > bestPage)) {
+                bestScore = score;
+                bestPage = i;
+                bestText = text;
+            }
+        }
+
+        if (bestPage < 0 || bestScore < 18) {
+            throw new IllegalStateException("لم أتمكن من مطابقة الدرس تلقائيًا داخل ملف التمارين");
+        }
+
+        PageLocator startLocator = PageLocator.locate(doc, bestPage, key);
+        float startY = startLocator.bestStartY;
+        int lastPage = Math.min(doc.getNumberOfPages() - 1, bestPage + MAX_FALLBACK_PAGES - 1);
+        float endY = -1f;
+
+        if (!key.nextCode.isEmpty()) {
+            boolean foundEnd = false;
+            for (int p = bestPage; p <= lastPage; p++) {
+                PageLocator locator = PageLocator.locateNext(doc, p, key.nextCode, p == bestPage ? startY + 20f : 0f);
+                if (locator.bestNextY >= 0) {
+                    lastPage = p;
+                    endY = locator.bestNextY;
+                    foundEnd = true;
+                    break;
+                }
+            }
+            if (!foundEnd) endY = -1f;
+        }
+
+        PDFRenderer renderer = new PDFRenderer(doc);
+        List<Bitmap> images = new ArrayList<>();
+        for (int p = bestPage; p <= lastPage; p++) {
+            Bitmap page = renderer.renderImageWithDPI(p, 130, ImageType.RGB);
+            float pageHeightPt = doc.getPage(p).getCropBox().getHeight();
+
+            int top = 0;
+            int bottom = page.getHeight();
+
+            if (p == bestPage && startY > 0) {
+                top = Math.max(0, Math.round((startY - 26f) / pageHeightPt * page.getHeight()));
+            }
+            if (p == lastPage && endY > 0) {
+                bottom = Math.min(page.getHeight(), Math.round((endY - 18f) / pageHeightPt * page.getHeight()));
+            }
+
+            if (bottom - top < page.getHeight() / 5) {
+                top = Math.max(0, top - page.getHeight() / 10);
+                bottom = Math.min(page.getHeight(), bottom + page.getHeight() / 4);
+            }
+
+            Bitmap crop = Bitmap.createBitmap(page, 0, top, page.getWidth(), Math.max(1, bottom - top));
+            if (crop != page) page.recycle();
+            crop = downscale(crop, MAX_WIDTH);
+            images.add(crop);
+        }
+
+        if (images.isEmpty()) throw new IllegalStateException("تعذر إنشاء صور تمارين الدرس");
+        return new ExtractResult(images, bestPage + 1, lastPage + 1, cleanSnippet(bestText), true);
     }
 
     static ExtractResult extractRange(Context context, Uri uri, int startPageOneBased, int endPageOneBased) throws Exception {
@@ -124,11 +170,11 @@ final class PdfExerciseExtractor {
 
             PDFRenderer renderer = new PDFRenderer(doc);
             List<Bitmap> images = new ArrayList<>();
-            for (int p = start; p <= end && images.size() < MAX_PAGES; p++) {
+            for (int p = start; p <= end && images.size() < 8; p++) {
                 Bitmap page = renderer.renderImageWithDPI(p, 130, ImageType.RGB);
                 images.add(downscale(page, MAX_WIDTH));
             }
-            return new ExtractResult(images, start + 1, Math.min(end + 1, start + MAX_PAGES), "", false);
+            return new ExtractResult(images, start + 1, Math.min(end + 1, start + 8), "تحديد يدوي", false);
         }
     }
 
