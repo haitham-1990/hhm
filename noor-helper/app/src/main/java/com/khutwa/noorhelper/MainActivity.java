@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.4.0");
+        title.setText("مساعد نور - التاسع 0.4.2");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -417,46 +417,122 @@ public class MainActivity extends Activity {
             if (currentPreparation == null) currentPreparation = LessonGenerator.generate(currentTitle, currentOutcomes);
         }
 
-        status.setText("أعبئ التحضير والخطة الزمنية داخل نور...");
+        status.setText("أعبئ التحضير وأضع تاريخ النشر...");
         webView.evaluateJavascript(fillScript(currentPreparation, currentLesson), raw -> {
             try {
                 String jsonText = decodeJsString(raw);
                 JSONObject result = new JSONObject(jsonText);
-                int objectives = result.optInt("objectives", 0);
-                int editors = result.optInt("editors", 0);
-                int checks = result.optInt("checks", 0);
-                int levels = result.optInt("levels", 0);
-                int weekSet = result.optInt("week", 0);
-                int durationSet = result.optInt("duration", 0);
-                int dateSet = result.optInt("date", 0);
-                int allTables = result.optInt("allTables", 0);
-
-                String scheduleInfo = "\nالأسبوع: " + (weekSet > 0 ? "تم" : "راجع")
-                        + "\nوقت/عدد الحصص: " + (durationSet > 0 ? "تم" : "راجع")
-                        + "\nتاريخ التنفيذ: " + (dateSet > 0 ? "تم" : "راجع")
-                        + "\nالتعميم على الجداول: " + (allTables > 0 ? "مفعّل" : "راجع");
-
-                if (exercisePdfUri != null) {
-                    status.setText("تمت تعبئة التحضير والخطة. أجهز الآن تمارين الدرس من PDF...");
-                    extractExercises(true);
-                } else {
-                    status.setText("اكتملت التعبئة — راجع البيانات ثم احفظ في نور.");
-                    new AlertDialog.Builder(this)
-                            .setTitle("تمت التعبئة")
-                            .setMessage("الأهداف: " + objectives
-                                    + "\nالاستراتيجيات/المصادر: " + checks
-                                    + "\nالمستويات: " + levels
-                                    + "\nحقول النص: " + editors
-                                    + scheduleInfo
-                                    + "\n\nلا يوجد ملف تمارين مرتبط. راجع الحقول ثم اضغط حفظ في نور بنفسك.")
-                            .setPositiveButton("مراجعة", null)
-                            .show();
-                }
+                applyWeekThenSessions(result);
             } catch (Exception e) {
                 status.setText("انتهت محاولة التعبئة. راجع الحقول قبل الحفظ.");
-                toast("تمت المحاولة، وبعض حقول الوقت قد تحتاج مراجعة في أول تجربة.");
+                toast("تمت تعبئة المحتوى، لكن تعذر بدء تسلسل الأسبوع والحصص.");
             }
         });
+    }
+
+    private void applyWeekThenSessions(JSONObject baseResult) {
+        if (currentLesson == null) {
+            finishFill(baseResult, 0, 0);
+            return;
+        }
+
+        final int week = currentLesson.weekStart;
+        status.setText("تم تاريخ النشر. أختار الآن أسبوع العمل " + week + "...");
+        webView.postDelayed(() -> webView.evaluateJavascript(setWeekOnlyScript(week), raw -> {
+            int weekSet = parseJsInt(raw);
+            if (weekSet <= 0) {
+                status.setText("تعذر اختيار أسبوع العمل تلقائيًا. راجع القائمة.");
+                finishFill(baseResult, 0, 0);
+                return;
+            }
+
+            status.setText("تم اختيار أسبوع العمل. أنتظر نور ليحمّل حصص الأسبوع...");
+            selectSessionsWithRetry(baseResult, weekSet, 0);
+        }), 450);
+    }
+
+    private void selectSessionsWithRetry(JSONObject baseResult, int weekSet, int attempt) {
+        long delay = attempt == 0 ? 1200L : 750L;
+        webView.postDelayed(() -> webView.evaluateJavascript(selectVisibleMathSessionsScript(), raw -> {
+            int selected = 0;
+            int found = 0;
+            try {
+                String jsonText = decodeJsString(raw);
+                JSONObject r = new JSONObject(jsonText);
+                selected = r.optInt("selected", 0);
+                found = r.optInt("found", 0);
+            } catch (Exception ignored) {}
+
+            if (found == 0 && attempt < 4) {
+                status.setText("نور ما زال يحمّل الحصص... محاولة " + (attempt + 2) + " من 5");
+                selectSessionsWithRetry(baseResult, weekSet, attempt + 1);
+                return;
+            }
+
+            finishFill(baseResult, weekSet, selected);
+        }), delay);
+    }
+
+    private void finishFill(JSONObject result, int weekSet, int sessionsSelected) {
+        int objectives = result.optInt("objectives", 0);
+        int editors = result.optInt("editors", 0);
+        int checks = result.optInt("checks", 0);
+        int levels = result.optInt("levels", 0);
+        int dateSet = result.optInt("date", 0);
+        int allTables = result.optInt("allTables", 0);
+
+        String scheduleInfo = "\nتاريخ النشر: " + (dateSet > 0 ? "تم" : "راجع")
+                + "\nأسبوع العمل: " + (weekSet > 0 ? "تم" : "راجع")
+                + "\nحصص الرياضيات المحددة: " + sessionsSelected
+                + "\nالتعميم على الجداول: " + (allTables > 0 ? "مفعّل" : "راجع");
+
+        if (exercisePdfUri != null) {
+            status.setText("تم التاريخ والأسبوع وتحديد " + sessionsSelected + " حصة. أجهز الآن تمارين الدرس...");
+            extractExercises(true);
+        } else {
+            status.setText("اكتملت التعبئة — تم تحديد " + sessionsSelected + " حصة. راجع ثم احفظ.");
+            new AlertDialog.Builder(this)
+                    .setTitle("تمت التعبئة")
+                    .setMessage("الأهداف: " + objectives
+                            + "\nالاستراتيجيات/المصادر: " + checks
+                            + "\nالمستويات: " + levels
+                            + "\nحقول النص: " + editors
+                            + scheduleInfo
+                            + "\n\nراجع النتيجة ثم اضغط حفظ في نور بنفسك.")
+                    .setPositiveButton("مراجعة", null)
+                    .show();
+        }
+    }
+
+    private int parseJsInt(String raw) {
+        try {
+            if (raw == null || "null".equals(raw)) return 0;
+            return Integer.parseInt(raw.replace("\"", "").trim());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private String setWeekOnlyScript(int week) {
+        return "(function(){" + baseHelpers()
+                + "return setWorkWeek(" + week + ");"
+                + "})()";
+    }
+
+    private String selectVisibleMathSessionsScript() {
+        return "(function(){" + baseHelpers()
+                + "var w=findText('أسبوع العمل'),b=findText('تعميم التحضير على كافة الجداول');"
+                + "var y1=w?pos(w):-1,y2=b?pos(b):1e12;"
+                + "var cbs=[].slice.call(document.querySelectorAll('input[type=checkbox]'));"
+                + "var found=0,selected=0;"
+                + "for(var i=0;i<cbs.length;i++){var cb=cbs[i],r=cb.getBoundingClientRect();"
+                + "if(r.width===0&&r.height===0)continue;var y=r.top+window.scrollY;"
+                + "if(y1>=0&&y<=y1+40)continue;if(y<=y1||y>=y2)continue;"
+                + "var tx=norm(labelText(cb));if(!tx&&cb.parentElement)tx=norm(cb.parentElement.innerText||cb.parentElement.textContent||'');"
+                + "if(tx.indexOf(norm('الرياضيات'))<0||tx.indexOf(norm('الحصة'))<0)continue;"
+                + "found++;if(!cb.checked)cb.click();if(cb.checked)selected++;}"
+                + "return JSON.stringify({found:found,selected:selected});"
+                + "})()";
     }
 
     private void extractExercises(boolean afterFill) {
@@ -699,11 +775,9 @@ public class MainActivity extends Activity {
                 + "ed+=setEditor('التقويم الختامي'," + JSONObject.quote(toHtml(p.summative)) + ");"
                 + "ed+=setEditor('ملاحظات ضمن خطة الدراسة الأسبوعية'," + JSONObject.quote(toHtml(p.weeklyNote)) + ");"
                 + "var allTables=enableByLabel('تعميم التحضير على كافة الجداول');"
-                + "var weekSet=" + week + ">0?setWorkWeek(" + week + "):0;"
-                + "var durationSet=" + periods + ">0?setLabeledValue(['وقت تنفيذ الحصة','مدة تنفيذ الحصة','عدد الحصص']," + JSONObject.quote(String.valueOf(periods)) + "):0;"
                 + "var dateSet=setPublicationDate(" + JSONObject.quote(startDate) + ");"
                 + "disableByLabel('نشر التحضير للطلبة في خطة الدراسة الأسبوعية');disableByLabel('السماح للمعلمين بنسخ و استخدام تحضيري');"
-                + "return JSON.stringify({objectives:oc,checks:checks,levels:levels,editors:ed,week:weekSet,duration:durationSet,date:dateSet,allTables:allTables});"
+                + "return JSON.stringify({objectives:oc,checks:checks,levels:levels,editors:ed,date:dateSet,allTables:allTables});"
                 + "})()";
     }
 
