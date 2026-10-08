@@ -31,9 +31,14 @@ jobs:
       - name: Build debug APK
         working-directory: noor-helper
         run: gradle :app:assembleDebug --stacktrace
+      - name: Verify APK signature
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs noor-helper/app/build/outputs/apk/debug/app-debug.apk
+      - name: Copy compatibility APK
+        run: cp noor-helper/app/build/outputs/apk/debug/app-debug.apk NoorHelper-0.1.1-compat.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NoorHelper-0.1.0-debug
-          path: noor-helper/app/build/outputs/apk/debug/app-debug.apk
+          name: NoorHelper-0.1.1-compat
+          path: NoorHelper-0.1.1-compat.apk
           if-no-files-found: error
