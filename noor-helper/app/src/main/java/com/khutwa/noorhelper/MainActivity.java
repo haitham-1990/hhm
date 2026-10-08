@@ -53,6 +53,7 @@ public class MainActivity extends Activity {
     private String currentTitle = "";
     private final List<String> currentOutcomes = new ArrayList<>();
     private LessonPreparation currentPreparation;
+    private Grade9Curriculum.Lesson currentLesson;
     private AiPreparationClient aiClient;
 
     private Uri exercisePdfUri;
@@ -63,6 +64,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         PDFBoxResourceLoader.init(getApplicationContext());
+        aiClient = new AiPreparationClient(this);
         buildUi();
         loadSavedPdf();
         configureWebView();
@@ -80,7 +82,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور الشخصي 0.3.0");
+        title.setText("مساعد نور - التاسع 0.4.0");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -93,7 +95,7 @@ public class MainActivity extends Activity {
         root.addView(top);
 
         status = new TextView(this);
-        status.setText("سجّل الدخول في نور، ثم اختر الدرس. يمكنك ربط ملف PDF للتمارين من الأسفل.");
+        status.setText("اختر درس الصف التاسع في نور ثم اضغط «تجهيز كامل». التحضير الأساسي جاهز داخل التطبيق بدون توكنات.");
         status.setTextSize(13);
         status.setTextColor(Color.DKGRAY);
         status.setPadding(dp(12), dp(4), dp(12), dp(6));
@@ -114,7 +116,7 @@ public class MainActivity extends Activity {
         select.setOnClickListener(v -> selectAllObjectives());
         actions.addView(select, weightedButton());
 
-        Button prepare = makeButton("تجهيز AI");
+        Button prepare = makeButton("تجهيز كامل");
         prepare.setOnClickListener(v -> generatePreview());
         actions.addView(prepare, weightedButton());
 
@@ -135,6 +137,10 @@ public class MainActivity extends Activity {
         Button extractPdf = makeButton("تمارين هذا الدرس");
         extractPdf.setOnClickListener(v -> extractExercises(false));
         pdfActions.addView(extractPdf, weightedButton());
+
+        Button aiImprove = makeButton("تحسين AI");
+        aiImprove.setOnClickListener(v -> generateAiPreview());
+        pdfActions.addView(aiImprove, weightedButton());
 
         root.addView(pdfActions);
         setContentView(root);
@@ -186,7 +192,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 String pdf = exercisePdfUri == null ? "لا يوجد PDF مرتبط." : "PDF التمارين مرتبط: " + pdfName(exercisePdfUri);
-                status.setText("نور مفتوح. اختر الدرس ثم استخدم أزرار المساعد. " + pdf);
+                status.setText("نور مفتوح. اختر درس الصف التاسع ثم اضغط «تجهيز كامل». " + pdf);
             }
         });
     }
@@ -266,16 +272,32 @@ public class MainActivity extends Activity {
                 if (arr != null) {
                     for (int i = 0; i < arr.length(); i++) currentOutcomes.add(arr.optString(i));
                 }
+
                 int editorCount = obj.optInt("editorCount", 0);
-                currentPreparation = null;
-                String msg = "العنوان: " + (currentTitle.isEmpty() ? "لم يُكتشف" : currentTitle)
-                        + "\nالأهداف المكتشفة: " + currentOutcomes.size()
-                        + "\nمحررات النص المكتشفة: " + editorCount
-                        + "\nPDF التمارين: " + (exercisePdfUri == null ? "غير مرتبط" : pdfName(exercisePdfUri));
-                status.setText("تم الفحص: " + currentOutcomes.size() + " أهداف — " + currentTitle);
+                currentLesson = Grade9Curriculum.find(currentTitle);
+                currentPreparation = Grade9PreparationBank.get(currentTitle);
+
+                StringBuilder msg = new StringBuilder();
+                msg.append("العنوان: ").append(currentTitle.isEmpty() ? "لم يُكتشف" : currentTitle)
+                        .append("\nالأهداف المكتشفة في نور: ").append(currentOutcomes.size())
+                        .append("\nمحررات النص المكتشفة: ").append(editorCount)
+                        .append("\nPDF التمارين: ").append(exercisePdfUri == null ? "غير مرتبط" : pdfName(exercisePdfUri));
+
+                if (currentLesson != null) {
+                    msg.append("\n\nمطابقة الخطة الرسمية: نعم")
+                            .append("\n").append(currentLesson.planSummary())
+                            .append("\nالأهداف الرسمية المحفوظة: ").append(currentLesson.objectives.size())
+                            .append("\nالتحضير الجاهز: ").append(currentPreparation == null ? "غير متوفر" : "متوفر - صفر توكن");
+                    status.setText("تم التعرف على " + currentLesson.code + " — "
+                            + currentLesson.periods + " حصص — الأسبوع " + currentLesson.weekStart);
+                } else {
+                    msg.append("\n\nلم أتعرف على الدرس ضمن خطة الصف التاسع المحفوظة.");
+                    status.setText("تم الفحص، لكن الدرس غير موجود في قاعدة الصف التاسع.");
+                }
+
                 if (showDialog) new AlertDialog.Builder(this)
                         .setTitle("نتيجة الفحص")
-                        .setMessage(msg)
+                        .setMessage(msg.toString())
                         .setPositiveButton("حسنًا", null)
                         .show();
             } catch (Exception e) {
@@ -301,21 +323,44 @@ public class MainActivity extends Activity {
     private void generatePreview() {
         if (currentTitle.isEmpty()) {
             scanLesson(false);
-            toast("اضغط تجهيز AI مرة أخرى بعد اكتمال الفحص.");
+            toast("بعد ظهور اسم الدرس اضغط «تجهيز كامل» مرة أخرى.");
+            return;
+        }
+
+        currentLesson = Grade9Curriculum.find(currentTitle);
+        currentPreparation = Grade9PreparationBank.get(currentTitle);
+
+        if (currentPreparation != null) {
+            status.setText("التحضير جاهز داخل التطبيق — لا يوجد استهلاك توكنات.");
+            showPreparationPreview("قاعدة الصف التاسع الجاهزة — 0 توكن");
+            return;
+        }
+
+        currentPreparation = LessonGenerator.generate(currentTitle, currentOutcomes);
+        status.setText("الدرس غير موجود في بنك التاسع؛ استخدمت قالبًا محليًا احتياطيًا.");
+        showPreparationPreview("قالب محلي احتياطي — 0 توكن");
+    }
+
+    private void generateAiPreview() {
+        if (currentTitle.isEmpty()) {
+            scanLesson(false);
+            toast("بعد ظهور اسم الدرس اضغط «تحسين AI» مرة أخرى.");
             return;
         }
 
         LessonPreparation cached = aiClient.getCached(currentTitle);
         if (cached != null) {
             currentPreparation = cached;
-            status.setText("التحضير الذكي محفوظ لهذا الدرس — بدون طلب AI جديد.");
-            showPreparationPreview("من الذاكرة المحلية — صفر استهلاك جديد");
+            status.setText("نسخة AI محفوظة محليًا — لا يوجد استهلاك جديد.");
+            showPreparationPreview("تحسين AI محفوظ محليًا");
             return;
         }
 
-        status.setText("أجهز التحضير بالذكاء الاصطناعي لأول مرة لهذا الدرس...");
+        status.setText("أحسن التحضير بالذكاء الاصطناعي مرة واحدة فقط...");
         final String title = currentTitle;
-        final List<String> outcomes = new ArrayList<>(currentOutcomes);
+        final List<String> outcomes = currentLesson != null
+                ? new ArrayList<>(currentLesson.objectives)
+                : new ArrayList<>(currentOutcomes);
 
         worker.execute(() -> {
             try {
@@ -323,16 +368,15 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     if (!title.equals(currentTitle)) return;
                     currentPreparation = generated;
-                    status.setText("تم إنشاء التحضير وحفظه محليًا. المرات القادمة لن تحتاج طلب AI جديد.");
-                    showPreparationPreview("ذكاء اصطناعي — تم التخزين للاستخدام القادم");
+                    status.setText("تم حفظ نسخة AI على الجهاز؛ إعادة فتح الدرس لن تستهلك توكنات جديدة.");
+                    showPreparationPreview("تحسين AI اختياري — محفوظ محليًا");
                 });
             } catch (Exception e) {
-                LessonPreparation fallback = LessonGenerator.generate(title, outcomes);
                 runOnUiThread(() -> {
-                    if (!title.equals(currentTitle)) return;
-                    currentPreparation = fallback;
-                    status.setText("تعذر اتصال الذكاء؛ استخدمت التحضير المحلي المؤقت.");
-                    showPreparationPreview("قالب محلي مؤقت — تعذر الاتصال بالذكاء");
+                    currentPreparation = Grade9PreparationBank.get(title);
+                    if (currentPreparation == null) currentPreparation = LessonGenerator.generate(title, outcomes);
+                    status.setText("تعذر اتصال AI؛ بقي التحضير الجاهز داخل التطبيق.");
+                    showPreparationPreview("التحضير المحلي — 0 توكن");
                 });
             }
         });
@@ -340,7 +384,9 @@ public class MainActivity extends Activity {
 
     private void showPreparationPreview(String source) {
         TextView preview = new TextView(this);
-        preview.setText("المصدر: " + source + "\n\n" + currentPreparation.preview());
+        String plan = currentLesson == null ? "" : "\n\nالخطة الرسمية:\n" + currentLesson.planSummary()
+                + "\nالمستوى المقترح: " + currentLesson.level;
+        preview.setText("المصدر: " + source + plan + "\n\n" + currentPreparation.preview());
         preview.setTextSize(15);
         preview.setPadding(dp(20), dp(10), dp(20), dp(10));
         preview.setTextDirection(View.TEXT_DIRECTION_RTL);
@@ -364,12 +410,15 @@ public class MainActivity extends Activity {
             toast("تم تشغيل الفحص. بعد ظهور الدرس اضغط تعبئة مرة أخرى.");
             return;
         }
+
+        currentLesson = Grade9Curriculum.find(currentTitle);
         if (currentPreparation == null) {
-            currentPreparation = aiClient.getCached(currentTitle);
+            currentPreparation = Grade9PreparationBank.get(currentTitle);
             if (currentPreparation == null) currentPreparation = LessonGenerator.generate(currentTitle, currentOutcomes);
         }
-        status.setText("أعبئ التحضير داخل نور...");
-        webView.evaluateJavascript(fillScript(currentPreparation), raw -> {
+
+        status.setText("أعبئ التحضير والخطة الزمنية داخل نور...");
+        webView.evaluateJavascript(fillScript(currentPreparation, currentLesson), raw -> {
             try {
                 String jsonText = decodeJsString(raw);
                 JSONObject result = new JSONObject(jsonText);
@@ -377,25 +426,35 @@ public class MainActivity extends Activity {
                 int editors = result.optInt("editors", 0);
                 int checks = result.optInt("checks", 0);
                 int levels = result.optInt("levels", 0);
+                int weekSet = result.optInt("week", 0);
+                int durationSet = result.optInt("duration", 0);
+                int dateSet = result.optInt("date", 0);
+                int allTables = result.optInt("allTables", 0);
+
+                String scheduleInfo = "\nالأسبوع: " + (weekSet > 0 ? "تم" : "راجع")
+                        + "\nوقت/عدد الحصص: " + (durationSet > 0 ? "تم" : "راجع")
+                        + "\nتاريخ التنفيذ: " + (dateSet > 0 ? "تم" : "راجع")
+                        + "\nالتعميم على الجداول: " + (allTables > 0 ? "مفعّل" : "راجع");
 
                 if (exercisePdfUri != null) {
-                    status.setText("تمت تعبئة النص. أبحث الآن عن تمارين الدرس داخل PDF...");
+                    status.setText("تمت تعبئة التحضير والخطة. أجهز الآن تمارين الدرس من PDF...");
                     extractExercises(true);
                 } else {
-                    status.setText("اكتملت التعبئة المبدئية — راجع ثم اضغط حفظ في نور.");
+                    status.setText("اكتملت التعبئة — راجع البيانات ثم احفظ في نور.");
                     new AlertDialog.Builder(this)
                             .setTitle("تمت التعبئة")
                             .setMessage("الأهداف: " + objectives
                                     + "\nالاستراتيجيات/المصادر: " + checks
                                     + "\nالمستويات: " + levels
                                     + "\nحقول النص: " + editors
+                                    + scheduleInfo
                                     + "\n\nلا يوجد ملف تمارين مرتبط. راجع الحقول ثم اضغط حفظ في نور بنفسك.")
                             .setPositiveButton("مراجعة", null)
                             .show();
                 }
             } catch (Exception e) {
                 status.setText("انتهت محاولة التعبئة. راجع الحقول قبل الحفظ.");
-                toast("تمت المحاولة، لكن بعض الحقول قد تحتاج تعبئة يدوية في هذه النسخة التجريبية.");
+                toast("تمت المحاولة، وبعض حقول الوقت قد تحتاج مراجعة في أول تجربة.");
             }
         });
     }
@@ -613,27 +672,38 @@ public class MainActivity extends Activity {
                 + "})()";
     }
 
-    private String fillScript(LessonPreparation p) {
-        String strategies = new JSONArray(Arrays.asList(
-                "التعلم التعاوني", "التعلم بالاكتشاف", "التعلم المبني على حل المشكلات", "العصف الذهني", "التعلم المتمايز"
-        )).toString();
-        String resources = new JSONArray(Arrays.asList(
-                "الكتاب", "السبورة التقليدية", "جهاز عرض البيانات"
-        )).toString();
+    private String fillScript(LessonPreparation p, Grade9Curriculum.Lesson lesson) {
+        List<String> strategyList = lesson == null
+                ? Arrays.asList("التعلم التعاوني", "التعلم بالاكتشاف", "التعلم المبني على حل المشكلات", "التعلم المتمايز")
+                : lesson.strategies;
+        List<String> resourceList = lesson == null
+                ? Arrays.asList("الكتاب", "السبورة التقليدية", "جهاز عرض البيانات")
+                : lesson.resources;
+
+        String strategies = new JSONArray(strategyList).toString();
+        String resources = new JSONArray(resourceList).toString();
+        String level = lesson == null ? "الفهم" : lesson.level;
+        int periods = lesson == null ? 0 : lesson.periods;
+        int week = lesson == null ? 0 : lesson.weekStart;
+        String startDate = lesson == null ? "" : lesson.periodStart;
 
         return "(function(){" + baseHelpers()
                 + "var oc=0,arr=objectiveBoxes();for(var i=0;i<arr.length;i++){if(!arr[i].checked)arr[i].click();if(arr[i].checked)oc++;}"
                 + "var checks=0;function checkNames(names){for(var a=0;a<names.length;a++){var target=norm(names[a]);var cbs=[].slice.call(document.querySelectorAll('input[type=checkbox]'));for(var b=0;b<cbs.length;b++){var tx=norm(labelText(cbs[b]));if(tx&&tx.indexOf(target)>=0){if(!cbs[b].checked)cbs[b].click();if(cbs[b].checked)checks++;break;}}}}"
                 + "checkNames(" + strategies + ");checkNames(" + resources + ");"
-                + "var levels=0;var sels=[].slice.call(document.querySelectorAll('select'));for(var s=0;s<sels.length;s++){var opts=[].slice.call(sels[s].options||[]);for(var o=0;o<opts.length;o++){if(norm(opts[o].text).indexOf(norm('الفهم'))>=0){if(sels[s].multiple){opts[o].selected=true;}else{sels[s].value=opts[o].value;}sels[s].dispatchEvent(new Event('change',{bubbles:true}));if(window.jQuery){try{window.jQuery(sels[s]).trigger('chosen:updated').trigger('change');}catch(e){}}levels++;break;}}}"
+                + "var levels=setLevels(" + JSONObject.quote(level) + ");"
                 + "var ed=0;ed+=setEditor('المفاهيم'," + JSONObject.quote(toHtml(p.concepts)) + ");"
                 + "ed+=setEditor('التهيئة'," + JSONObject.quote(toHtml(p.intro)) + ");"
                 + "ed+=setEditor('إجراءات سير الدرس'," + JSONObject.quote(toHtml(p.procedures)) + ");"
                 + "ed+=setEditor('التقويم التكويني'," + JSONObject.quote(toHtml(p.formative)) + ");"
                 + "ed+=setEditor('التقويم الختامي'," + JSONObject.quote(toHtml(p.summative)) + ");"
                 + "ed+=setEditor('ملاحظات ضمن خطة الدراسة الأسبوعية'," + JSONObject.quote(toHtml(p.weeklyNote)) + ");"
+                + "var weekSet=" + week + ">0?setWeek(" + week + "):0;"
+                + "var durationSet=" + periods + ">0?setLabeledValue(['وقت تنفيذ الحصة','مدة تنفيذ الحصة','عدد الحصص']," + JSONObject.quote(String.valueOf(periods)) + "):0;"
+                + "var dateSet=setExecutionDate(" + JSONObject.quote(startDate) + ");"
+                + "var allTables=enableByLabel('تعميم التحضير على كافة الجداول');"
                 + "disableByLabel('نشر التحضير للطلبة في خطة الدراسة الأسبوعية');disableByLabel('السماح للمعلمين بنسخ و استخدام تحضيري');"
-                + "return JSON.stringify({objectives:oc,checks:checks,levels:levels,editors:ed});"
+                + "return JSON.stringify({objectives:oc,checks:checks,levels:levels,editors:ed,week:weekSet,duration:durationSet,date:dateSet,allTables:allTables});"
                 + "})()";
     }
 
@@ -641,14 +711,21 @@ public class MainActivity extends Activity {
         return "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670]/g,'').replace(/\\s+/g,' ').trim();}"
                 + "function findText(t){var q=norm(t),els=[].slice.call(document.querySelectorAll('label,legend,h1,h2,h3,h4,h5,strong,span,div,p'));var best=null,score=1e9;for(var i=0;i<els.length;i++){var x=norm(els[i].innerText||els[i].textContent);if(!x||x.indexOf(q)<0)continue;var r=els[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var sc=x.length-q.length;if(sc<score){score=sc;best=els[i];}}return best;}"
                 + "function nearestAfter(anchor,sel,max){if(!anchor)return null;var ar=anchor.getBoundingClientRect(),cs=[].slice.call(document.querySelectorAll(sel)),best=null,d=1e9;for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var dy=r.top-ar.bottom;if(dy>=-20&&dy<(max||700)&&dy<d){d=dy;best=cs[i];}}return best;}"
+                + "function fire(el){try{el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));if(window.jQuery){window.jQuery(el).trigger('chosen:updated').trigger('change');}}catch(e){}}"
                 + "function labelText(cb){if(!cb)return '';var t='';if(cb.id){var ls=[].slice.call(document.querySelectorAll('label'));for(var z=0;z<ls.length;z++){if(ls[z].htmlFor===cb.id){t=ls[z].innerText||ls[z].textContent||'';break;}}}if(!t&&cb.closest('label'))t=cb.closest('label').innerText||cb.closest('label').textContent||'';if(!t){var p=cb.parentElement;if(p)t=p.innerText||p.textContent||'';}return norm(t).replace(/^[-–•\\s]+/,'');}"
                 + "function pos(el){if(!el)return -1;var r=el.getBoundingClientRect();return r.top+window.scrollY;}"
                 + "function objectiveBoxes(){var a=findText('المخرجات التعليمية'),b=findText('الاستراتيجيات');var y1=pos(a),y2=pos(b);var all=[].slice.call(document.querySelectorAll('input[type=checkbox]'));var out=[];for(var i=0;i<all.length;i++){var r=all[i].getBoundingClientRect(),y=r.top+window.scrollY;if(y1>=0&&y2>y1&&y>y1-10&&y<y2-5){var tx=labelText(all[i]);if(tx&&tx.length>4)out.push(all[i]);}}if(out.length===0){for(var j=0;j<all.length;j++){var tx2=labelText(all[j]);if(/(يحدد|يحدّد|يجري|يطبق|يطبّق|يتعامل|الطلاب|الطالب)/.test(tx2))out.push(all[j]);}}return out;}"
                 + "function visibleEditors(){var a=[].slice.call(document.querySelectorAll('iframe,[contenteditable=true],textarea'));return a.filter(function(e){var r=e.getBoundingClientRect();return r.width>20&&r.height>20;});}"
                 + "function findEditor(label){var a=findText(label);if(!a)return null;var ar=a.getBoundingClientRect(),cs=visibleEditors(),best=null,d=1e9;for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect(),dy=r.top-ar.bottom;if(dy>=-30&&dy<650&&dy<d){d=dy;best=cs[i];}}return best;}"
-                + "function setEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.innerHTML=html;doc.body.dispatchEvent(new Event('input',{bubbles:true}));doc.body.dispatchEvent(new Event('change',{bubbles:true}));return 1;}}if(best.getAttribute('contenteditable')==='true'){best.innerHTML=html;best.dispatchEvent(new Event('input',{bubbles:true}));best.dispatchEvent(new Event('change',{bubbles:true}));return 1;}if(best.tagName==='TEXTAREA'){best.value=html.replace(/<br\\s*\\/?\\s*>/gi,'\\n').replace(/<[^>]+>/g,'');best.dispatchEvent(new Event('input',{bubbles:true}));best.dispatchEvent(new Event('change',{bubbles:true}));return 1;}}catch(e){}return 0;}"
-                + "function appendToEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.insertAdjacentHTML('beforeend',html);doc.body.dispatchEvent(new Event('input',{bubbles:true}));doc.body.dispatchEvent(new Event('change',{bubbles:true}));return 1;}}if(best.getAttribute('contenteditable')==='true'){best.insertAdjacentHTML('beforeend',html);best.dispatchEvent(new Event('input',{bubbles:true}));best.dispatchEvent(new Event('change',{bubbles:true}));return 1;}if(best.tagName==='TEXTAREA'){best.value+='\\nتمارين الدرس مرفقة كصور في النسخة المرئية.';best.dispatchEvent(new Event('input',{bubbles:true}));best.dispatchEvent(new Event('change',{bubbles:true}));return 1;}}catch(e){}return 0;}"
-                + "function disableByLabel(name){var q=norm(name),cbs=[].slice.call(document.querySelectorAll('input[type=checkbox]'));for(var i=0;i<cbs.length;i++){if(norm(labelText(cbs[i])).indexOf(q)>=0&&cbs[i].checked)cbs[i].click();}}";
+                + "function setEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.innerHTML=html;fire(doc.body);return 1;}}if(best.getAttribute('contenteditable')==='true'){best.innerHTML=html;fire(best);return 1;}if(best.tagName==='TEXTAREA'){best.value=html.replace(/<br\\s*\\/?\\s*>/gi,'\\n').replace(/<[^>]+>/g,'');fire(best);return 1;}}catch(e){}return 0;}"
+                + "function appendToEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.insertAdjacentHTML('beforeend',html);fire(doc.body);return 1;}}if(best.getAttribute('contenteditable')==='true'){best.insertAdjacentHTML('beforeend',html);fire(best);return 1;}if(best.tagName==='TEXTAREA'){best.value+='\\nتمارين الدرس مرفقة كصور في النسخة المرئية.';fire(best);return 1;}}catch(e){}return 0;}"
+                + "function setLevels(target){var n=0,q=norm(target),sels=[].slice.call(document.querySelectorAll('select'));for(var s=0;s<sels.length;s++){var opts=[].slice.call(sels[s].options||[]);for(var o=0;o<opts.length;o++){if(norm(opts[o].text).indexOf(q)>=0){if(sels[s].multiple){opts[o].selected=true;}else{sels[s].value=opts[o].value;}fire(sels[s]);n++;break;}}}return n;}"
+                + "function setControlValue(el,val){if(!el)return 0;try{if(el.tagName==='SELECT'){var opts=[].slice.call(el.options||[]),q=norm(val);for(var i=0;i<opts.length;i++){if(norm(opts[i].text)===q||norm(opts[i].text).indexOf(q)>=0||String(opts[i].value)===String(val)){el.value=opts[i].value;fire(el);return 1;}}return 0;}el.value=val;fire(el);return 1;}catch(e){return 0;}}"
+                + "function setLabeledValue(labels,val){for(var i=0;i<labels.length;i++){var a=findText(labels[i]);if(!a)continue;var el=nearestAfter(a,'select,input[type=number],input[type=text],input:not([type])',450);if(setControlValue(el,val))return 1;}return 0;}"
+                + "function setWeek(n){var a=findText('الأسبوع');if(!a)return 0;var el=nearestAfter(a,'select',500);if(!el)return 0;var names=['','الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع','الثامن','التاسع','العاشر','الحادي عشر','الثاني عشر','الثالث عشر','الرابع عشر','الخامس عشر','السادس عشر','السابع عشر','الثامن عشر','التاسع عشر'];var opts=[].slice.call(el.options||[]);for(var i=0;i<opts.length;i++){var tx=norm(opts[i].text);if(tx.indexOf(String(n))>=0||(names[n]&&tx.indexOf(norm(names[n]))>=0)){el.value=opts[i].value;fire(el);return 1;}}if(el.options&&el.options.length>n){el.selectedIndex=n;fire(el);return 1;}return 0;}"
+                + "function setExecutionDate(date){if(!date)return 0;var labels=['تاريخ التنفيذ','تاريخ الحصة','تاريخ بدء التنفيذ','وقت تنفيذ الحصة'];for(var i=0;i<labels.length;i++){var a=findText(labels[i]);if(!a)continue;var el=nearestAfter(a,'input[type=date]',500);if(el){el.value=date;fire(el);return 1;}}return 0;}"
+                + "function enableByLabel(name){var q=norm(name),cbs=[].slice.call(document.querySelectorAll('input[type=checkbox]'));for(var i=0;i<cbs.length;i++){if(norm(labelText(cbs[i])).indexOf(q)>=0){if(!cbs[i].checked)cbs[i].click();return cbs[i].checked?1:0;}}return 0;}"
+                + "function disableByLabel(name){var q=norm(name),cbs=[].slice.call(document.querySelectorAll('input[type=checkbox]'));for(var i=0;i<cbs.length;i++){if(norm(labelText(cbs[i])).indexOf(q)>=0){if(cbs[i].checked)cbs[i].click();return cbs[i].checked?0:1;}}return 0;}";
     }
 
     private static String toHtml(String text) {
