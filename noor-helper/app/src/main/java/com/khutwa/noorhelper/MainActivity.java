@@ -78,6 +78,7 @@ public class MainActivity extends Activity {
     private boolean autoAwaitingSave = false;
     private int autoCurrentIndex = -1;
     private int autoTargetIndex = -1;
+    private int autoPreparingIndex = -1;
     private final List<Grade9Curriculum.Lesson> autoLessons = Grade9Curriculum.allLessons();
 
     private Uri exercisePdfUri;
@@ -353,6 +354,505 @@ public class MainActivity extends Activity {
                 pendingReport = "";
             }
         }
+    }
+
+    private void restoreAutoUi() {
+        int last = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1);
+        int target = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_TARGET_INDEX, autoLessons.size() - 1);
+        if (autoTargetSpinner != null && !autoLessons.isEmpty()) {
+            target = Math.max(0, Math.min(autoLessons.size() - 1, target));
+            autoTargetSpinner.setSelection(target);
+        }
+        updateAutoProgressText(last);
+    }
+
+    private void updateAutoProgressText(int last) {
+        if (autoProgress == null || autoLessons.isEmpty()) return;
+        String completed = last >= 0 && last < autoLessons.size()
+                ? autoLessons.get(last).displayName()
+                : "لا يوجد";
+        int next = last + 1;
+        String nextText = next >= 0 && next < autoLessons.size()
+                ? autoLessons.get(next).displayName()
+                : "اكتمل الفصل";
+        int target = autoTargetSpinner == null ? -1 : autoTargetSpinner.getSelectedItemPosition();
+        String targetText = target >= 0 && target < autoLessons.size()
+                ? autoLessons.get(target).displayName()
+                : "غير محدد";
+        autoProgress.setText("آخر درس مكتمل: " + completed
+                + "\nالتالي: " + nextText
+                + "\nالتوقف عند: " + targetText);
+    }
+
+    private void startAutoRun(boolean resume) {
+        if (!isNoorPage()) {
+            toast("سجّل الدخول إلى نور أولاً.");
+            return;
+        }
+        if (exercisePdfUri == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("ملف التمارين مطلوب")
+                    .setMessage("اختر أولاً ملف PDF «خطواتي نحو التميز». التشغيل التلقائي سيستخرج صور كل درس منه ويضيفها للتحضير.")
+                    .setPositiveButton("اختيار PDF", (d, w) -> pickPdf())
+                    .setNegativeButton("إلغاء", null)
+                    .show();
+            return;
+        }
+        if (autoLessons.isEmpty()) {
+            toast("قائمة دروس التاسع غير متوفرة.");
+            return;
+        }
+
+        int target = autoTargetSpinner.getSelectedItemPosition();
+        int last = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1);
+        int pending = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_PENDING_INDEX, -1);
+        int start = last + 1;
+        if (resume && pending > last && pending < autoLessons.size()) start = pending;
+
+        if (target < start) {
+            final int selectedTarget = target;
+            new AlertDialog.Builder(this)
+                    .setTitle("الهدف قبل نقطة التقدم")
+                    .setMessage("آخر درس مكتمل محفوظ بعد الدرس الذي اخترته. هل تريد تصفير التقدم والبدء من أول درس حتى «"
+                            + autoLessons.get(selectedTarget).displayName() + "»؟")
+                    .setNegativeButton("إلغاء", null)
+                    .setPositiveButton("ابدأ من الأول", (d, w) -> {
+                        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                .putInt(KEY_AUTO_LAST_INDEX, -1)
+                                .putInt(KEY_AUTO_PENDING_INDEX, 0)
+                                .apply();
+                        beginAutoRunAt(0, selectedTarget);
+                    })
+                    .show();
+            return;
+        }
+        beginAutoRunAt(start, target);
+    }
+
+    private void beginAutoRunAt(int start, int target) {
+        if (start < 0 || start >= autoLessons.size()) {
+            toast("لا يوجد درس تالٍ للتحضير.");
+            return;
+        }
+        autoActive = true;
+        autoAwaitingSave = false;
+        autoPreparingIndex = -1;
+        autoCurrentIndex = start;
+        autoTargetIndex = Math.max(start, Math.min(autoLessons.size() - 1, target));
+
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_AUTO_ACTIVE, true)
+                .putInt(KEY_AUTO_TARGET_INDEX, autoTargetIndex)
+                .putInt(KEY_AUTO_PENDING_INDEX, autoCurrentIndex)
+                .apply();
+
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        status.setText("بدأ التشغيل التلقائي — " + autoLessons.get(autoCurrentIndex).displayName());
+        updateAutoProgressText(getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1));
+        handleAutoPage(webView.getUrl());
+    }
+
+    private void stopAutoRun(boolean completed) {
+        autoActive = false;
+        autoAwaitingSave = false;
+        autoPreparingIndex = -1;
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_AUTO_ACTIVE, false)
+                .apply();
+        int last = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1);
+        updateAutoProgressText(last);
+        if (completed) {
+            status.setText("اكتمل التحضير حتى الدرس المحدد.");
+            new AlertDialog.Builder(this)
+                    .setTitle("اكتمل التشغيل")
+                    .setMessage("تم الوصول إلى «" + autoLessons.get(Math.max(0, Math.min(last, autoLessons.size()-1))).displayName()
+                            + "» وحفظ نقطة التقدم. يمكنك اختيار درس أبعد من القائمة والضغط «متابعة» لاحقًا.")
+                    .setPositiveButton("حسنًا", null)
+                    .show();
+        } else {
+            status.setText("تم إيقاف التشغيل. نقطة التقدم محفوظة ويمكنك الضغط «متابعة» لاحقًا.");
+        }
+    }
+
+    private void stopAutoWithError(String message) {
+        autoActive = false;
+        autoAwaitingSave = false;
+        autoPreparingIndex = -1;
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_AUTO_ACTIVE, false)
+                .putInt(KEY_AUTO_PENDING_INDEX, autoCurrentIndex)
+                .apply();
+        int last = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1);
+        updateAutoProgressText(last);
+        status.setText("توقف التشغيل عند " + (autoCurrentIndex >= 0 && autoCurrentIndex < autoLessons.size()
+                ? autoLessons.get(autoCurrentIndex).displayName() : "الدرس الحالي"));
+        new AlertDialog.Builder(this)
+                .setTitle("توقف آمن")
+                .setMessage(message + "\n\nلم أسجل الدرس الحالي كمكتمل. بعد حل المشكلة اضغط «متابعة» وسيعيده من البداية.")
+                .setPositiveButton("حسنًا", null)
+                .show();
+    }
+
+    private void handleAutoPage(String url) {
+        if (!autoActive || url == null) return;
+        if (autoCurrentIndex < 0 || autoCurrentIndex >= autoLessons.size()) {
+            stopAutoWithError("فقدت رقم الدرس الحالي.");
+            return;
+        }
+
+        if (autoAwaitingSave && url.contains("/teacher/courses/preparations_index")) {
+            markAutoLessonSaved();
+            return;
+        }
+
+        if (url.contains("/teacher/courses/add_preparation")) {
+            if (autoPreparingIndex != autoCurrentIndex) prepareAutoLesson(autoCurrentIndex);
+            return;
+        }
+
+        if (url.contains("/teacher/courses/preparations_index")) {
+            navigateToAddPreparation();
+            return;
+        }
+
+        navigateToAddPreparation();
+    }
+
+    private void navigateToAddPreparation() {
+        if (!autoActive) return;
+        status.setText("أفتح صفحة إضافة التحضير...");
+        String js = "(function(){"
+                + "var els=[].slice.call(document.querySelectorAll('a,button'));"
+                + "function n(s){return (s||'').replace(/\\s+/g,' ').trim();}"
+                + "for(var i=0;i<els.length;i++){var t=n(els[i].innerText||els[i].textContent);"
+                + "if(t==='إضافة تحضير'||t.indexOf('إضافة تحضير')>=0){els[i].click();return 'add';}}"
+                + "for(var j=0;j<els.length;j++){var t2=n(els[j].innerText||els[j].textContent);"
+                + "if(t2==='تحضير الدروس'||t2.indexOf('تحضير الدروس')>=0){els[j].click();return 'prep';}}"
+                + "return 'none';})()";
+        webView.evaluateJavascript(js, raw -> {
+            String v = raw == null ? "" : raw.replace("\"", "");
+            if (v.contains("none")) {
+                webView.postDelayed(() -> {
+                    if (autoActive && !webView.getUrl().contains("/add_preparation")) {
+                        stopAutoWithError("لم أجد رابط «إضافة تحضير» في الصفحة الحالية. افتح صفحة التحاضير ثم اضغط «متابعة».");
+                    }
+                }, 1200);
+            }
+        });
+    }
+
+    private void prepareAutoLesson(int index) {
+        if (!autoActive || index < 0 || index >= autoLessons.size()) return;
+        autoPreparingIndex = index;
+        Grade9Curriculum.Lesson lesson = autoLessons.get(index);
+        currentLesson = lesson;
+        currentPreparation = Grade9PreparationBank.get(lesson.title);
+        currentTitle = lesson.noorCode() + " " + lesson.title;
+
+        if (currentPreparation == null) {
+            stopAutoWithError("لا يوجد تحضير محلي جاهز للدرس «" + lesson.displayName() + "».");
+            return;
+        }
+
+        status.setText("الدرس " + (index + 1) + " من " + (autoTargetIndex + 1)
+                + " — أختار «" + lesson.displayName() + "» من شجرة نور...");
+        autoTreeStage(lesson, 0, 0);
+    }
+
+    private void autoTreeStage(Grade9Curriculum.Lesson lesson, int stage, int retry) {
+        if (!autoActive || autoCurrentIndex < 0) return;
+        String query;
+        boolean exact = false;
+        if (stage == 0) query = "عرض الشجرة - الرياضيات";
+        else if (stage == 1) { query = "الأول"; exact = true; }
+        else if (stage == 2) {
+            int p = lesson.unit.indexOf(':');
+            query = p >= 0 ? lesson.unit.substring(p + 1).trim() : lesson.unit;
+        } else query = lesson.title;
+
+        webView.evaluateJavascript(treeClickScript(query, exact), raw -> {
+            int ok = parseJsInt(raw);
+            if (ok <= 0) {
+                if (retry < 9) {
+                    webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 650);
+                } else {
+                    stopAutoWithError("لم أجد «" + query + "» في شجرة المنهج.");
+                }
+                return;
+            }
+
+            if (stage < 3) {
+                webView.postDelayed(() -> autoTreeStage(lesson, stage + 1, 0), stage == 1 ? 900 : 700);
+            } else {
+                webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1000);
+            }
+        });
+    }
+
+    private String treeClickScript(String query, boolean exact) {
+        return "(function(){"
+                + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim();}"
+                + "var q=norm(" + JSONObject.quote(query) + "),a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a'));"
+                + "var best=null,bestLen=1e9;for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;"
+                + "var t=norm(a[i].innerText||a[i].textContent);if(!t)continue;"
+                + "var m=" + (exact ? "t===q" : "(t.indexOf(q)>=0||q.indexOf(t)>=0)") + ";"
+                + "if(m&&t.length<bestLen){best=a[i];bestLen=t.length;}}"
+                + "if(!best)return '0';best.click();return '1';})()";
+    }
+
+    private void waitForAutoLessonForm(Grade9Curriculum.Lesson lesson, int attempt) {
+        if (!autoActive) return;
+        String js = "(function(){var t=document.getElementById('PreparationTitle');"
+                + "var v=t?(t.value||''):'';"
+                + "var n=document.querySelectorAll('input[name^=\\"Preparation[criteria]\\"]').length;"
+                + "return JSON.stringify({title:v,criteria:n});})()";
+        webView.evaluateJavascript(js, raw -> {
+            boolean ready = false;
+            String foundTitle = "";
+            try {
+                JSONObject o = new JSONObject(decodeJsString(raw));
+                foundTitle = o.optString("title", "");
+                Grade9Curriculum.Lesson found = Grade9Curriculum.find(foundTitle);
+                ready = found != null && found.code.equals(lesson.code) && o.optInt("criteria", 0) > 0;
+            } catch (Exception ignored) {}
+
+            if (!ready) {
+                if (attempt < 14) {
+                    webView.postDelayed(() -> waitForAutoLessonForm(lesson, attempt + 1), 650);
+                } else {
+                    stopAutoWithError("نور لم يحمّل عنوان وأهداف الدرس «" + lesson.displayName() + "».");
+                }
+                return;
+            }
+
+            currentTitle = foundTitle;
+            currentPreparation = Grade9PreparationBank.get(foundTitle);
+            if (currentPreparation == null) currentPreparation = Grade9PreparationBank.get(lesson.title);
+            fillAutoLessonContent(lesson);
+        });
+    }
+
+    private void fillAutoLessonContent(Grade9Curriculum.Lesson lesson) {
+        if (!autoActive || currentPreparation == null) return;
+        status.setText("أعبئ محتوى " + lesson.displayName() + "...");
+        webView.evaluateJavascript(guidedContentScript(currentPreparation, lesson), raw -> {
+            int editors = 0;
+            try {
+                JSONObject o = new JSONObject(decodeJsString(raw));
+                editors = o.optInt("editors", 0);
+            } catch (Exception ignored) {}
+            if (editors < 4) {
+                stopAutoWithError("لم أستطع تعبئة جميع حقول محتوى الدرس.");
+                return;
+            }
+
+            webView.evaluateJavascript(autoFlagsScript(), ignored -> attachAutoPdf(lesson));
+        });
+    }
+
+    private String autoFlagsScript() {
+        return "(function(){"
+                + "function setCheck(id,on){var e=document.getElementById(id);if(!e)return 0;if(!!e.checked!==!!on)e.click();return !!e.checked===!!on?1:0;}"
+                + "var a=setCheck('PreparationSemesterPlan',true);"
+                + "var b=setCheck('PreparationAllowSharePreparations',true);"
+                + "var c=setCheck('PreparationShowInWeeklyStudyPlan',true);"
+                + "var g=setCheck('global',true);"
+                + "return JSON.stringify({semester:a,share:b,weekly:c,global:g});})()";
+    }
+
+    private void attachAutoPdf(Grade9Curriculum.Lesson lesson) {
+        if (!autoActive) return;
+        status.setText("أستخرج صور درس " + lesson.displayName() + " من PDF...");
+        final String lessonTitleForPdf = currentTitle;
+        worker.execute(() -> {
+            try {
+                PdfExerciseExtractor.ExtractResult result = PdfExerciseExtractor.extract(this, exercisePdfUri, lessonTitleForPdf);
+                List<String> base64Images = new ArrayList<>();
+                for (Bitmap bitmap : result.images) {
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 68, out);
+                    base64Images.add(Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP));
+                    if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+                }
+                runOnUiThread(() -> {
+                    status.setText("وجدت صور التمارين ص" + result.startPage + "–" + result.endPage + " — أضيفها للتحضير...");
+                    appendAutoImageAt(base64Images, 0, lesson);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> stopAutoWithError("تعذر استخراج صور الدرس من ملف PDF: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void appendAutoImageAt(List<String> images, int index, Grade9Curriculum.Lesson lesson) {
+        if (!autoActive) return;
+        if (index >= images.size()) {
+            applyAutoSchedule(lesson);
+            return;
+        }
+        String html = (index == 0 ? "<hr><p><strong>تمارين الدرس من ملف خطواتي نحو التميز</strong></p>" : "")
+                + "<p><img src=\\"data:image/jpeg;base64," + images.get(index)
+                + "\\" style=\\"max-width:100%;height:auto;display:block;margin:12px auto;\\" /></p>";
+        String js = "(function(){" + baseHelpers()
+                + "return appendToEditor('إجراءات سير الدرس'," + JSONObject.quote(html) + ");"
+                + "})()";
+        webView.evaluateJavascript(js, raw -> {
+            int ok = parseJsInt(raw);
+            if (ok > 0) {
+                appendAutoImageAt(images, index + 1, lesson);
+            } else {
+                stopAutoWithError("لم أستطع إضافة صور PDF داخل «إجراءات سير الدرس».");
+            }
+        });
+    }
+
+    private void applyAutoSchedule(Grade9Curriculum.Lesson lesson) {
+        List<String> dates = Grade9SchedulePlanner.datesFor(lesson);
+        if (dates.isEmpty()) {
+            stopAutoWithError("لم أستطع حساب تواريخ النشر من الخطة.");
+            return;
+        }
+        status.setText("أجهز " + dates.size() + " تاريخ/تواريخ نشر حسب الخطة...");
+        ensurePublicationRows(lesson, dates, 0);
+    }
+
+    private void ensurePublicationRows(Grade9Curriculum.Lesson lesson, List<String> dates, int attempt) {
+        if (!autoActive) return;
+        String js = "(function(){"
+                + "var es=[].slice.call(document.querySelectorAll('input[id^=publishdate-]')).filter(function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;});"
+                + "if(es.length>=" + dates.size() + ")return String(es.length);"
+                + "var first=document.getElementById('publishdate-1'),global=document.getElementById('global');"
+                + "var y1=first?first.getBoundingClientRect().top+window.scrollY:-1,y2=global?global.getBoundingClientRect().top+window.scrollY:1e12;"
+                + "var a=[].slice.call(document.querySelectorAll('a'));for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;"
+                + "var y=r.top+window.scrollY,t=(a[i].innerText||a[i].textContent||'').replace(/\\s+/g,' ').trim();"
+                + "if(t==='إضافة'&&y>y1&&y<y2){a[i].click();return '0';}}return '-1';})()";
+        webView.evaluateJavascript(js, raw -> {
+            int count = parseJsInt(raw);
+            if (count >= dates.size()) {
+                configureAutoPublicationRow(lesson, dates, 0, 0);
+            } else if (count == 0 && attempt < 12) {
+                webView.postDelayed(() -> ensurePublicationRows(lesson, dates, attempt + 1), 600);
+            } else if (count > 0 && count < dates.size() && attempt < 12) {
+                webView.postDelayed(() -> ensurePublicationRows(lesson, dates, attempt + 1), 450);
+            } else {
+                stopAutoWithError("تعذر إنشاء العدد المطلوب من أسطر «تاريخ النشر».");
+            }
+        });
+    }
+
+    private void configureAutoPublicationRow(Grade9Curriculum.Lesson lesson, List<String> dates, int index, int retry) {
+        if (!autoActive) return;
+        if (index >= dates.size()) {
+            finalizeAutoLessonAndSave(lesson);
+            return;
+        }
+        int row = index + 1;
+        String date = dates.get(index);
+        status.setText("أحدد تاريخ النشر " + date + " وأسبوع العمل (" + row + "/" + dates.size() + ")...");
+        webView.evaluateJavascript(setAutoPublicationRowScript(row, date), raw -> {
+            int ok = parseJsInt(raw);
+            if (ok <= 0) {
+                if (retry < 7) {
+                    webView.postDelayed(() -> configureAutoPublicationRow(lesson, dates, index, retry + 1), 500);
+                } else {
+                    stopAutoWithError("تعذر تعيين تاريخ النشر/أسبوع العمل للتاريخ " + date + ".");
+                }
+                return;
+            }
+            webView.postDelayed(() -> selectAutoTimeslots(lesson, dates, index, 0), 1100);
+        });
+    }
+
+    private String setAutoPublicationRowScript(int row, String date) {
+        return "(function(){" + baseHelpers()
+                + "var d=document.getElementById('publishdate-" + row + "');var w=document.getElementById('week_id-" + row + "');"
+                + "if(!d||!w)return '0';d.value=" + JSONObject.quote(date) + ";fire(d);"
+                + "var opts=[].slice.call(w.options||[]),target=null;"
+                + "for(var i=0;i<opts.length;i++){var tx=opts[i].text||'';var ms=tx.match(/(20\\d{2}-\\d{2}-\\d{2})/g);"
+                + "if(ms&&ms.length>=2&&" + JSONObject.quote(date) + ">=ms[0]&&" + JSONObject.quote(date) + "<=ms[1]){target=opts[i];break;}}"
+                + "if(!target)return '0';w.value=target.value;fire(w);return '1';})()";
+    }
+
+    private void selectAutoTimeslots(Grade9Curriculum.Lesson lesson, List<String> dates, int index, int attempt) {
+        if (!autoActive) return;
+        int row = index + 1;
+        String js = "(function(){var q='input[type=checkbox][name=\\"data[plane][date" + row + "][timeslot][]\\"]';"
+                + "var a=[].slice.call(document.querySelectorAll(q)).filter(function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;});"
+                + "var n=0;for(var i=0;i<a.length;i++){if(!a[i].checked)a[i].click();if(a[i].checked)n++;}return String(n);})()";
+        webView.evaluateJavascript(js, raw -> {
+            int selected = parseJsInt(raw);
+            if (selected <= 0) {
+                if (attempt < 9) {
+                    status.setText("أنتظر نور ليحمّل حصص " + dates.get(index) + "...");
+                    webView.postDelayed(() -> selectAutoTimeslots(lesson, dates, index, attempt + 1), 700);
+                } else {
+                    stopAutoWithError("لم تظهر حصص الرياضيات للتاريخ " + dates.get(index) + ".");
+                }
+                return;
+            }
+            status.setText("تم تحديد " + selected + " حصة في " + dates.get(index) + ".");
+            webView.postDelayed(() -> configureAutoPublicationRow(lesson, dates, index + 1, 0), 350);
+        });
+    }
+
+    private void finalizeAutoLessonAndSave(Grade9Curriculum.Lesson lesson) {
+        if (!autoActive) return;
+        webView.evaluateJavascript(autoFlagsScript(), raw -> {
+            status.setText("اكتمل " + lesson.displayName() + " — أحفظ في نور...");
+            autoAwaitingSave = true;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putInt(KEY_AUTO_PENDING_INDEX, autoCurrentIndex)
+                    .apply();
+
+            String js = "(function(){var t=document.getElementById('PreparationTitle');var f=t?t.form:null;"
+                    + "if(!f)return '0';var s=f.querySelector('input[type=submit],button[type=submit]');"
+                    + "if(!s)return '0';s.click();return '1';})()";
+            webView.evaluateJavascript(js, saveRaw -> {
+                int ok = parseJsInt(saveRaw);
+                if (ok <= 0) {
+                    autoAwaitingSave = false;
+                    stopAutoWithError("لم أجد زر حفظ نموذج التحضير.");
+                    return;
+                }
+                webView.postDelayed(() -> {
+                    if (autoActive && autoAwaitingSave
+                            && webView.getUrl() != null
+                            && webView.getUrl().contains("/add_preparation")) {
+                        autoAwaitingSave = false;
+                        stopAutoWithError("نور لم يؤكد الحفظ خلال الوقت المتوقع. راجع الصفحة لمعرفة رسالة التحقق.");
+                    }
+                }, 12000);
+            });
+        });
+    }
+
+    private void markAutoLessonSaved() {
+        if (!autoActive) return;
+        int done = autoCurrentIndex;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putInt(KEY_AUTO_LAST_INDEX, done)
+                .putInt(KEY_AUTO_PENDING_INDEX, done + 1)
+                .putInt(KEY_AUTO_TARGET_INDEX, autoTargetIndex)
+                .apply();
+
+        autoAwaitingSave = false;
+        autoPreparingIndex = -1;
+        updateAutoProgressText(done);
+
+        if (done >= autoTargetIndex) {
+            stopAutoRun(true);
+            return;
+        }
+
+        autoCurrentIndex = done + 1;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putInt(KEY_AUTO_PENDING_INDEX, autoCurrentIndex)
+                .apply();
+        status.setText("تم حفظ " + autoLessons.get(done).displayName()
+                + " — أنتقل إلى " + autoLessons.get(autoCurrentIndex).displayName() + "...");
+        webView.postDelayed(this::navigateToAddPreparation, 700);
     }
 
     private void startNoorLearning() {
