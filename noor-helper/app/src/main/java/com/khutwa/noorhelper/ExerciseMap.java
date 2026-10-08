@@ -87,12 +87,19 @@ final class ExerciseMap {
     static Lesson find(String noorTitle) {
         String text = arabicDigitsToLatin(noorTitle == null ? "" : noorTitle);
         Matcher m = Pattern.compile("(\\d+)\\s*[-–]\\s*(\\d+)").matcher(text);
+        String c = compact(text);
         if (m.find()) {
             Lesson lesson = LESSONS.get(m.group(1) + "-" + m.group(2));
-            if (lesson != null) return lesson;
+            // Noor/PDF may display the lesson/unit numbers in the opposite order
+            // from our internal unit/lesson map. Trust a numeric match only when
+            // the lesson title also matches; otherwise fall back to title matching.
+            if (lesson != null) {
+                String expectedTitle = compact(lesson.title);
+                if (!expectedTitle.isEmpty() && c.contains(expectedTitle)) return lesson;
+            }
         }
 
-        String c = compact(text);
+
         Lesson best = null;
         int bestLen = 0;
         for (Lesson lesson : LESSONS.values()) {
