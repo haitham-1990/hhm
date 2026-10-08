@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     private volatile String lastLoadedUrl = "";
     private boolean guidedLearningWaiting = false;
     private String guidedFilledTitle = "";
+    private Spinner autoStartSpinner;
     private Spinner autoTargetSpinner;
     private TextView autoProgress;
     private boolean autoActive = false;
@@ -110,7 +111,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.6.1");
+        title.setText("مساعد نور - التاسع 0.6.3");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -192,6 +193,26 @@ public class MainActivity extends Activity {
         learningActions.addView(exportLearning, weightedButton());
 
         root.addView(learningActions);
+
+        LinearLayout autoStartRow = new LinearLayout(this);
+        autoStartRow.setOrientation(LinearLayout.HORIZONTAL);
+        autoStartRow.setGravity(Gravity.CENTER_VERTICAL);
+        autoStartRow.setPadding(dp(4), dp(2), dp(4), dp(2));
+
+        TextView startLabel = new TextView(this);
+        startLabel.setText("ابدأ من:");
+        startLabel.setTextSize(13);
+        startLabel.setPadding(dp(6), 0, dp(6), 0);
+        autoStartRow.addView(startLabel, new LinearLayout.LayoutParams(dp(82), dp(48)));
+
+        autoStartSpinner = new Spinner(this);
+        List<String> startLessonNames = new ArrayList<>();
+        for (Grade9Curriculum.Lesson l : autoLessons) startLessonNames.add(l.displayName());
+        ArrayAdapter<String> startLessonAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, startLessonNames);
+        startLessonAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        autoStartSpinner.setAdapter(startLessonAdapter);
+        autoStartRow.addView(autoStartSpinner, new LinearLayout.LayoutParams(0, dp(48), 1));
+        root.addView(autoStartRow);
 
         LinearLayout autoTargetRow = new LinearLayout(this);
         autoTargetRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -359,10 +380,14 @@ public class MainActivity extends Activity {
 
     private void restoreAutoUi() {
         int last = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1);
+        int pending = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_PENDING_INDEX, last + 1);
         int target = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_TARGET_INDEX, autoLessons.size() - 1);
-        if (autoTargetSpinner != null && !autoLessons.isEmpty()) {
-            target = Math.max(0, Math.min(autoLessons.size() - 1, target));
-            autoTargetSpinner.setSelection(target);
+        if (!autoLessons.isEmpty()) {
+            int start = pending >= 0 ? pending : last + 1;
+            start = Math.max(0, Math.min(autoLessons.size() - 1, start));
+            target = Math.max(start, Math.min(autoLessons.size() - 1, target));
+            if (autoStartSpinner != null) autoStartSpinner.setSelection(start);
+            if (autoTargetSpinner != null) autoTargetSpinner.setSelection(target);
         }
         updateAutoProgressText(last);
     }
@@ -380,8 +405,13 @@ public class MainActivity extends Activity {
         String targetText = target >= 0 && target < autoLessons.size()
                 ? autoLessons.get(target).displayName()
                 : "غير محدد";
+        int chosenStart = autoStartSpinner == null ? next : autoStartSpinner.getSelectedItemPosition();
+        String startText = chosenStart >= 0 && chosenStart < autoLessons.size()
+                ? autoLessons.get(chosenStart).displayName()
+                : nextText;
         autoProgress.setText("آخر درس مكتمل: " + completed
-                + "\nالتالي: " + nextText
+                + "\nالبدء من: " + startText
+                + "\nالتالي المحفوظ: " + nextText
                 + "\nالتوقف عند: " + targetText);
     }
 
@@ -407,8 +437,18 @@ public class MainActivity extends Activity {
         int target = autoTargetSpinner.getSelectedItemPosition();
         int last = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1);
         int pending = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_PENDING_INDEX, -1);
-        int start = last + 1;
-        if (resume && pending > last && pending < autoLessons.size()) start = pending;
+        int chosenStart = autoStartSpinner == null ? 0 : autoStartSpinner.getSelectedItemPosition();
+        int start = chosenStart;
+        if (resume && pending >= 0 && pending < autoLessons.size()) start = pending;
+
+        if (!resume && start > 0) {
+            // User explicitly says earlier lessons are already done (useful after installing an updated build).
+            last = start - 1;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putInt(KEY_AUTO_LAST_INDEX, last)
+                    .putInt(KEY_AUTO_PENDING_INDEX, start)
+                    .apply();
+        }
 
         if (target < start) {
             final int selectedTarget = target;
@@ -572,42 +612,76 @@ public class MainActivity extends Activity {
 
     private void autoTreeStage(Grade9Curriculum.Lesson lesson, int stage, int retry) {
         if (!autoActive || autoCurrentIndex < 0) return;
-        String query;
-        boolean exact = false;
-        if (stage == 0) query = "عرض الشجرة - الرياضيات";
-        else if (stage == 1) { query = "الأول"; exact = true; }
-        else if (stage == 2) {
-            int p = lesson.unit.indexOf(':');
-            query = p >= 0 ? lesson.unit.substring(p + 1).trim() : lesson.unit;
-        } else query = lesson.title;
 
-        webView.evaluateJavascript(treeClickScript(query, exact), raw -> {
-            int ok = parseJsInt(raw);
-            if (ok <= 0) {
-                if (retry < 9) {
-                    webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 650);
-                } else {
-                    stopAutoWithError("لم أجد «" + query + "» في شجرة المنهج.");
+        if (stage >= 3) {
+            webView.evaluateJavascript(treeClickLessonScript(lesson), raw -> {
+                int ok = parseJsInt(raw);
+                if (ok <= 0) {
+                    if (retry < 14) {
+                        webView.postDelayed(() -> autoTreeStage(lesson, 2, retry + 1), 700);
+                    } else {
+                        stopAutoWithError("لم أجد درس «" + lesson.displayName() + "» ظاهرًا في شجرة المنهج.");
+                    }
+                    return;
                 }
-                return;
-            }
+                status.setText("تم اختيار " + lesson.displayName() + " — أنتظر نور ليحمّل العنوان والأهداف...");
+                webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1400);
+            });
+            return;
+        }
 
-            if (stage < 3) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage + 1, 0), stage == 1 ? 900 : 700);
+        String parent;
+        String child;
+        boolean exactParent = false;
+        if (stage == 0) {
+            parent = "عرض الشجرة - الرياضيات";
+            child = "الأول";
+        } else if (stage == 1) {
+            parent = "الأول";
+            exactParent = true;
+            int p = lesson.unit.indexOf(':');
+            child = p >= 0 ? lesson.unit.substring(p + 1).trim() : lesson.unit;
+        } else {
+            int p = lesson.unit.indexOf(':');
+            parent = p >= 0 ? lesson.unit.substring(p + 1).trim() : lesson.unit;
+            child = lesson.title;
+        }
+
+        webView.evaluateJavascript(treeEnsureChildScript(parent, child, exactParent), raw -> {
+            int state = parseJsInt(raw);
+            if (state == 2) {
+                webView.postDelayed(() -> autoTreeStage(lesson, stage + 1, 0), 250);
+            } else if (state == 1) {
+                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 700);
+            } else if (retry < 14) {
+                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 700);
             } else {
-                webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1000);
+                stopAutoWithError("لم أتمكن من فتح مسار الدرس «" + lesson.displayName() + "» في شجرة نور.");
             }
         });
     }
 
-    private String treeClickScript(String query, boolean exact) {
+    private String treeEnsureChildScript(String parentQuery, String childQuery, boolean exactParent) {
         return "(function(){"
                 + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim();}"
-                + "var q=norm(" + JSONObject.quote(query) + "),a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a'));"
-                + "var best=null,bestLen=1e9;for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;"
-                + "var t=norm(a[i].innerText||a[i].textContent);if(!t)continue;"
-                + "var m=" + (exact ? "t===q" : "(t.indexOf(q)>=0||q.indexOf(t)>=0)") + ";"
-                + "if(m&&t.length<bestLen){best=a[i];bestLen=t.length;}}"
+                + "function visible(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}"
+                + "var a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a')),cq=norm(" + JSONObject.quote(childQuery) + ");"
+                + "for(var i=0;i<a.length;i++){if(!visible(a[i]))continue;var ct=norm(a[i].innerText||a[i].textContent);if(ct&&(ct===cq||ct.indexOf(cq)>=0))return '2';}"
+                + "var pq=norm(" + JSONObject.quote(parentQuery) + "),best=null,bestLen=1e9;"
+                + "for(var j=0;j<a.length;j++){if(!visible(a[j]))continue;var t=norm(a[j].innerText||a[j].textContent);if(!t)continue;"
+                + "var m=" + (exactParent ? "t===pq" : "(t.indexOf(pq)>=0||pq.indexOf(t)>=0)") + ";if(m&&t.length<bestLen){best=a[j];bestLen=t.length;}}"
+                + "if(!best)return '0';best.click();return '1';})()";
+    }
+
+    private String treeClickLessonScript(Grade9Curriculum.Lesson lesson) {
+        return "(function(){"
+                + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/[\\s\\-–]+/g,'').trim();}"
+                + "var code=norm(" + JSONObject.quote(lesson.code) + "),title=norm(" + JSONObject.quote(lesson.title) + ");"
+                + "var a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a')),best=null,bestLen=1e9;"
+                + "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var t=norm(a[i].innerText||a[i].textContent);"
+                + "if(t&&t.indexOf(title)>=0&&t.indexOf(code)>=0&&t.length<bestLen){best=a[i];bestLen=t.length;}}"
+                + "if(!best){for(var j=0;j<a.length;j++){var rr=a[j].getBoundingClientRect();if(rr.width===0&&rr.height===0)continue;var tt=norm(a[j].innerText||a[j].textContent);"
+                + "if(tt&&tt.indexOf(title)>=0&&tt.length<bestLen){best=a[j];bestLen=tt.length;}}}"
                 + "if(!best)return '0';best.click();return '1';})()";
     }
 
@@ -620,18 +694,30 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(js, raw -> {
             boolean ready = false;
             String foundTitle = "";
+            int criteria = 0;
             try {
                 JSONObject o = new JSONObject(decodeJsString(raw));
                 foundTitle = o.optString("title", "");
+                criteria = o.optInt("criteria", 0);
                 Grade9Curriculum.Lesson found = Grade9Curriculum.find(foundTitle);
-                ready = found != null && found.code.equals(lesson.code) && o.optInt("criteria", 0) > 0;
+                ready = found != null && found.code.equals(lesson.code) && criteria > 0;
             } catch (Exception ignored) {}
 
             if (!ready) {
-                if (attempt < 14) {
-                    webView.postDelayed(() -> waitForAutoLessonForm(lesson, attempt + 1), 650);
+                if (attempt < 36) {
+                    if (attempt > 0 && attempt % 5 == 0) {
+                        status.setText("نور تأخر في تحميل " + lesson.displayName()
+                                + " — أعيد اختيار الدرس (محاولة " + (attempt / 5 + 1) + ")...");
+                        webView.evaluateJavascript(treeClickLessonScript(lesson), ignored ->
+                                webView.postDelayed(() -> waitForAutoLessonForm(lesson, attempt + 1), 1200));
+                    } else {
+                        status.setText("أنتظر عنوان وأهداف " + lesson.displayName()
+                                + " — " + Math.min(30, attempt + 1) + "ث");
+                        webView.postDelayed(() -> waitForAutoLessonForm(lesson, attempt + 1), 800);
+                    }
                 } else {
-                    stopAutoWithError("نور لم يحمّل عنوان وأهداف الدرس «" + lesson.displayName() + "».");
+                    stopAutoWithError("نور لم يحمّل عنوان وأهداف الدرس «" + lesson.displayName()
+                            + "» بعد إعادة اختياره عدة مرات.");
                 }
                 return;
             }
