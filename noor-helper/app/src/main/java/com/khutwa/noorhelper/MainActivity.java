@@ -52,7 +52,8 @@ public class MainActivity extends Activity {
     private TextView status;
     private String currentTitle = "";
     private final List<String> currentOutcomes = new ArrayList<>();
-    private LessonPreparation currentPreparation;\n    private AiPreparationClient aiClient;
+    private LessonPreparation currentPreparation;
+    private AiPreparationClient aiClient;
 
     private Uri exercisePdfUri;
     private final List<Bitmap> exerciseImages = new ArrayList<>();
@@ -497,7 +498,8 @@ public class MainActivity extends Activity {
         TextView info = new TextView(this);
         info.setText("الدرس: " + currentTitle
                 + "\nالصفحات: " + result.startPage + "–" + result.endPage
-                + "\nالطريقة: " + (result.automatic ? "خريطة جاهزة/مطابقة تلقائية" : "تحديد يدوي")\n                + "\n" + result.matchedText);
+                + "\nالطريقة: " + (result.automatic ? "خريطة جاهزة/مطابقة تلقائية" : "تحديد يدوي")
+                + "\n" + result.matchedText);
         info.setTextSize(14);
         info.setTextDirection(View.TEXT_DIRECTION_RTL);
         list.addView(info);
