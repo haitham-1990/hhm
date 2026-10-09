@@ -89,8 +89,7 @@ final class ExerciseMap {
         Matcher m = Pattern.compile("(\\d+)\\s*[-–]\\s*(\\d+)").matcher(text);
         String c = compact(text);
         if (m.find()) {
-            // Noor titles use lesson-unit; our PDF map uses unit-lesson.
-            Lesson lesson = LESSONS.get(m.group(2) + "-" + m.group(1));
+            Lesson lesson = LESSONS.get(m.group(1) + "-" + m.group(2));
             if (lesson != null) return lesson;
         }
 
