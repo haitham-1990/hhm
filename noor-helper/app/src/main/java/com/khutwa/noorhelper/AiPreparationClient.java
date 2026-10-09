@@ -912,7 +912,7 @@ final class AiPreparationClient {
     SourceResult generateFromSources(String title, List<String> noorOutcomes,
                                      String planContext, String materialContext) throws Exception {
         String sourceKey = title + "\n" + planContext + "\n" + materialContext;
-        String key = "source_" + hashShort(sourceKey);
+        String key = "source_flow_v2_" + hashShort(sourceKey);
         String cached = prefs().getString(key, null);
         if (cached != null && !cached.trim().isEmpty()) {
             return parseSourceResult(title, cached);
@@ -958,7 +958,8 @@ final class AiPreparationClient {
                 repairPayload.put("message",
                         "أصلح النص التالي إلى JSON صحيح فقط دون أي شرح، مع الحفاظ على المعنى وجميع الحقول "
                         + "o,l,periods,start,end,st,rs,c,i,p,f,s,w. "
-                        + "لا تضف مفاتيح جديدة. الدرس: " + limit(title, 180)
+                        + "الحقل p يمكن أن يكون مصفوفة مراحل تدريسية بعناصر t,teacher,student,source,check,pg. "
+                        + "لا تضف مفاتيح أخرى. الدرس: " + limit(title, 180)
                         + "\nالنص غير الصالح:\n" + limitRaw(answer, 7000));
                 String repaired = cleanJson(postForAnswer(repairPayload));
                 result = parseSourceResult(title, repaired);
@@ -974,27 +975,42 @@ final class AiPreparationClient {
 
     private static String buildSourcePrompt(String title, List<String> noorOutcomes,
                                             String planContext, String materialContext) {
-        StringBuilder b = new StringBuilder(22000);
-        b.append("أنت محرك تحضير دروس لمنصة نور في سلطنة عمان. ");
+        StringBuilder b = new StringBuilder(26000);
+        b.append("أنت محرك تحضير تربوي عام لمنصة نور في سلطنة عمان. ");
+        b.append("المعلم قد يدرّس أي مادة وأي صف؛ لا تفترض الرياضيات أو نوعاً محدداً من الدروس. ");
         b.append("اعتمد حصراً على مقتطف الخطة الدراسية ومقتطف المادة العلمية أدناه. ");
+        b.append("افهم المادة العلمية أولاً: ميّز بين الشرح، المفهوم، المثال، النص، الشكل، الجدول، التجربة، النشاط، السؤال أو التمرين بحسب ما يظهر فعلياً. ");
+        b.append("بعد الفهم، أعد تنظيم الدرس تربوياً؛ لا تنسخ صفحات المصدر كسرد طويل، ولا تجعل بنية سير الدرس قالباً ثابتاً لا يناسب المادة. ");
         b.append("لا تخترع مخرجاً رسمياً أو تاريخاً أو عدد حصص غير مذكور في الخطة. ");
-        b.append("إذا لم يظهر تاريخ أو عدد حصص بوضوح أرجع قيمة فارغة/0. ");
-        b.append("أما الأنشطة والتقويم والتهيئة فيجب بناؤها تربوياً من محتوى المادة العلمية ومخرج الدرس.\n");
+        b.append("إذا لم يظهر تاريخ أو عدد حصص بوضوح أرجع قيمة فارغة/0.\n");
         b.append("الدرس المستهدف: ").append(limit(title, 220)).append("\n");
+
         if (noorOutcomes != null && !noorOutcomes.isEmpty()) {
             b.append("المخرجات الظاهرة حالياً في نور (للمقارنة فقط):\n");
             for (int i = 0; i < Math.min(8, noorOutcomes.size()); i++) {
                 b.append("- ").append(limit(noorOutcomes.get(i), 220)).append("\n");
             }
         }
+
         b.append("\n=== مقتطف الخطة الدراسية ===\n").append(limitRaw(planContext, 7000));
         b.append("\n\n=== مقتطف المادة العلمية ===\n").append(limitRaw(materialContext, 14000));
+
+        b.append("\n\nأنشئ سير درس عملياً واضحاً من 3 إلى 6 مراحل بحسب طبيعة المحتوى نفسه. ");
+        b.append("قد تكون المرحلة استكشافاً، قراءة وتحليلاً، تجربة، نمذجة، مثالاً موجهاً، مناقشة، تطبيقاً، ممارسة أو غير ذلك؛ اختر ما يناسب المصدر. ");
+        b.append("لكل مرحلة اذكر: عنواناً قصيراً، دور المعلم، دور الطالب، ما يستخدم من المادة العلمية، وطريقة تحقق سريعة من التعلم. ");
+        b.append("اجعل التعليمات قابلة للتنفيذ داخل الحصة وليست عبارات عامة. ");
+        b.append("لا تضع إجابات مباشرة لأسئلة الكتاب أو التمارين، ويمكنك وصف طريقة التوجيه دون كشف الحل. ");
+        b.append("إذا كانت صفحة معينة تحتوي عنصراً بصرياً مفيداً للمرحلة مثل شكل أو جدول أو خريطة أو تجربة أو مثال يستحق العرض، ");
+        b.append("ضع رقم صفحة PDF الحقيقي في pg كما يظهر فقط في علامة [MATERIAL PDF N]. ");
+        b.append("لا تضع رقم صفحة بالتخمين، ولا تستخدم pg لمجرد أن الصفحة تحتوي نصاً. ");
+        b.append("استخدم بحد أقصى 3 صفحات بصرية فريدة في الدرس كله، ويمكن أن تكون pg فارغة تماماً.");
 
         b.append("\n\nاختر الاستراتيجيات فقط من هذه القائمة وبالأسماء نفسها: ");
         b.append("الفصل المقلوب، التعلم التعاوني، التعلم التشاركي، التعلم الذاتي، التعلم بالاكتشاف، ");
         b.append("التعلم المبني على حل المشكلات، التعلم المبني على المشاريع، التعلم المبني على اللعب، ");
         b.append("التعلم بالنمذجة، التعلم المتمايز، الخرائط الذهنية، العصف الذهني، رحلات تعليمية، ");
         b.append("رحلات تعليمية افتراضية، تجارب معملية، تجارب معملية افتراضية، تقارير كتب، دراسة حالة، أخرى.");
+
         b.append("\nواختر المصادر التعليمية فقط من هذه القائمة وبالأسماء نفسها: ");
         b.append("الكتاب، كتب إلكترونية، السبورة التقليدية، السبورة الذكية، الأقلام، جهاز عرض البيانات، ");
         b.append("جهاز الحاسب، صورة توضيحية، عروض تقديمية، نماذج مجسمة، الوسائط المتعددة، الوسائط الاجتماعية، ");
@@ -1005,11 +1021,17 @@ final class AiPreparationClient {
         b.append("\"l\":\"الفهم أو التطبيق أو التحليل\",");
         b.append("\"periods\":0,\"start\":\"YYYY-MM-DD أو فارغ\",\"end\":\"YYYY-MM-DD أو فارغ\",");
         b.append("\"st\":[\"استراتيجية\"],\"rs\":[\"مصدر\"],");
-        b.append("\"c\":\"المفاهيم\",\"i\":\"التهيئة والتعلم القبلي\",");
-        b.append("\"p\":\"إجراءات سير درس مرقمة تتضمن نشاطاً، تمايزاً، وسؤال تفكير أعلى\",");
-        b.append("\"f\":\"التقويم التكويني\",\"s\":\"التقويم الختامي\",");
+        b.append("\"c\":\"المفاهيم الأساسية من المصدر\",");
+        b.append("\"i\":\"تهيئة قصيرة مرتبطة بالتعلم القبلي ومحتوى الدرس\",");
+        b.append("\"p\":[");
+        b.append("{\"t\":\"عنوان المرحلة\",\"teacher\":\"دور المعلم\",\"student\":\"دور الطالب\",");
+        b.append("\"source\":\"المحتوى أو المثال أو النص أو الشكل المستخدم من المادة دون اختلاق\",");
+        b.append("\"check\":\"تحقق سريع\",\"pg\":[0]}");
+        b.append("],");
+        b.append("\"f\":\"تقويم تكويني مرتبط بما تم تعلمه\",");
+        b.append("\"s\":\"تقويم ختامي يقيس مخرج الدرس\",");
         b.append("\"w\":\"ملاحظة أسبوعية مختصرة مناسبة للطالب وولي الأمر\"}.");
-        b.append("\nلا تضع حلول أسئلة الكتاب، ولا تنسب شيئاً للخطة إذا لم يظهر في المقتطف.");
+        b.append("\nفي pg احذف 0 واستبدله فقط بأرقام صفحات PDF الموجودة فعلياً في المقتطف، أو أرجع [] إذا لا توجد صفحة بصرية مهمة.");
         return b.toString();
     }
 
@@ -1019,7 +1041,7 @@ final class AiPreparationClient {
                 title,
                 required(o, "c"),
                 required(o, "i"),
-                required(o, "p"),
+                procedureHtml(o),
                 required(o, "f"),
                 required(o, "s"),
                 required(o, "w")
@@ -1034,6 +1056,73 @@ final class AiPreparationClient {
                 o.optString("start", "").trim(),
                 o.optString("end", "").trim()
         );
+    }
+
+    private static String procedureHtml(JSONObject root) {
+        JSONArray stages = root.optJSONArray("p");
+        if (stages == null || stages.length() == 0) {
+            String fallback = root.optString("p", "").trim();
+            if (fallback.isEmpty()) throw new IllegalArgumentException("حقل ناقص من الذكاء: p");
+            return "<div dir=\"rtl\"><p>" + html(fallback).replace("\n", "<br>") + "</p></div>";
+        }
+
+        StringBuilder out = new StringBuilder(5000);
+        out.append("<div dir=\"rtl\">");
+        int written = 0;
+        Set<Integer> usedPages = new LinkedHashSet<>();
+
+        for (int i = 0; i < stages.length() && written < 6; i++) {
+            JSONObject stage = stages.optJSONObject(i);
+            if (stage == null) continue;
+
+            String t = stage.optString("t", "").trim();
+            String teacher = stage.optString("teacher", "").trim();
+            String student = stage.optString("student", "").trim();
+            String source = stage.optString("source", "").trim();
+            String check = stage.optString("check", "").trim();
+            if (t.isEmpty() && teacher.isEmpty() && student.isEmpty() && source.isEmpty() && check.isEmpty()) continue;
+
+            written++;
+            out.append("<div style=\"margin:0 0 18px 0;\">");
+            out.append("<p><strong>").append(written).append(". ")
+                    .append(html(t.isEmpty() ? "مرحلة التعلم" : t)).append("</strong></p>");
+            appendProcedureRow(out, "دور المعلم", teacher);
+            appendProcedureRow(out, "دور الطالب", student);
+            appendProcedureRow(out, "من المادة العلمية", source);
+            appendProcedureRow(out, "تحقق سريع", check);
+
+            JSONArray pages = stage.optJSONArray("pg");
+            if (pages != null) {
+                for (int p = 0; p < pages.length() && usedPages.size() < 3; p++) {
+                    int page = pages.optInt(p, 0);
+                    if (page <= 0 || usedPages.contains(page)) continue;
+                    usedPages.add(page);
+                    out.append("<div data-khutwa-page=\"").append(page)
+                            .append("\" style=\"margin:8px 0;\"></div>");
+                }
+            }
+            out.append("</div>");
+            if (written < 6) out.append("<hr>");
+        }
+
+        if (written == 0) throw new IllegalArgumentException("سير الدرس فارغ");
+        out.append("</div>");
+        return out.toString();
+    }
+
+    private static void appendProcedureRow(StringBuilder out, String label, String value) {
+        if (value == null || value.trim().isEmpty()) return;
+        out.append("<p><strong>").append(html(label)).append(":</strong> ")
+                .append(html(value.trim()).replace("\n", "<br>")).append("</p>");
+    }
+
+    private static String html(String raw) {
+        if (raw == null) return "";
+        return raw.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private static List<String> stringArray(JSONArray a) {
