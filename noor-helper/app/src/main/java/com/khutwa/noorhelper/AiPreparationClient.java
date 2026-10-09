@@ -296,13 +296,116 @@ final class AiPreparationClient {
         try {
             JSONObject decision = new JSONObject(cleanJson(postForAnswer(payload)));
             diagnostics.log("hierarchy_decision", decision);
-            return applyHierarchyDecision(candidates, decision);
+            List<DiscoveredCurriculumStore.Entry> decided = applyHierarchyDecision(candidates, decision);
+            List<DiscoveredCurriculumStore.Entry> normalized = normalizeLetteredLessonCodes(decided);
+            diagnostics.logLessons("catalog_after_code_structure_normalization", normalized);
+            return normalized;
         } catch (Exception e) {
             diagnostics.logMessage("hierarchy_validation_error", e.getMessage());
-            // Safe fallback: exact-deduplicated candidates are still preferable to
-            // silently dropping lessons because a validation response failed.
-            return candidates;
+            // Even when the AI hierarchy response fails, preserve all independent
+            // candidates while applying only the generic code hierarchy visible in
+            // the source itself (for example N-M-أ / N-M-ب under N-M).
+            List<DiscoveredCurriculumStore.Entry> normalized = normalizeLetteredLessonCodes(candidates);
+            diagnostics.logLessons("catalog_after_code_structure_fallback", normalized);
+            return normalized;
         }
+    }
+
+    private List<DiscoveredCurriculumStore.Entry> normalizeLetteredLessonCodes(
+            List<DiscoveredCurriculumStore.Entry> source) {
+        if (source == null || source.isEmpty()) return source;
+
+        Pattern subPattern = Pattern.compile("^\\s*([0-9٠-٩]+)\\s*[-–]\\s*([0-9٠-٩]+)\\s*[-–]\\s*([\\p{L}]+)\\s*$");
+        Map<String, Integer> parentIndex = new LinkedHashMap<>();
+        Map<String, List<Integer>> children = new LinkedHashMap<>();
+
+        for (int i = 0; i < source.size(); i++) {
+            String code = source.get(i).lesson.code == null ? "" : source.get(i).lesson.code.trim();
+            Matcher sub = subPattern.matcher(code);
+            if (sub.matches()) {
+                String base = sub.group(1) + "-" + sub.group(2);
+                if (!children.containsKey(base)) children.put(base, new ArrayList<>());
+                children.get(base).add(i);
+            } else {
+                String base = baseLessonCode(code);
+                if (!base.isEmpty() && base.equals(code.replaceAll("\\s+", ""))) {
+                    parentIndex.put(base, i);
+                }
+            }
+        }
+
+        List<DiscoveredCurriculumStore.Entry> working = new ArrayList<>(source);
+        java.util.Set<Integer> remove = new java.util.HashSet<>();
+
+        for (Map.Entry<String, List<Integer>> groupEntry : children.entrySet()) {
+            String base = groupEntry.getKey();
+            List<Integer> idxs = groupEntry.getValue();
+            if (idxs == null || idxs.size() < 2) continue;
+            java.util.Collections.sort(idxs);
+
+            // Only collapse a contiguous sibling run. This avoids combining
+            // unrelated codes that happen to share the same numeric prefix.
+            boolean contiguous = true;
+            for (int j = 1; j < idxs.size(); j++) {
+                if (idxs.get(j) != idxs.get(j - 1) + 1) {
+                    contiguous = false;
+                    break;
+                }
+            }
+            if (!contiguous) continue;
+
+            Integer parent = parentIndex.get(base);
+            int anchor = parent != null ? parent : idxs.get(0);
+            DiscoveredCurriculumStore.Entry baseEntry = working.get(anchor);
+
+            List<String> objectives = new ArrayList<>(baseEntry.lesson.objectives);
+            List<String> strategies = new ArrayList<>(baseEntry.lesson.strategies);
+            List<String> resources = new ArrayList<>(baseEntry.lesson.resources);
+            int periods = parent != null ? Math.max(1, baseEntry.lesson.periods) : 0;
+            int startPage = baseEntry.materialStartPage;
+            int endPage = baseEntry.materialEndPage;
+            String periodStart = baseEntry.lesson.periodStart;
+            String periodEnd = baseEntry.lesson.periodEnd;
+
+            for (Integer idx : idxs) {
+                if (parent != null && idx == parent) continue;
+                DiscoveredCurriculumStore.Entry child = working.get(idx);
+                if (parent == null || idx != anchor) periods += Math.max(1, child.lesson.periods);
+                for (String x : child.lesson.objectives) if (!objectives.contains(x)) objectives.add(x);
+                for (String x : child.lesson.strategies) if (!strategies.contains(x)) strategies.add(x);
+                for (String x : child.lesson.resources) if (!resources.contains(x)) resources.add(x);
+                if (child.materialStartPage > 0 && (startPage <= 0 || child.materialStartPage < startPage)) {
+                    startPage = child.materialStartPage;
+                }
+                if (child.materialEndPage > endPage) endPage = child.materialEndPage;
+                if (periodStart.isEmpty() && !child.lesson.periodStart.isEmpty()) periodStart = child.lesson.periodStart;
+                if (!child.lesson.periodEnd.isEmpty()) periodEnd = child.lesson.periodEnd;
+                if (idx != anchor) remove.add(idx);
+            }
+
+            String title = baseEntry.lesson.title;
+            String unit = baseEntry.lesson.unit;
+            CurriculumLesson parentLesson = new CurriculumLesson(
+                    base,
+                    title,
+                    unit,
+                    baseEntry.lesson.semester,
+                    Math.max(1, periods),
+                    periodStart,
+                    periodEnd,
+                    baseEntry.lesson.level,
+                    objectives,
+                    strategies,
+                    resources
+            );
+            working.set(anchor, new DiscoveredCurriculumStore.Entry(parentLesson, startPage, endPage));
+        }
+
+        List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
+        for (int i = 0; i < working.size(); i++) {
+            if (!remove.contains(i)) out.add(working.get(i));
+        }
+        return out;
     }
 
     private List<DiscoveredCurriculumStore.Entry> applyHierarchyDecision(
