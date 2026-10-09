@@ -72,9 +72,7 @@ final class AiPreparationClient {
         LessonPreparation cached = getCached(title);
         if (cached != null) return cached;
 
-        ExerciseMap.Lesson lesson = ExerciseMap.find(title);
-        String canonicalTitle = lesson == null ? title : lesson.code + " " + lesson.title;
-        String prompt = buildCompactPrompt(canonicalTitle, outcomes);
+        String prompt = buildCompactPrompt(title, outcomes);
 
         JSONObject payload = new JSONObject();
         payload.put("message", prompt);
@@ -116,29 +114,28 @@ final class AiPreparationClient {
 
     List<DiscoveredCurriculumStore.Entry> discoverCurriculum(String planContext,
                                                                      String materialOutline) throws Exception {
-        String key = "catalog_v2_" + hashShort(planContext + "\n" + materialOutline);
+        String key = "catalog_free_v3_" + hashShort(planContext + "\n" + materialOutline);
         String cached = prefs().getString(key, null);
         if (cached != null && !cached.trim().isEmpty()) {
             return parseDiscoveredCurriculum(cached);
         }
 
         StringBuilder prompt = new StringBuilder(120000);
-        prompt.append("أنت محلل مناهج عمانية. أمامك خطة دراسية قد تحتوي أكثر من صف، وملف مادة/تمارين واحد. ");
-        prompt.append("حدد بنفسك أي صف/مادة في الخطة يطابق ملف المادة من خلال أسماء الوحدات والدروس، ثم استخرج منهج ذلك الصف فقط. ");
-        prompt.append("لا تعتمد على معرفة مسبقة ولا تخترع دروساً. رتب الدروس تماماً كما تظهر في الخطة. ");
-        prompt.append("مهم جداً: الدرس يُحسب على مستوى الكود الرقمي الأساسي المكوّن من رقمين فقط مثل 7-1 أو 9-2. ");
-        prompt.append("إذا وجدت تحت نفس الكود بنوداً بالحروف أ، ب، ج، د... فهذه موضوعات فرعية داخل درس واحد وليست دروساً مستقلة. ");
-        prompt.append("اجمع كل البنود الفرعية التي تشترك في نفس الكود الأساسي في سجل درس واحد، واجمع مخرجاتها وصفحاتها داخله. ");
-        prompt.append("مثال: 7-1-أ و7-1-ب و7-1-ج يجب أن تعاد كلها كدرس واحد code=7-1، وليس ثلاثة دروس. ");
-        prompt.append("لكل درس استخرج رقم الدرس الأساسي فقط، اسم الدرس/المجموعة، الوحدة، عدد الحصص، تاريخ بداية ونهاية فترة الوحدة/الدرس، والمخرجات الرسمية إن وجدت. ");
-        prompt.append("ومن مخطط صفحات المادة حدد صفحات PDF التي يبدأ وينتهي عندها محتوى كل درس. ");
-        prompt.append("إذا اشترك درسان في صفحة واحدة يجوز أن يكون end/start الصفحة نفسها؛ التطبيق سيقسم الصفحة عند عنوان الدرس. ");
-        prompt.append("أرجع JSON فقط بالشكل: {\"subject\":\"...\",\"grade\":\"...\",\"lessons\":[");
-        prompt.append("{\"code\":\"2-1\",\"title\":\"...\",\"unit\":\"الوحدة ...: ...\",");
-        prompt.append("\"periods\":2,\"start\":\"YYYY-MM-DD\",\"end\":\"YYYY-MM-DD\",");
-        prompt.append("\"objectives\":[\"...\"],\"materialStartPage\":20,\"materialEndPage\":20}]}.");
-        prompt.append("\nلا تضع درساً إذا لم تجد دليلاً عليه في الخطة. أرقام صفحات المادة هي أرقام PDF الفعلية الظاهرة في المخطط أدناه.\n");
-        prompt.append("\n=== الخطة الدراسية ===\n").append(limitRaw(planContext, 76000));
+        prompt.append("حلل الوثيقتين المرفقتين كما هما، بدون افتراض مادة أو صف أو عدد وحدات أو عدد دروس مسبق. ");
+        prompt.append("الوثيقة الأولى خطة دراسية، والثانية المادة العلمية أو التمارين المستخدمة في التدريس. ");
+        prompt.append("استنتج من محتوى الوثيقتين: المادة، الصف/المستوى إن وجد، الفصل/الفترة إن وجدت، الوحدات، ");
+        prompt.append("الدروس الفعلية، ترتيبها، أرقامها أو رموزها كما تظهر في المصدر، عدد الحصص، التواريخ، ");
+        prompt.append("المخرجات/الأهداف الرسمية، ونطاق صفحات المادة العلمية المرتبط بكل درس. ");
+        prompt.append("استنتج بنفسك من بنية الخطة ما الذي يمثل درساً مستقلاً وما الذي يمثل عنواناً أو موضوعاً فرعياً داخل درس؛ ");
+        prompt.append("لا تعامل كل سطر أو كل عنوان فرعي كدرس مستقل. لا تضف أي درس أو معلومة غير مدعومة بالوثيقتين. ");
+        prompt.append("إذا لم يوجد رمز للدرس اترك code فارغاً. إذا لم توجد معلومة اتركها فارغة أو صفراً. ");
+        prompt.append("أرقام صفحات المادة يجب أن تكون أرقام صفحات PDF الفعلية في المخطط المرسل. ");
+        prompt.append("أرجع JSON فقط بهذه البنية العامة:");
+        prompt.append("{\"subject\":\"\",\"grade\":\"\",\"semester\":\"\",\"lessons\":[");
+        prompt.append("{\"code\":\"\",\"title\":\"\",\"unit\":\"\",\"semester\":\"\",");
+        prompt.append("\"periods\":0,\"start\":\"\",\"end\":\"\",");
+        prompt.append("\"objectives\":[],\"materialStartPage\":0,\"materialEndPage\":0}]}.");
+        prompt.append("\n\n=== الخطة الدراسية ===\n").append(limitRaw(planContext, 76000));
         prompt.append("\n\n=== مخطط المادة العلمية بحسب صفحات PDF ===\n").append(limitRaw(materialOutline, 38000));
 
         JSONObject payload = new JSONObject();
@@ -146,23 +143,9 @@ final class AiPreparationClient {
         String answer = postForAnswer(payload);
         String json = cleanJson(answer);
         List<DiscoveredCurriculumStore.Entry> result = parseDiscoveredCurriculum(json);
-        if (result.isEmpty()) throw new IllegalStateException("لم يستطع الذكاء اكتشاف قائمة الدروس من الملفين.");
+        if (result.isEmpty()) throw new IllegalStateException("لم يستطع الذكاء اكتشاف دروس مدعومة من الملفين.");
         prefs().edit().putString(key, json).apply();
         return result;
-    }
-
-    private static final class CurriculumGroup {
-        String code;
-        String title;
-        String unit;
-        int periods;
-        String start;
-        String end;
-        int materialStartPage;
-        int materialEndPage;
-        boolean hasParent;
-        final Set<String> objectives = new LinkedHashSet<>();
-        final List<String> childTitles = new ArrayList<>();
     }
 
     private List<DiscoveredCurriculumStore.Entry> parseDiscoveredCurriculum(String rawJson) throws Exception {
@@ -171,137 +154,45 @@ final class AiPreparationClient {
         List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
         if (lessons == null) return out;
 
-        Map<String, CurriculumGroup> groups = new LinkedHashMap<>();
+        String rootSemester = root.optString("semester", "").trim();
+        java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
 
         for (int i = 0; i < lessons.length(); i++) {
             JSONObject o = lessons.optJSONObject(i);
             if (o == null) continue;
 
-            String rawCode = o.optString("code", "").trim();
-            String canonical = canonicalLessonCode(rawCode);
             String title = o.optString("title", "").trim();
-            if (canonical.isEmpty() || title.isEmpty()) continue;
+            if (title.isEmpty()) continue;
 
-            CurriculumGroup g = groups.get(canonical);
-            if (g == null) {
-                g = new CurriculumGroup();
-                g.code = canonical;
-                g.title = title;
-                g.unit = o.optString("unit", "").trim();
-                g.periods = Math.max(1, o.optInt("periods", 1));
-                g.start = o.optString("start", "").trim();
-                g.end = o.optString("end", "").trim();
-                g.materialStartPage = Math.max(0, o.optInt("materialStartPage", 0));
-                g.materialEndPage = Math.max(g.materialStartPage, o.optInt("materialEndPage", g.materialStartPage));
-                groups.put(canonical, g);
-            }
+            String sourceCode = o.optString("code", "").trim();
+            String internalCode = sourceCode.isEmpty()
+                    ? "AUTO-" + String.format(java.util.Locale.US, "%03d", i + 1)
+                    : sourceCode;
 
-            boolean exactParent = isExactBaseCode(rawCode, canonical);
-            if (exactParent) {
-                if (!g.hasParent) {
-                    g.title = title;
-                    String u = o.optString("unit", "").trim();
-                    if (!u.isEmpty()) g.unit = u;
-                    g.periods = Math.max(1, o.optInt("periods", g.periods));
-                    String s = o.optString("start", "").trim();
-                    String e = o.optString("end", "").trim();
-                    if (!s.isEmpty()) g.start = s;
-                    if (!e.isEmpty()) g.end = e;
-                }
-                g.hasParent = true;
-            } else {
-                if (!g.childTitles.contains(title)) g.childTitles.add(title);
-                // A split subtopic must not add a new lesson or inflate the official
-                // number of periods. Keep the largest period value seen.
-                g.periods = Math.max(g.periods, Math.max(1, o.optInt("periods", 1)));
-            }
+            String duplicateKey = normalizeTitle(sourceCode + "|" + title);
+            if (!seen.add(duplicateKey)) continue;
 
-            String unit = o.optString("unit", "").trim();
-            if (g.unit.isEmpty() && !unit.isEmpty()) g.unit = unit;
-
-            String s = o.optString("start", "").trim();
-            String e = o.optString("end", "").trim();
-            g.start = earliestDate(g.start, s);
-            g.end = latestDate(g.end, e);
-
-            int ps = Math.max(0, o.optInt("materialStartPage", 0));
-            int pe = Math.max(ps, o.optInt("materialEndPage", ps));
-            if (ps > 0 && (g.materialStartPage <= 0 || ps < g.materialStartPage)) g.materialStartPage = ps;
-            if (pe > g.materialEndPage) g.materialEndPage = pe;
-
-            for (String objective : stringArray(o.optJSONArray("objectives"))) {
-                if (!objective.isEmpty()) g.objectives.add(objective);
-            }
-        }
-
-        for (CurriculumGroup g : groups.values()) {
-            // If the AI only emitted lettered subtopics, preserve them as learning
-            // context without counting them as separate lessons.
-            if (!g.hasParent && !g.childTitles.isEmpty()) {
-                for (String child : g.childTitles) {
-                    g.objectives.add("موضوع فرعي: " + child);
-                }
-            }
-
-            Grade9Curriculum.Lesson lesson = new Grade9Curriculum.Lesson(
-                    g.code,
-                    g.title,
-                    g.unit,
-                    Math.max(1, g.periods),
-                    g.start == null ? "" : g.start,
-                    g.end == null ? "" : g.end,
-                    0, 0,
+            String semester = o.optString("semester", rootSemester).trim();
+            CurriculumLesson lesson = new CurriculumLesson(
+                    internalCode,
+                    title,
+                    o.optString("unit", "").trim(),
+                    semester,
+                    Math.max(1, o.optInt("periods", 1)),
+                    o.optString("start", "").trim(),
+                    o.optString("end", "").trim(),
                     "الفهم",
-                    new ArrayList<>(g.objectives),
+                    stringArray(o.optJSONArray("objectives")),
                     new ArrayList<>(),
                     new ArrayList<>()
             );
-            out.add(new DiscoveredCurriculumStore.Entry(
-                    lesson,
-                    Math.max(0, g.materialStartPage),
-                    Math.max(g.materialStartPage, g.materialEndPage)
-            ));
+
+            int ps = Math.max(0, o.optInt("materialStartPage", 0));
+            int pe = Math.max(ps, o.optInt("materialEndPage", ps));
+            out.add(new DiscoveredCurriculumStore.Entry(lesson, ps, pe));
         }
 
         return out;
-    }
-
-    private static String canonicalLessonCode(String raw) {
-        String s = latinDigits(raw == null ? "" : raw);
-        Matcher m = Pattern.compile("([0-9]+)\\s*[-–]\\s*([0-9]+)").matcher(s);
-        if (!m.find()) return "";
-        return m.group(1) + "-" + m.group(2);
-    }
-
-    private static boolean isExactBaseCode(String raw, String canonical) {
-        String s = latinDigits(raw == null ? "" : raw).trim();
-        s = s.replaceAll("\\s+", "");
-        s = s.replace('–', '-');
-        return s.equals(canonical);
-    }
-
-    private static String latinDigits(String s) {
-        String ar = "٠١٢٣٤٥٦٧٨٩";
-        StringBuilder out = new StringBuilder(s == null ? 0 : s.length());
-        if (s == null) return "";
-        for (int i = 0; i < s.length(); i++) {
-            char ch = s.charAt(i);
-            int idx = ar.indexOf(ch);
-            out.append(idx >= 0 ? (char)('0' + idx) : ch);
-        }
-        return out.toString();
-    }
-
-    private static String earliestDate(String a, String b) {
-        if (a == null || a.isEmpty()) return b == null ? "" : b;
-        if (b == null || b.isEmpty()) return a;
-        return a.compareTo(b) <= 0 ? a : b;
-    }
-
-    private static String latestDate(String a, String b) {
-        if (a == null || a.isEmpty()) return b == null ? "" : b;
-        if (b == null || b.isEmpty()) return a;
-        return a.compareTo(b) >= 0 ? a : b;
     }
 
     private String postForAnswer(JSONObject payload) throws Exception {
@@ -478,22 +369,22 @@ final class AiPreparationClient {
     }
 
     private static String buildCompactPrompt(String title, List<String> outcomes) {
-        StringBuilder b = new StringBuilder(1200);
-        b.append("أنت معلم رياضيات عماني خبير. جهز درس الصف التاسع للفصل الدراسي الأول لمنصة نور. ");
-        b.append("اكتب عمليًا ومباشرًا ومناسبًا لحصة مدرسية، ولا تكرر عنوان الدرس أو الأهداف.\n");
-        b.append("الدرس: ").append(limit(title, 180)).append("\n");
+        StringBuilder b = new StringBuilder(1400);
+        b.append("جهز تحضيراً تعليمياً عملياً للدرس التالي اعتماداً على عنوانه ومخرجاته فقط. ");
+        b.append("لا تفترض مادة أو صفاً غير مذكورين. لا تخترع مخرجاً رسمياً.\n");
+        b.append("الدرس: ").append(limit(title, 220)).append("\n");
         b.append("المخرجات:");
         if (outcomes != null && !outcomes.isEmpty()) {
-            int n = Math.min(6, outcomes.size());
-            for (int i=0;i<n;i++) b.append("\n- ").append(limit(outcomes.get(i), 150));
+            for (int i = 0; i < Math.min(8, outcomes.size()); i++) {
+                b.append("\n- ").append(limit(outcomes.get(i), 180));
+            }
         } else {
-            b.append(" استخدم المخرجات المتوقعة من عنوان الدرس.");
+            b.append(" غير متوفرة في المصدر.");
         }
-        b.append("\nأرجع JSON فقط بهذه المفاتيح القصيرة:");
-        b.append("{\"c\":\"المفاهيم\",\"i\":\"التهيئة والتعلم القبلي\",\"p\":\"إجراءات وأنشطة مرقمة\",\"f\":\"التقويم التكويني\",\"s\":\"التقويم الختامي\",\"w\":\"ملاحظة أسبوعية للطالب وولي الأمر\"}");
-        b.append("\nفي الإجراءات: ابدأ بنشاط تمهيدي قصير، ثم شرح/اكتشاف، ثم تعلم تعاوني أو فردي، ثم تمايز للمتعثر والمتقدم، ثم سؤال تفكير أعلى. ");
-        b.append("اختم بعبارة: ينفذ الطلبة تمارين الدرس المرفقة من ورقة خطواتي نحو التميز. ");
-        b.append("اجعل كل حقل مختصرًا لكن كافيًا؛ لا تكتب حلول التمارين.");
+        b.append("\nأرجع JSON فقط:");
+        b.append("{\"c\":\"المفاهيم\",\"i\":\"التهيئة والتعلم القبلي\",");
+        b.append("\"p\":\"إجراءات وأنشطة مرقمة\",\"f\":\"التقويم التكويني\",");
+        b.append("\"s\":\"التقويم الختامي\",\"w\":\"ملاحظة أسبوعية للطالب وولي الأمر\"}.");
         return b.toString();
     }
 
