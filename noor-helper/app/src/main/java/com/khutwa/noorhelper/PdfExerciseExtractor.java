@@ -58,6 +58,7 @@ final class PdfExerciseExtractor {
     static ExtractResult extractBetween(Context context, Uri uri,
                                         String currentTitle, String nextTitle,
                                         int startPageOneBased, int endPageOneBased,
+                                        int previousEndPageOneBased,
                                         int nextStartPageOneBased) throws Exception {
         try (InputStream in = context.getContentResolver().openInputStream(uri);
              PDDocument doc = PDDocument.load(in)) {
@@ -68,45 +69,134 @@ final class PdfExerciseExtractor {
             int end = Math.min(doc.getNumberOfPages() - 1,
                     Math.max(start, endPageOneBased > 0 ? endPageOneBased - 1 : start));
 
-            LessonKey currentKey = LessonKey.from(currentTitle);
-            PageLocator startLocator = PageLocator.locate(doc, start, currentKey);
-            float startY = startLocator.bestStartY;
+            // We crop only when a physical PDF page is shared with an adjacent lesson.
+            // Otherwise the complete page is preserved. This prevents questions from
+            // being cut merely because their text resembles a lesson title.
+            boolean cropTopShared = previousEndPageOneBased > 0
+                    && previousEndPageOneBased == startPageOneBased;
+            boolean cropBottomShared = nextStartPageOneBased > 0
+                    && nextStartPageOneBased == endPageOneBased
+                    && nextTitle != null && !nextTitle.trim().isEmpty();
 
-            int nextPage = nextStartPageOneBased > 0 ? nextStartPageOneBased - 1 : -1;
-            float nextY = -1f;
-            if (nextPage >= start && nextPage < doc.getNumberOfPages()
-                    && nextPage <= end && nextTitle != null && !nextTitle.trim().isEmpty()) {
-                LessonKey nextKey = LessonKey.from(nextTitle);
-                PageLocator nextLocator = PageLocator.locate(doc, nextPage, nextKey);
-                nextY = nextLocator.bestStartY;
+            float currentHeadingY = -1f;
+            if (cropTopShared) {
+                currentHeadingY = PageLocator.locateHeading(doc, start, LessonKey.from(currentTitle));
+            }
+
+            int nextPage = cropBottomShared ? nextStartPageOneBased - 1 : -1;
+            float nextHeadingY = -1f;
+            if (cropBottomShared && nextPage >= start && nextPage <= end) {
+                nextHeadingY = PageLocator.locateHeading(doc, nextPage, LessonKey.from(nextTitle));
             }
 
             PDFRenderer renderer = new PDFRenderer(doc);
             List<Bitmap> images = new ArrayList<>();
+
             for (int p = start; p <= end; p++) {
                 Bitmap page = renderer.renderImageWithDPI(p, 135, ImageType.RGB);
                 float pageHeightPt = doc.getPage(p).getCropBox().getHeight();
+
                 int top = 0;
                 int bottom = page.getHeight();
 
-                if (p == start && startY > 0) {
-                    top = Math.max(0, Math.round((startY - 22f) / pageHeightPt * page.getHeight()));
-                }
-                if (p == nextPage && nextY > 0) {
-                    bottom = Math.min(page.getHeight(),
-                            Math.round((nextY - 14f) / pageHeightPt * page.getHeight()));
+                if (p == start && cropTopShared && currentHeadingY > 0) {
+                    int approx = Math.max(0,
+                            Math.round((currentHeadingY - 10f) / pageHeightPt * page.getHeight()));
+                    int safe = findSafeWhitespaceBefore(page, approx, 140);
+                    // If no clear blank band exists, preserve extra content above the
+                    // heading rather than risking cutting the first question.
+                    top = safe >= 0 ? safe : Math.max(0, approx - 55);
                 }
 
-                if (bottom <= top + 10) continue;
-                Bitmap crop = Bitmap.createBitmap(page, 0, top, page.getWidth(), bottom - top);
-                if (crop != page) page.recycle();
-                images.add(downscale(crop, MAX_WIDTH));
+                if (p == nextPage && cropBottomShared && nextHeadingY > 0) {
+                    int approx = Math.min(page.getHeight(),
+                            Math.round((nextHeadingY - 8f) / pageHeightPt * page.getHeight()));
+                    int safe = findSafeWhitespaceBefore(page, approx, 160);
+                    // If a reliable blank band cannot be found, do not crop the page.
+                    // A little overlap is safer than slicing through a question.
+                    if (safe >= 0) bottom = safe;
+                }
+
+                if (bottom <= top + Math.max(30, page.getHeight() / 25)) {
+                    // Safety fallback: never produce a tiny strip that could be a
+                    // fragment of a question. Keep the whole page instead.
+                    top = 0;
+                    bottom = page.getHeight();
+                }
+
+                Bitmap out;
+                if (top == 0 && bottom == page.getHeight()) {
+                    out = page;
+                } else {
+                    out = Bitmap.createBitmap(page, 0, top, page.getWidth(), bottom - top);
+                    page.recycle();
+                }
+                images.add(downscale(out, MAX_WIDTH));
             }
 
-            if (images.isEmpty()) throw new IllegalStateException("تعذر قص صور الدرس بين عنوانه وعنوان الدرس التالي");
-            return new ExtractResult(images, start + 1, end + 1, "تقسيم ديناميكي بين عناوين الدروس", true);
+            if (images.isEmpty()) throw new IllegalStateException("تعذر إنشاء صور الدرس");
+            return new ExtractResult(
+                    images,
+                    start + 1,
+                    end + 1,
+                    "صفحات كاملة مع قص آمن للصفحات المشتركة فقط",
+                    true
+            );
         }
     }
+
+    private static int findSafeWhitespaceBefore(Bitmap bitmap, int approxY, int radius) {
+        if (bitmap == null || bitmap.getWidth() < 20 || bitmap.getHeight() < 20) return -1;
+
+        int minY = Math.max(2, approxY - Math.max(40, radius));
+        int maxY = Math.min(bitmap.getHeight() - 2, approxY + 18);
+        int minBand = Math.max(10, bitmap.getHeight() / 170);
+        int x0 = Math.max(0, bitmap.getWidth() / 20);
+        int x1 = Math.min(bitmap.getWidth(), bitmap.getWidth() - bitmap.getWidth() / 20);
+        int xStep = Math.max(4, bitmap.getWidth() / 180);
+
+        int bestCenter = -1;
+        int bestDistance = Integer.MAX_VALUE;
+        int runStart = -1;
+
+        for (int y = minY; y <= maxY; y++) {
+            boolean blank = isMostlyBlankRow(bitmap, y, x0, x1, xStep);
+            if (blank && runStart < 0) runStart = y;
+
+            boolean closes = !blank || y == maxY;
+            if (closes && runStart >= 0) {
+                int runEnd = blank && y == maxY ? y : y - 1;
+                int length = runEnd - runStart + 1;
+                if (length >= minBand) {
+                    int center = (runStart + runEnd) / 2;
+                    // Prefer whitespace before the heading, then the closest band.
+                    int penalty = center > approxY ? 10000 : 0;
+                    int distance = penalty + Math.abs(approxY - center);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        bestCenter = center;
+                    }
+                }
+                runStart = -1;
+            }
+        }
+        return bestCenter;
+    }
+
+    private static boolean isMostlyBlankRow(Bitmap bitmap, int y, int x0, int x1, int step) {
+        int samples = 0;
+        int light = 0;
+        for (int x = x0; x < x1; x += step) {
+            int pixel = bitmap.getPixel(x, y);
+            int r = (pixel >> 16) & 0xff;
+            int g = (pixel >> 8) & 0xff;
+            int b = pixel & 0xff;
+            samples++;
+            if (r >= 238 && g >= 238 && b >= 238) light++;
+        }
+        return samples > 0 && light >= Math.ceil(samples * 0.965);
+    }
+
 
     static ExtractResult renderPages(Context context, Uri uri, List<Integer> pdfPages) throws Exception {
         if (pdfPages == null || pdfPages.isEmpty()) {
@@ -401,6 +491,50 @@ final class PdfExerciseExtractor {
                 }
             }
             return l;
+        }
+
+        static float locateHeading(PDDocument doc, int pageIndex, LessonKey key) throws Exception {
+            PageLocator l = new PageLocator();
+            l.setStartPage(pageIndex + 1);
+            l.setEndPage(pageIndex + 1);
+            l.getText(doc);
+
+            // First pass: a real lesson heading normally contains the numeric code
+            // and starts with it. Do not accept an occurrence buried inside a question.
+            for (TextChunk chunk : l.chunks) {
+                String cc = compact(chunk.text);
+                if (!key.codeCompact.isEmpty() && cc.startsWith(key.codeCompact)) {
+                    if (key.titleCompact.isEmpty() || cc.contains(key.titleCompact)
+                            || titleTokenHits(cc, key.tokens) >= Math.min(2, key.tokens.size())) {
+                        return chunk.y;
+                    }
+                }
+            }
+
+            // Second pass: title text with multiple matching tokens and a short line.
+            float bestY = -1f;
+            int best = 0;
+            for (TextChunk chunk : l.chunks) {
+                String cc = compact(chunk.text);
+                int hits = titleTokenHits(cc, key.tokens);
+                int score = hits * 20;
+                if (!key.titleCompact.isEmpty() && cc.contains(key.titleCompact)) score += 80;
+                if (chunk.text != null && chunk.text.length() <= 90) score += 8;
+                if (score > best && score >= 48) {
+                    best = score;
+                    bestY = chunk.y;
+                }
+            }
+            return bestY;
+        }
+
+        private static int titleTokenHits(String compactChunk, List<String> tokens) {
+            int hits = 0;
+            if (tokens == null) return 0;
+            for (String token : tokens) {
+                if (token != null && token.length() >= 3 && compactChunk.contains(token)) hits++;
+            }
+            return hits;
         }
 
         static PageLocator locateNext(PDDocument doc, int pageIndex, String nextCode, float minY) throws Exception {
