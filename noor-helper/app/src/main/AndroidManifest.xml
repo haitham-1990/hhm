@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="نور الذكي - اكتشاف المنهج 0.9.1"
+        android:label="نور الذكي - اكتشاف المنهج 0.9.2"
         android:usesCleartextTraffic="false"
         android:theme="@style/AppTheme">
         <activity
