@@ -87,24 +87,7 @@ final class PdfCorpusIndex {
     PdfLessonContext.Result forLesson(String lessonTitle) {
         LessonKey key = LessonKey.from(lessonTitle);
         Selection plan = selectPlanWindow(planPages, key);
-        Selection material;
-
-        // Material pages are a sequence, not independent search results.
-        // Prefer the exact lesson page map so the same neighbouring pages are
-        // not pulled into several lessons.
-        ExerciseMap.Lesson mapped = ExerciseMap.find(lessonTitle);
-        if (mapped != null && mapped.segments != null) {
-            List<Integer> exactPages = new ArrayList<>();
-            for (ExerciseMap.Segment segment : mapped.segments) {
-                if (segment != null && segment.pdfPage > 0 && !exactPages.contains(segment.pdfPage)) {
-                    exactPages.add(segment.pdfPage);
-                }
-            }
-            material = selectExact(materialPages, exactPages, MATERIAL_MAX_CHARS);
-        } else {
-            material = select(materialPages, key, false);
-        }
-
+        Selection material = select(materialPages, key, false);
         return new PdfLessonContext.Result(
                 plan.text, material.text, plan.pages, material.pages
         );
