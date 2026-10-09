@@ -7,7 +7,7 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.khutwa.noorsmartfree101'
+        applicationId 'com.khutwa.noorsmartfree102'
         minSdk 23
         targetSdk 34
         versionCode 29
