@@ -435,10 +435,10 @@ final class AiPreparationClient {
     }
 
     private static String baseLessonCode(String raw) {
-        String v = arabicDigitsToLatin(raw == null ? "" : raw);
-        Matcher m = Pattern.compile("^\\s*([0-9]+)\\s*[-–]\\s*([0-9]+)").matcher(v);
+        String v = raw == null ? "" : raw.trim();
+        Matcher m = Pattern.compile("^\\s*([0-9٠-٩]+)\\s*[-–]\\s*([0-9٠-٩]+)").matcher(v);
         if (m.find()) return m.group(1) + "-" + m.group(2);
-        return v.trim();
+        return v;
     }
 
     private void mergeExactCandidates(List<DiscoveredCurriculumStore.Entry> base,
