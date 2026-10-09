@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - سير درس ذكي 1.0.16");
+        title.setText("نور الذكي - قص السؤال الذكي 1.0.17");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -949,7 +949,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.16.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.17.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1865,126 +1865,166 @@ public class MainActivity extends Activity {
 
     private void attachAutoPdf(CurriculumLesson lesson) {
         if (!autoActive) return;
-        int total = LessonImageCache.imageCount(this, lesson.code);
-        try {
-            JSONObject meta = new JSONObject();
-            meta.put("cached_images", total);
-            logAutoStage("lesson_images_loaded", lesson, meta);
-        } catch (Exception ignored) {}
 
-        if (total <= 0) {
-            stopAutoWithError("صور الدرس غير موجودة في قاعدة البيانات.");
-            return;
-        }
+        status.setText("أحدد الأسئلة/الأنشطة المناسبة داخل سير " + lesson.displayName() + "...");
+        String js = "(function(){" + baseHelpers()
+                + "return questionMarkers('إجراءات سير الدرس');"
+                + "})()";
 
-        status.setText("أضيف محتوى " + lesson.displayName() + " من المادة العلمية...");
-        appendAutoImageAt(lesson, 0, total);
+        webView.evaluateJavascript(js, raw -> {
+            JSONArray markers = new JSONArray();
+            try {
+                String decoded = decodeJsString(raw);
+                markers = new JSONArray(decoded);
+            } catch (Exception parseError) {
+                diagnostics.logException("question_markers_parse_error", parseError);
+            }
+
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("question_markers", markers.length());
+                logAutoStage("question_markers_ready", lesson, meta);
+            } catch (Exception ignored) {}
+
+            if (markers.length() == 0) {
+                status.setText("لا توجد صورة سؤال لازمة لهذا الدرس — أكمل الجدولة...");
+                applyAutoSchedule(lesson);
+                return;
+            }
+
+            appendAutoQuestionCrop(lesson, markers, 0);
+        });
     }
 
 
-    private void appendAutoImageAt(CurriculumLesson lesson, int index, int total) {
+    private void appendAutoQuestionCrop(CurriculumLesson lesson, JSONArray markers, int index) {
         if (!autoActive) return;
-        if (index >= total) {
+        if (markers == null || index >= markers.length()) {
             applyAutoSchedule(lesson);
             return;
         }
 
-        int page = 0;
-        if (currentDbEntry != null
-                && currentDbEntry.materialPages != null
-                && index < currentDbEntry.materialPages.size()) {
-            Integer p = currentDbEntry.materialPages.get(index);
-            page = p == null ? 0 : p;
-        }
-
-        if (page <= 0) {
-            appendAutoImageAt(lesson, index + 1, total);
+        JSONObject marker = markers.optJSONObject(index);
+        if (marker == null) {
+            appendAutoQuestionCrop(lesson, markers, index + 1);
             return;
         }
 
-        final int sourcePage = page;
-        String probe = "(function(){" + baseHelpers()
-                + "return String(hasSourcePageMarker('إجراءات سير الدرس'," + sourcePage + "));"
-                + "})()";
+        final String qid = marker.optString("id", String.valueOf(index + 1));
+        final int page = marker.optInt("page", 0);
+        final String question = marker.optString("q", "").trim();
+        final String questionEnd = marker.optString("qend", "").trim();
 
-        webView.evaluateJavascript(probe, probeRaw -> {
-            int wanted = parseJsInt(probeRaw);
-            if (wanted <= 0) {
-                try {
-                    JSONObject meta = new JSONObject();
-                    meta.put("image_index", index);
-                    meta.put("image_total", total);
-                    meta.put("material_page", sourcePage);
-                    meta.put("action", "skipped_not_requested_by_ai");
-                    logAutoStage("lesson_image_selection", lesson, meta);
-                } catch (Exception ignored) {}
-                appendAutoImageAt(lesson, index + 1, total);
-                return;
-            }
+        boolean pageBelongsToLesson = currentDbEntry != null
+                && currentDbEntry.materialPages != null
+                && currentDbEntry.materialPages.contains(page);
 
-            worker.execute(() -> {
-                try {
-                    // Read only the source page the AI selected for this teaching stage.
-                    // The cached JPEG is sent directly: no bitmap decode or second compression.
-                    String base64 = LessonImageCache.base64At(this, lesson.code, index);
+        if (page <= 0 || question.isEmpty() || !pageBelongsToLesson) {
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("marker_index", index);
+                meta.put("qid", qid);
+                meta.put("page", page);
+                meta.put("reason", pageBelongsToLesson ? "missing_question_anchor" : "page_outside_lesson_range");
+                logAutoStage("question_crop_skipped", lesson, meta);
+            } catch (Exception ignored) {}
+            removeAutoQuestionMarker(qid, () -> appendAutoQuestionCrop(lesson, markers, index + 1));
+            return;
+        }
+
+        status.setText("أقص السؤال/النشاط من صفحة " + page + " وأضعه في موضعه...");
+        worker.execute(() -> {
+            try {
+                String base64 = PdfExerciseExtractor.questionCropBase64(
+                        this,
+                        subjectMaterialPdfUri,
+                        page,
+                        question,
+                        questionEnd
+                );
+
+                runOnUiThread(() -> {
+                    if (!autoActive) return;
+
                     if (base64 == null || base64.isEmpty()) {
-                        throw new IllegalStateException("تعذر قراءة صورة صفحة " + sourcePage);
+                        try {
+                            JSONObject meta = new JSONObject();
+                            meta.put("marker_index", index);
+                            meta.put("qid", qid);
+                            meta.put("page", page);
+                            meta.put("reason", "question_text_not_located_safely");
+                            logAutoStage("question_crop_skipped", lesson, meta);
+                        } catch (Exception ignored) {}
+                        removeAutoQuestionMarker(qid,
+                                () -> appendAutoQuestionCrop(lesson, markers, index + 1));
+                        return;
                     }
 
-                    runOnUiThread(() -> {
-                        if (!autoActive) return;
-                        status.setText("أضيف الصفحة " + sourcePage + " في موضعها داخل سير الدرس...");
-                        String html = "<div style='display:block;max-width:100%;margin:10px auto;"
-                                + "text-align:center;overflow:hidden;filter:none!important;"
-                                + "mix-blend-mode:normal!important;forced-color-adjust:none;'>"
-                                + "<img src='data:image/jpeg;base64," + base64
-                                + "' alt='محتوى من صفحة " + sourcePage + " من المادة العلمية'"
-                                + " style='display:block;max-width:100%;width:auto;height:auto;"
-                                + "margin:0 auto;object-fit:contain;filter:none!important;"
-                                + "mix-blend-mode:normal!important;forced-color-adjust:none!important;' />"
-                                + "</div>";
+                    String html = "<div dir='rtl' style='display:block;max-width:100%;margin:10px 0 14px 0;'>"
+                            + "<p style='margin:0 0 6px 0;'><strong>سؤال / نشاط من المادة العلمية</strong></p>"
+                            + "<img src='data:image/jpeg;base64," + base64
+                            + "' alt='سؤال أو نشاط من المادة العلمية'"
+                            + " style='display:block;max-width:100%;width:auto;height:auto;"
+                            + "margin:0 auto;object-fit:contain;filter:none!important;"
+                            + "mix-blend-mode:normal!important;forced-color-adjust:none!important;' />"
+                            + "</div>";
 
-                        String js = "(function(){" + baseHelpers()
-                                + "return placeSourceImage('إجراءات سير الدرس'," + sourcePage + ","
-                                + JSONObject.quote(html) + ");"
-                                + "})()";
+                    String placeJs = "(function(){" + baseHelpers()
+                            + "return placeQuestionCrop('إجراءات سير الدرس',"
+                            + JSONObject.quote(qid) + "," + JSONObject.quote(html) + ");"
+                            + "})()";
 
-                        webView.evaluateJavascript(js, raw -> {
-                            int ok = parseJsInt(raw);
-                            try {
-                                JSONObject meta = new JSONObject();
-                                meta.put("image_index", index);
-                                meta.put("image_total", total);
-                                meta.put("material_page", sourcePage);
-                                meta.put("result", ok);
-                                meta.put("source", "ai_selected_cached_jpeg");
-                                logAutoStage("lesson_image_append_result", lesson, meta);
-                            } catch (Exception ignored) {}
+                    webView.evaluateJavascript(placeJs, placeRaw -> {
+                        int ok = parseJsInt(placeRaw);
+                        try {
+                            JSONObject meta = new JSONObject();
+                            meta.put("marker_index", index);
+                            meta.put("qid", qid);
+                            meta.put("page", page);
+                            meta.put("result", ok);
+                            meta.put("source", "exact_question_crop");
+                            logAutoStage("question_crop_append_result", lesson, meta);
+                        } catch (Exception ignored) {}
 
-                            // If the marker disappeared because the editor normalized the DOM,
-                            // do not append the image to the wrong place. Continue safely.
-                            appendAutoImageAt(lesson, index + 1, total);
-                        });
+                        if (ok <= 0) {
+                            removeAutoQuestionMarker(qid,
+                                    () -> appendAutoQuestionCrop(lesson, markers, index + 1));
+                        } else {
+                            appendAutoQuestionCrop(lesson, markers, index + 1);
+                        }
                     });
-                } catch (OutOfMemoryError memoryError) {
-                    try {
-                        JSONObject meta = new JSONObject();
-                        meta.put("material_page", sourcePage);
-                        meta.put("image_index", index);
-                        diagnostics.log("lesson_image_memory_skip", meta);
-                    } catch (Exception ignored) {}
-                    runOnUiThread(() -> appendAutoImageAt(lesson, index + 1, total));
-                } catch (Exception imageError) {
-                    try {
-                        JSONObject meta = new JSONObject();
-                        meta.put("material_page", sourcePage);
-                        meta.put("image_index", index);
-                        meta.put("error", imageError.getMessage() == null ? "" : imageError.getMessage());
-                        diagnostics.log("lesson_image_optional_skip", meta);
-                    } catch (Exception ignored) {}
-                    runOnUiThread(() -> appendAutoImageAt(lesson, index + 1, total));
-                }
-            });
+                });
+            } catch (OutOfMemoryError memoryError) {
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("qid", qid);
+                    meta.put("page", page);
+                    diagnostics.log("question_crop_memory_skip", meta);
+                } catch (Exception ignored) {}
+                System.gc();
+                runOnUiThread(() -> removeAutoQuestionMarker(qid,
+                        () -> appendAutoQuestionCrop(lesson, markers, index + 1)));
+            } catch (Exception cropError) {
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("qid", qid);
+                    meta.put("page", page);
+                    meta.put("error", cropError.getMessage() == null ? "" : cropError.getMessage());
+                    diagnostics.log("question_crop_error", meta);
+                } catch (Exception ignored) {}
+                runOnUiThread(() -> removeAutoQuestionMarker(qid,
+                        () -> appendAutoQuestionCrop(lesson, markers, index + 1)));
+            }
+        });
+    }
+
+
+    private void removeAutoQuestionMarker(String qid, Runnable done) {
+        String js = "(function(){" + baseHelpers()
+                + "return removeQuestionMarker('إجراءات سير الدرس'," + JSONObject.quote(qid) + ");"
+                + "})()";
+        webView.evaluateJavascript(js, ignored -> {
+            if (done != null) done.run();
         });
     }
 
