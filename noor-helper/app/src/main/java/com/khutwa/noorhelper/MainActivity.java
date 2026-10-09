@@ -423,10 +423,7 @@ public class MainActivity extends Activity {
                 List<DiscoveredCurriculumStore.Entry> catalog = curriculumStore.load();
                 if (catalog.isEmpty()) {
                     runOnUiThread(() -> status.setText("الذكاء يحدد الصف والوحدات والدروس وترتيبها من الملفين..."));
-                    catalog = aiClient.discoverCurriculum(
-                            corpus.planDiscoveryContext(),
-                            corpus.materialDiscoveryOutline()
-                    );
+                    catalog = aiClient.discoverCurriculum(corpus);
                     curriculumStore.save(catalog);
                 }
 
