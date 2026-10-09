@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.6.5");
+        title.setText("مساعد نور - التاسع 0.6.6");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         } else {
             int p = lesson.unit.indexOf(':');
             parent = p >= 0 ? lesson.unit.substring(p + 1).trim() : lesson.unit;
-            child = lesson.title;
+            child = lesson.code;
         }
 
         webView.evaluateJavascript(treeEnsureChildScript(parent, child, exactParent), raw -> {
@@ -716,15 +716,19 @@ public class MainActivity extends Activity {
 
     private String treeClickLessonScript(Grade9Curriculum.Lesson lesson) {
         return "(function(){"
-                + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/[\\s\\-–]+/g,'').trim();}"
-                + "var code=norm(" + JSONObject.quote(lesson.code) + "),title=norm(" + JSONObject.quote(lesson.title) + ");"
+                + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
+                + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim());}"
+                + "function codeOf(s){var m=norm(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
+                + "function compact(s){return norm(s).replace(/[\\s\\-–]+/g,'');}"
+                + "var code=" + JSONObject.quote(lesson.code) + ",title=compact(" + JSONObject.quote(lesson.title) + ");"
                 + "var a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a')),best=null,bestLen=1e9;"
-                + "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var t=norm(a[i].innerText||a[i].textContent);"
-                + "if(t&&t.indexOf(title)>=0&&t.indexOf(code)>=0&&t.length<bestLen){best=a[i];bestLen=t.length;}}"
-                + "if(!best){for(var j=0;j<a.length;j++){var rr=a[j].getBoundingClientRect();if(rr.width===0&&rr.height===0)continue;var tt=norm(a[j].innerText||a[j].textContent);"
+                + "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var raw=a[i].innerText||a[i].textContent||'';"
+                + "if(codeOf(raw)===code){var tx=compact(raw),score=(tx.indexOf(title)>=0?0:1000)+tx.length;if(score<bestLen){best=a[i];bestLen=score;}}}"
+                + "if(!best){for(var j=0;j<a.length;j++){var rr=a[j].getBoundingClientRect();if(rr.width===0&&rr.height===0)continue;var tt=compact(a[j].innerText||a[j].textContent);"
                 + "if(tt&&tt.indexOf(title)>=0&&tt.length<bestLen){best=a[j];bestLen=tt.length;}}}"
                 + "if(!best)return '0';best.click();return '1';})()";
     }
+
 
     private void waitForAutoLessonForm(Grade9Curriculum.Lesson lesson, int attempt) {
         if (!autoActive) return;
