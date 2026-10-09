@@ -3,6 +3,7 @@ package com.khutwa.noorhelper;
 import android.content.Context;
 import android.net.Uri;
 
+import com.tom_roush.pdfbox.io.MemoryUsageSetting;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.text.PDFTextStripper;
 
@@ -73,7 +74,7 @@ final class PdfLessonContext {
 
     private static DocSelection select(Context context, Uri uri, LessonKey key, boolean plan) throws Exception {
         try (InputStream in = context.getContentResolver().openInputStream(uri);
-             PDDocument doc = PDDocument.load(in)) {
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
             if (doc.getNumberOfPages() <= 0) return new DocSelection("", new ArrayList<>());
 
             List<ScoredPage> scored = new ArrayList<>();
