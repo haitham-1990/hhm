@@ -3,6 +3,7 @@ package com.khutwa.noorhelper;
 import android.content.Context;
 import android.net.Uri;
 
+import com.tom_roush.pdfbox.io.MemoryUsageSetting;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.text.PDFTextStripper;
 
@@ -308,7 +309,7 @@ final class PdfCorpusIndex {
 
     private static List<String> readAllPages(Context context, Uri uri) throws Exception {
         try (InputStream in = context.getContentResolver().openInputStream(uri);
-             PDDocument doc = PDDocument.load(in)) {
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
             List<String> out = new ArrayList<>();
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setSortByPosition(true);
