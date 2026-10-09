@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - قارئ الشجرة 1.0.7");
+        title.setText("نور الذكي - منصة 0.6.9 + محتوى ذكي 1.0.8");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -831,7 +831,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.7.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.8.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1291,6 +1291,123 @@ public class MainActivity extends Activity {
 
 
     private void autoTreeStage(CurriculumLesson lesson, int stage, int retry) {
+        Grade9Curriculum.Lesson legacy = lesson == null ? null : Grade9Curriculum.byCode(lesson.code);
+        if (legacy != null) {
+            autoTreeStage069(lesson, legacy, stage, retry);
+        } else {
+            autoTreeStageGeneric(lesson, stage, retry);
+        }
+    }
+
+
+    private void autoTreeStage069(CurriculumLesson lesson, Grade9Curriculum.Lesson legacy, int stage, int retry) {
+        if (!autoActive || autoCurrentIndex < 0) return;
+
+        if (stage >= 3) {
+            webView.evaluateJavascript(treeClickLessonScript069(legacy), raw -> {
+                int ok = parseJsInt(raw);
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("driver", "0.6.9");
+                    meta.put("stage", stage);
+                    meta.put("retry", retry);
+                    meta.put("result", ok);
+                    logAutoStage("tree_lesson_click_result", lesson, meta);
+                } catch (Exception ignored) {}
+
+                if (ok <= 0) {
+                    if (retry < 14) {
+                        webView.postDelayed(() -> autoTreeStage069(lesson, legacy, 2, retry + 1), 700);
+                    } else {
+                        captureNoorDiagnosticSnapshot("legacy_069_lesson_not_found", lesson);
+                        stopAutoWithError("لم أجد درس «" + lesson.displayName() + "» ظاهرًا في شجرة المنهج.");
+                    }
+                    return;
+                }
+                status.setText("تم اختيار " + lesson.displayName() + " — أنتظر نور ليحمّل العنوان والأهداف...");
+                webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1400);
+            });
+            return;
+        }
+
+        String parent;
+        String child;
+        boolean exactParent = false;
+        if (stage == 0) {
+            parent = "عرض الشجرة - الرياضيات";
+            child = "الأول";
+        } else if (stage == 1) {
+            parent = "الأول";
+            exactParent = true;
+            int p = legacy.unit.indexOf(':');
+            child = p >= 0 ? legacy.unit.substring(p + 1).trim() : legacy.unit;
+        } else {
+            int p = legacy.unit.indexOf(':');
+            parent = p >= 0 ? legacy.unit.substring(p + 1).trim() : legacy.unit;
+            child = legacy.noorCode();
+        }
+
+        final String parentQ = parent;
+        final String childQ = child;
+        final boolean exact = exactParent;
+        webView.evaluateJavascript(treeEnsureChildScript069(parentQ, childQ, exact), raw -> {
+            int state = parseJsInt(raw);
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("driver", "0.6.9");
+                meta.put("stage", stage);
+                meta.put("retry", retry);
+                meta.put("parent_query", parentQ);
+                meta.put("child_query", childQ);
+                meta.put("exact_parent", exact);
+                meta.put("result", state);
+                logAutoStage("tree_path_result", lesson, meta);
+            } catch (Exception ignored) {}
+
+            if (state == 2) {
+                webView.postDelayed(() -> autoTreeStage069(lesson, legacy, stage + 1, 0), 250);
+            } else if (state == 1) {
+                webView.postDelayed(() -> autoTreeStage069(lesson, legacy, stage, retry + 1), 700);
+            } else if (retry < 14) {
+                webView.postDelayed(() -> autoTreeStage069(lesson, legacy, stage, retry + 1), 700);
+            } else {
+                captureNoorDiagnosticSnapshot("legacy_069_tree_path_failed", lesson);
+                stopAutoWithError("لم أتمكن من فتح مسار الدرس «" + lesson.displayName() + "» في شجرة نور.");
+            }
+        });
+    }
+
+
+    private String treeEnsureChildScript069(String parentQuery, String childQuery, boolean exactParent) {
+        return "(function(){"
+                + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim();}"
+                + "function visible(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}"
+                + "var a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a')),cq=norm(" + JSONObject.quote(childQuery) + "),cqc=cq.replace(/[\\s\\-–]+/g,'');"
+                + "for(var i=0;i<a.length;i++){if(!visible(a[i]))continue;var ct=norm(a[i].innerText||a[i].textContent),ctc=ct.replace(/[\\s\\-–]+/g,'');if(ct&&(ct===cq||ct.indexOf(cq)>=0||ctc.indexOf(cqc)>=0))return '2';}"
+                + "var pq=norm(" + JSONObject.quote(parentQuery) + "),best=null,bestLen=1e9;"
+                + "for(var j=0;j<a.length;j++){if(!visible(a[j]))continue;var t=norm(a[j].innerText||a[j].textContent);if(!t)continue;"
+                + "var m=" + (exactParent ? "t===pq" : "(t.indexOf(pq)>=0||pq.indexOf(t)>=0)") + ";if(m&&t.length<bestLen){best=a[j];bestLen=t.length;}}"
+                + "if(!best)return '0';best.click();return '1';})()";
+    }
+
+
+    private String treeClickLessonScript069(Grade9Curriculum.Lesson lesson) {
+        return "(function(){"
+                + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
+                + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim());}"
+                + "function codeOf(s){var m=norm(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
+                + "function compact(s){return norm(s).replace(/[\\s\\-–]+/g,'');}"
+                + "var code=codeOf(" + JSONObject.quote(lesson.noorCode()) + "),title=compact(" + JSONObject.quote(lesson.title) + ");"
+                + "var a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a')),best=null,bestLen=1e9;"
+                + "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var raw=a[i].innerText||a[i].textContent||'';"
+                + "if(codeOf(raw)===code){var tx=compact(raw),score=(tx.indexOf(title)>=0?0:1000)+tx.length;if(score<bestLen){best=a[i];bestLen=score;}}}"
+                + "if(!best){for(var j=0;j<a.length;j++){var rr=a[j].getBoundingClientRect();if(rr.width===0&&rr.height===0)continue;var tt=compact(a[j].innerText||a[j].textContent);"
+                + "if(tt&&tt.indexOf(title)>=0&&tt.length<bestLen){best=a[j];bestLen=tt.length;}}}"
+                + "if(!best)return '0';best.click();return '1';})()";
+    }
+
+
+    private void autoTreeStageGeneric(CurriculumLesson lesson, int stage, int retry) {
         if (!autoActive || autoCurrentIndex < 0) return;
 
         List<String> path = new ArrayList<>();
@@ -1343,17 +1460,17 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
 
             if (state == 2) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage + 1, 0), 300);
+                webView.postDelayed(() -> autoTreeStageGeneric(lesson, stage + 1, 0), 300);
                 return;
             }
 
             if (state == 1 && retry < 8) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 650);
+                webView.postDelayed(() -> autoTreeStageGeneric(lesson, stage, retry + 1), 650);
                 return;
             }
 
             if (state <= 0 && retry < 4) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 650);
+                webView.postDelayed(() -> autoTreeStageGeneric(lesson, stage, retry + 1), 650);
                 return;
             }
 
@@ -1784,7 +1901,19 @@ public class MainActivity extends Activity {
     }
 
     private void applyAutoSchedule(CurriculumLesson lesson) {
-        List<String> dates = GenericSchedulePlanner.datesFor(lesson, autoLessons);
+        List<String> dates;
+        Grade9Curriculum.Lesson legacyScheduleLesson = lesson == null ? null : Grade9Curriculum.byCode(lesson.code);
+        if (legacyScheduleLesson != null) {
+            dates = Grade9SchedulePlanner.datesFor(legacyScheduleLesson);
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("driver", "0.6.9");
+                meta.put("source", "Grade9SchedulePlanner");
+                logAutoStage("schedule_driver_selected", lesson, meta);
+            } catch (Exception ignored) {}
+        } else {
+            dates = GenericSchedulePlanner.datesFor(lesson, autoLessons);
+        }
         if (dates.isEmpty()) {
             stopAutoWithError("لم أستطع حساب تواريخ النشر من الخطة.");
             return;
