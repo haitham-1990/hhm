@@ -185,14 +185,6 @@ public class MainActivity extends Activity {
         databaseStatus.setTextDirection(View.TEXT_DIRECTION_RTL);
         root.addView(databaseStatus);
 
-        Button diagnosticButton = makeButton("حفظ تقرير التشخيص");
-        diagnosticButton.setTextSize(12);
-        diagnosticButton.setOnClickListener(v -> exportDiagnosticReport());
-        LinearLayout.LayoutParams diagParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
-        diagParams.setMargins(dp(6), 0, dp(6), dp(2));
-        root.addView(diagnosticButton, diagParams);
-
         LinearLayout autoStartRow = new LinearLayout(this);
         autoStartRow.setOrientation(LinearLayout.HORIZONTAL);
         autoStartRow.setGravity(Gravity.CENTER_VERTICAL);
