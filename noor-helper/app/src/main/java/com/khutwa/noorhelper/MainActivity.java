@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.6.4");
+        title.setText("مساعد نور - التاسع 0.6.5");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -1133,8 +1133,9 @@ public class MainActivity extends Activity {
                 + "window.__khutwaNoorLearningMute=true;"
                 + "try{"
                 + "var oc=0,arr=objectiveBoxes();for(var i=0;i<arr.length;i++){if(!arr[i].checked)arr[i].click();if(arr[i].checked)oc++;}"
-                + "var checks=0;function checkNames(names){for(var a=0;a<names.length;a++){var target=norm(names[a]);var cbs=[].slice.call(document.querySelectorAll('input[type=checkbox]'));for(var b=0;b<cbs.length;b++){var tx=norm(labelText(cbs[b]));if(tx&&tx.indexOf(target)>=0){if(!cbs[b].checked)cbs[b].click();if(cbs[b].checked)checks++;break;}}}}"
-                + "checkNames(" + strategies + ");checkNames(" + resources + ");"
+                + "var strategyCount=setMultiSelect('strategies'," + strategies + ");"
+                + "var resourceCount=setMultiSelect('teaching_aids'," + resources + ");"
+                + "var checks=strategyCount+resourceCount;"
                 + "var levels=setLevels(" + JSONObject.quote(level) + ");"
                 + "var ed=0;ed+=setEditor('المفاهيم'," + JSONObject.quote(toHtml(p.concepts)) + ");"
                 + "ed+=setEditor('التهيئة'," + JSONObject.quote(toHtml(p.intro)) + ");"
@@ -1820,8 +1821,9 @@ public class MainActivity extends Activity {
 
         return "(function(){" + baseHelpers()
                 + "var oc=0,arr=objectiveBoxes();for(var i=0;i<arr.length;i++){if(!arr[i].checked)arr[i].click();if(arr[i].checked)oc++;}"
-                + "var checks=0;function checkNames(names){for(var a=0;a<names.length;a++){var target=norm(names[a]);var cbs=[].slice.call(document.querySelectorAll('input[type=checkbox]'));for(var b=0;b<cbs.length;b++){var tx=norm(labelText(cbs[b]));if(tx&&tx.indexOf(target)>=0){if(!cbs[b].checked)cbs[b].click();if(cbs[b].checked)checks++;break;}}}}"
-                + "checkNames(" + strategies + ");checkNames(" + resources + ");"
+                + "var strategyCount=setMultiSelect('strategies'," + strategies + ");"
+                + "var resourceCount=setMultiSelect('teaching_aids'," + resources + ");"
+                + "var checks=strategyCount+resourceCount;"
                 + "var levels=setLevels(" + JSONObject.quote(level) + ");"
                 + "var ed=0;ed+=setEditor('المفاهيم'," + JSONObject.quote(toHtml(p.concepts)) + ");"
                 + "ed+=setEditor('التهيئة'," + JSONObject.quote(toHtml(p.intro)) + ");"
@@ -1849,6 +1851,7 @@ public class MainActivity extends Activity {
                 + "function setEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.innerHTML=html;fire(doc.body);return 1;}}if(best.getAttribute('contenteditable')==='true'){best.innerHTML=html;fire(best);return 1;}if(best.tagName==='TEXTAREA'){best.value=html.replace(/<br\\s*\\/?\\s*>/gi,'\\n').replace(/<[^>]+>/g,'');fire(best);return 1;}}catch(e){}return 0;}"
                 + "function appendToEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.insertAdjacentHTML('beforeend',html);fire(doc.body);return 1;}}if(best.getAttribute('contenteditable')==='true'){best.insertAdjacentHTML('beforeend',html);fire(best);return 1;}if(best.tagName==='TEXTAREA'){best.value+='\\nتمارين الدرس مرفقة كصور في النسخة المرئية.';fire(best);return 1;}}catch(e){}return 0;}"
                 + "function setLevels(target){var n=0,q=norm(target),sels=[].slice.call(document.querySelectorAll('select'));for(var s=0;s<sels.length;s++){var opts=[].slice.call(sels[s].options||[]);for(var o=0;o<opts.length;o++){if(norm(opts[o].text).indexOf(q)>=0){if(sels[s].multiple){opts[o].selected=true;}else{sels[s].value=opts[o].value;}fire(sels[s]);n++;break;}}}return n;}"
+                + "function setMultiSelect(id,names){var el=document.getElementById(id);if(!el)return 0;var opts=[].slice.call(el.options||[]),count=0;for(var z=0;z<opts.length;z++)opts[z].selected=false;for(var a=0;a<names.length;a++){var q=norm(names[a]),best=null;for(var b=0;b<opts.length;b++){var tx=norm(opts[b].text||'');if(tx===q){best=opts[b];break;}if(!best&&tx.indexOf(q)>=0)best=opts[b];}if(best&&!best.selected){best.selected=true;count++;}}fire(el);if(window.jQuery){try{window.jQuery(el).trigger('chosen:updated');}catch(e){}}return count;}"
                 + "function setControlValue(el,val){if(!el)return 0;try{if(el.tagName==='SELECT'){var opts=[].slice.call(el.options||[]),q=norm(val);for(var i=0;i<opts.length;i++){if(norm(opts[i].text)===q||norm(opts[i].text).indexOf(q)>=0||String(opts[i].value)===String(val)){el.value=opts[i].value;fire(el);return 1;}}return 0;}el.value=val;fire(el);return 1;}catch(e){return 0;}}"
                 + "function setLabeledValue(labels,val){for(var i=0;i<labels.length;i++){var a=findText(labels[i]);if(!a)continue;var el=nearestAfter(a,'select,input[type=number],input[type=text],input:not([type])',450);if(setControlValue(el,val))return 1;}return 0;}"
                 + "function setSelectWeek(el,n){if(!el)return 0;var names=['','الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع','الثامن','التاسع','العاشر','الحادي عشر','الثاني عشر','الثالث عشر','الرابع عشر','الخامس عشر','السادس عشر','السابع عشر','الثامن عشر','التاسع عشر'];var opts=[].slice.call(el.options||[]);for(var i=0;i<opts.length;i++){var tx=norm(opts[i].text),v=String(opts[i].value||'');if(tx.indexOf(String(n))>=0||(names[n]&&tx.indexOf(norm(names[n]))>=0)||v===String(n)){el.value=opts[i].value;fire(el);return 1;}}if(el.options&&el.options.length>n){el.selectedIndex=n;fire(el);return 1;}return 0;}"
