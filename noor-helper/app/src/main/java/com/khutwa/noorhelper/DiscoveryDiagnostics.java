@@ -104,8 +104,12 @@ final class DiscoveryDiagnostics {
             try {
                 JSONObject root = new JSONObject();
                 root.put("report_type", "noor_smart_discovery_diagnostic");
+                root.put("report_version", 2);
+                root.put("purpose", "تشخيص اكتشاف الدروس وتقسيم صفحات المادة وبناء التحاضير والصور في نور الذكي.");
                 root.put("app_version", appVersion());
                 root.put("generated_at", isoNow());
+                root.put("android_sdk", android.os.Build.VERSION.SDK_INT);
+                root.put("device_model", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL);
                 root.put("privacy_note",
                         "لا يحتوي التقرير على كلمة مرور نور أو الكوكيز أو نصوص ملفات PDF الكاملة. يسجل نتائج الاكتشاف والتقسيم والأخطاء فقط.");
                 root.put("event_count", events.length());
