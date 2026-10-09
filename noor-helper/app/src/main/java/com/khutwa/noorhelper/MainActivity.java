@@ -1420,7 +1420,7 @@ public class MainActivity extends Activity {
                 + "for(var u=0;u<unitAnchors.length;u++){var ua=unitAnchors[u];if(ua===sem||!vis(ua))continue;var raw=ua.innerText||ua.textContent||'',cc=codeOf(raw);if(cc)continue;"
                 + "var score=wordScore(raw,unit),rk=unitKey(raw),rc=compact(raw);"
                 + "if(uk&&rk&&(rk===uk||rk.indexOf(uk)>=0||uk.indexOf(rk)>=0))score+=900;"
-                + "if(uno){var m=rk.match(/(^|\\s)"+uno+"($|\\s)/);if(m)score+=800;}"
+                + "if(uno){var re=new RegExp('(^|\\\\s)'+uno+'($|\\\\s)');if(re.test(rk))score+=800;}"
                 + "var ln=rk.length||9999;if(score>bestScore||(score===bestScore&&ln<bestLen)){bestScore=score;bestLen=ln;bestUnit=ua;}}"
                 + "if(!bestUnit||bestScore<240){if(semLi.querySelector('li.jstree-loading'))return 'unit_waiting';return 'unit_not_found';}"
                 + "var unitLi=bestUnit.closest?bestUnit.closest('li'):null;if(!unitLi)return 'unit_not_found';"
