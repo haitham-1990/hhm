@@ -13,6 +13,7 @@ import com.tom_roush.pdfbox.text.TextPosition;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -51,6 +52,34 @@ final class PdfExerciseExtractor {
             }
 
             return extractByTextSearch(doc, lessonTitle);
+        }
+    }
+
+    static ExtractResult renderPages(Context context, Uri uri, List<Integer> pdfPages) throws Exception {
+        if (pdfPages == null || pdfPages.isEmpty()) {
+            throw new IllegalArgumentException("لا توجد صفحات محفوظة لهذا الدرس.");
+        }
+        try (InputStream in = context.getContentResolver().openInputStream(uri);
+             PDDocument doc = PDDocument.load(in)) {
+            PDFRenderer renderer = new PDFRenderer(doc);
+            List<Bitmap> images = new ArrayList<>();
+            int first = Integer.MAX_VALUE;
+            int last = -1;
+
+            LinkedHashSet<Integer> unique = new LinkedHashSet<>(pdfPages);
+            for (Integer pageNo : unique) {
+                if (pageNo == null) continue;
+                int pageIndex = pageNo - 1;
+                if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) continue;
+                Bitmap page = renderer.renderImageWithDPI(pageIndex, 135, ImageType.RGB);
+                page = downscale(page, MAX_WIDTH);
+                images.add(page);
+                first = Math.min(first, pageNo);
+                last = Math.max(last, pageNo);
+            }
+
+            if (images.isEmpty()) throw new IllegalStateException("تعذر قراءة الصفحات المحفوظة من المادة العلمية.");
+            return new ExtractResult(images, first, last, "صفحات محفوظة في قاعدة البيانات", true);
         }
     }
 
