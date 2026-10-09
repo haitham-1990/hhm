@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="مساعد نور 0.6.5"
+        android:label="مساعد نور 0.6.6"
         android:usesCleartextTraffic="false"
         android:theme="@style/AppTheme">
         <activity
