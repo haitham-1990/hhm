@@ -12,6 +12,8 @@ import com.tom_roush.pdfbox.text.PDFTextStripper;
 import com.tom_roush.pdfbox.text.TextPosition;
 
 import java.io.InputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashSet;
@@ -140,6 +142,102 @@ final class PdfExerciseExtractor {
             );
         }
     }
+
+    static int saveBetweenToDirectory(Context context, Uri uri,
+                                      String currentTitle, String nextTitle,
+                                      int startPageOneBased, int endPageOneBased,
+                                      int previousEndPageOneBased,
+                                      int nextStartPageOneBased,
+                                      File outputDir) throws Exception {
+        try (InputStream in = context.getContentResolver().openInputStream(uri);
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
+            if (doc.getNumberOfPages() == 0) throw new IllegalStateException("ملف PDF فارغ");
+
+            int start = Math.max(0, startPageOneBased - 1);
+            if (start >= doc.getNumberOfPages()) throw new IllegalArgumentException("صفحة بداية الدرس خارج الملف");
+            int end = Math.min(doc.getNumberOfPages() - 1,
+                    Math.max(start, endPageOneBased > 0 ? endPageOneBased - 1 : start));
+
+            boolean cropTopShared = previousEndPageOneBased > 0
+                    && previousEndPageOneBased == startPageOneBased;
+            boolean cropBottomShared = nextStartPageOneBased > 0
+                    && nextStartPageOneBased == endPageOneBased
+                    && nextTitle != null && !nextTitle.trim().isEmpty();
+
+            float currentHeadingY = -1f;
+            if (cropTopShared) {
+                currentHeadingY = PageLocator.locateHeading(doc, start, LessonKey.from(currentTitle));
+            }
+
+            int nextPage = cropBottomShared ? nextStartPageOneBased - 1 : -1;
+            float nextHeadingY = -1f;
+            if (cropBottomShared && nextPage >= start && nextPage <= end) {
+                nextHeadingY = PageLocator.locateHeading(doc, nextPage, LessonKey.from(nextTitle));
+            }
+
+            PDFRenderer renderer = new PDFRenderer(doc);
+            int saved = 0;
+
+            for (int p = start; p <= end; p++) {
+                Bitmap page = null;
+                Bitmap finalBitmap = null;
+                try {
+                    // Render one page, save it, then release it before moving on.
+                    // This keeps memory use nearly constant even for long lessons.
+                    page = renderer.renderImageWithDPI(p, 125, ImageType.RGB);
+                    float pageHeightPt = doc.getPage(p).getCropBox().getHeight();
+
+                    int top = 0;
+                    int bottom = page.getHeight();
+
+                    if (p == start && cropTopShared && currentHeadingY > 0) {
+                        int approx = Math.max(0,
+                                Math.round((currentHeadingY - 10f) / pageHeightPt * page.getHeight()));
+                        int safe = findSafeWhitespaceBefore(page, approx, 140);
+                        top = safe >= 0 ? safe : Math.max(0, approx - 55);
+                    }
+
+                    if (p == nextPage && cropBottomShared && nextHeadingY > 0) {
+                        int approx = Math.min(page.getHeight(),
+                                Math.round((nextHeadingY - 8f) / pageHeightPt * page.getHeight()));
+                        int safe = findSafeWhitespaceBefore(page, approx, 160);
+                        if (safe >= 0) bottom = safe;
+                    }
+
+                    if (bottom <= top + Math.max(30, page.getHeight() / 25)) {
+                        top = 0;
+                        bottom = page.getHeight();
+                    }
+
+                    Bitmap out;
+                    if (top == 0 && bottom == page.getHeight()) {
+                        out = page;
+                    } else {
+                        out = Bitmap.createBitmap(page, 0, top, page.getWidth(), bottom - top);
+                        if (!page.isRecycled()) page.recycle();
+                        page = null;
+                    }
+
+                    finalBitmap = downscale(out, MAX_WIDTH);
+                    File outFile = new File(outputDir, String.format(Locale.US, "%03d.jpg", saved + 1));
+                    try (FileOutputStream outStream = new FileOutputStream(outFile)) {
+                        if (!finalBitmap.compress(Bitmap.CompressFormat.JPEG, 72, outStream)) {
+                            throw new IllegalStateException("تعذر ضغط صورة الدرس.");
+                        }
+                        outStream.flush();
+                    }
+                    saved++;
+                } finally {
+                    if (finalBitmap != null && !finalBitmap.isRecycled()) finalBitmap.recycle();
+                    if (page != null && !page.isRecycled()) page.recycle();
+                }
+            }
+
+            if (saved == 0) throw new IllegalStateException("تعذر إنشاء صور الدرس");
+            return saved;
+        }
+    }
+
 
     private static int findSafeWhitespaceBefore(Bitmap bitmap, int approxY, int radius) {
         if (bitmap == null || bitmap.getWidth() < 20 || bitmap.getHeight() < 20) return -1;
