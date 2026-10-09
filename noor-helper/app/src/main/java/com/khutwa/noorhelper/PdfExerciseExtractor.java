@@ -46,11 +46,6 @@ final class PdfExerciseExtractor {
              PDDocument doc = PDDocument.load(in)) {
             if (doc.getNumberOfPages() == 0) throw new IllegalStateException("ملف PDF فارغ");
 
-            ExerciseMap.Lesson mapped = ExerciseMap.find(lessonTitle);
-            if (mapped != null && doc.getNumberOfPages() >= 109) {
-                return extractMapped(doc, mapped);
-            }
-
             return extractByTextSearch(doc, lessonTitle);
         }
     }
@@ -226,42 +221,6 @@ final class PdfExerciseExtractor {
         }
     }
 
-    private static ExtractResult extractMapped(PDDocument doc, ExerciseMap.Lesson lesson) throws Exception {
-        PDFRenderer renderer = new PDFRenderer(doc);
-        List<Bitmap> images = new ArrayList<>();
-        int first = Integer.MAX_VALUE;
-        int last = -1;
-
-        for (ExerciseMap.Segment segment : lesson.segments) {
-            int pageIndex = segment.pdfPage - 1;
-            if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) continue;
-
-            Bitmap page = renderer.renderImageWithDPI(pageIndex, 135, ImageType.RGB);
-            Bitmap crop = page;
-
-            if (segment.side != ExerciseMap.Side.FULL) {
-                int half = page.getWidth() / 2;
-                int x = segment.side == ExerciseMap.Side.LEFT ? 0 : half;
-                int width = segment.side == ExerciseMap.Side.LEFT ? half : page.getWidth() - half;
-                crop = Bitmap.createBitmap(page, x, 0, width, page.getHeight());
-                if (crop != page) page.recycle();
-            }
-
-            crop = downscale(crop, MAX_WIDTH);
-            images.add(crop);
-            first = Math.min(first, segment.pdfPage);
-            last = Math.max(last, segment.pdfPage);
-        }
-
-        if (images.isEmpty()) throw new IllegalStateException("لم أتمكن من استخراج صفحات الدرس من الخريطة المحفوظة");
-        return new ExtractResult(
-                images,
-                first,
-                last,
-                "خريطة ثابتة: " + lesson.code + " " + lesson.title,
-                true
-        );
-    }
 
     private static ExtractResult extractByTextSearch(PDDocument doc, String lessonTitle) throws Exception {
         LessonKey key = LessonKey.from(lessonTitle);
