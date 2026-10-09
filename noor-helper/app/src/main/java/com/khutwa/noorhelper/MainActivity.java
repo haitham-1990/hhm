@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - استكمال سريع 1.0.14");
+        title.setText("نور الذكي - صور آمنة 1.0.15");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -994,7 +994,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.14.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.15.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1922,7 +1922,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        status.setText("أضيف صور " + lesson.displayName() + " من قاعدة البيانات...");
+        status.setText("أضيف محتوى " + lesson.displayName() + " من المادة العلمية...");
         appendAutoImageAt(lesson, 0, total);
     }
 
@@ -1935,21 +1935,27 @@ public class MainActivity extends Activity {
         }
 
         worker.execute(() -> {
-            Bitmap bitmap = null;
             try {
-                bitmap = LessonImageCache.loadAt(this, lesson.code, index);
-                if (bitmap == null) throw new IllegalStateException("تعذر قراءة صورة الدرس رقم " + (index + 1));
-
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 68, out);
-                String base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+                // Read the already-compressed JPEG directly. Do not decode/recompress it:
+                // this preserves small text and avoids a second large Bitmap allocation.
+                String base64 = LessonImageCache.base64At(this, lesson.code, index);
+                if (base64 == null || base64.isEmpty()) {
+                    throw new IllegalStateException("تعذر قراءة صورة الدرس رقم " + (index + 1));
+                }
 
                 runOnUiThread(() -> {
                     if (!autoActive) return;
                     status.setText("أضيف صورة " + (index + 1) + " من " + total + "...");
-                    String html = (index == 0 ? "<hr><p><strong>تمارين الدرس من المادة العلمية المرفقة</strong></p>" : "")
-                            + "<p><img src='data:image/jpeg;base64," + base64
-                            + "' style='max-width:100%;height:auto;display:block;margin:12px auto;' /></p>";
+                    String html = (index == 0
+                            ? "<hr><p><strong>محتوى الدرس من المادة العلمية المرفقة</strong></p>" : "")
+                            + "<div style='display:block;max-width:100%;margin:10px auto;"
+                            + "text-align:center;overflow:hidden;filter:none!important;"
+                            + "mix-blend-mode:normal!important;forced-color-adjust:none;'>"
+                            + "<img src='data:image/jpeg;base64," + base64
+                            + "' style='display:block;max-width:100%;width:auto;height:auto;"
+                            + "margin:0 auto;object-fit:contain;filter:none!important;"
+                            + "mix-blend-mode:normal!important;forced-color-adjust:none!important;' />"
+                            + "</div>";
                     String js = "(function(){" + baseHelpers()
                             + "return appendToEditor('إجراءات سير الدرس'," + JSONObject.quote(html) + ");"
                             + "})()";
@@ -1960,6 +1966,7 @@ public class MainActivity extends Activity {
                             meta.put("image_index", index);
                             meta.put("image_total", total);
                             meta.put("result", ok);
+                            meta.put("source", "cached_jpeg_direct");
                             logAutoStage("lesson_image_append_result", lesson, meta);
                         } catch (Exception ignored) {}
 
@@ -1974,8 +1981,6 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> stopAutoWithError("ضغط الذاكرة أثناء تحميل صورة الدرس رقم " + (index + 1) + "."));
             } catch (Exception e) {
                 runOnUiThread(() -> stopAutoWithError("تعذر تحميل صورة الدرس من قاعدة البيانات: " + e.getMessage()));
-            } finally {
-                if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
             }
         });
     }
