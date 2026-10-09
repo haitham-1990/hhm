@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - صور آمنة 1.0.15");
+        title.setText("نور الذكي - سير درس ذكي 1.0.16");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -994,7 +994,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.15.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.16.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1934,54 +1934,102 @@ public class MainActivity extends Activity {
             return;
         }
 
-        worker.execute(() -> {
-            try {
-                // Read the already-compressed JPEG directly. Do not decode/recompress it:
-                // this preserves small text and avoids a second large Bitmap allocation.
-                String base64 = LessonImageCache.base64At(this, lesson.code, index);
-                if (base64 == null || base64.isEmpty()) {
-                    throw new IllegalStateException("تعذر قراءة صورة الدرس رقم " + (index + 1));
-                }
+        int page = 0;
+        if (currentDbEntry != null
+                && currentDbEntry.materialPages != null
+                && index < currentDbEntry.materialPages.size()) {
+            Integer p = currentDbEntry.materialPages.get(index);
+            page = p == null ? 0 : p;
+        }
 
-                runOnUiThread(() -> {
-                    if (!autoActive) return;
-                    status.setText("أضيف صورة " + (index + 1) + " من " + total + "...");
-                    String html = (index == 0
-                            ? "<hr><p><strong>محتوى الدرس من المادة العلمية المرفقة</strong></p>" : "")
-                            + "<div style='display:block;max-width:100%;margin:10px auto;"
-                            + "text-align:center;overflow:hidden;filter:none!important;"
-                            + "mix-blend-mode:normal!important;forced-color-adjust:none;'>"
-                            + "<img src='data:image/jpeg;base64," + base64
-                            + "' style='display:block;max-width:100%;width:auto;height:auto;"
-                            + "margin:0 auto;object-fit:contain;filter:none!important;"
-                            + "mix-blend-mode:normal!important;forced-color-adjust:none!important;' />"
-                            + "</div>";
-                    String js = "(function(){" + baseHelpers()
-                            + "return appendToEditor('إجراءات سير الدرس'," + JSONObject.quote(html) + ");"
-                            + "})()";
-                    webView.evaluateJavascript(js, raw -> {
-                        int ok = parseJsInt(raw);
-                        try {
-                            JSONObject meta = new JSONObject();
-                            meta.put("image_index", index);
-                            meta.put("image_total", total);
-                            meta.put("result", ok);
-                            meta.put("source", "cached_jpeg_direct");
-                            logAutoStage("lesson_image_append_result", lesson, meta);
-                        } catch (Exception ignored) {}
+        if (page <= 0) {
+            appendAutoImageAt(lesson, index + 1, total);
+            return;
+        }
 
-                        if (ok > 0) {
-                            appendAutoImageAt(lesson, index + 1, total);
-                        } else {
-                            stopAutoWithError("لم أستطع إضافة صور PDF داخل «إجراءات سير الدرس».");
-                        }
-                    });
-                });
-            } catch (OutOfMemoryError e) {
-                runOnUiThread(() -> stopAutoWithError("ضغط الذاكرة أثناء تحميل صورة الدرس رقم " + (index + 1) + "."));
-            } catch (Exception e) {
-                runOnUiThread(() -> stopAutoWithError("تعذر تحميل صورة الدرس من قاعدة البيانات: " + e.getMessage()));
+        final int sourcePage = page;
+        String probe = "(function(){" + baseHelpers()
+                + "return String(hasSourcePageMarker('إجراءات سير الدرس'," + sourcePage + "));"
+                + "})()";
+
+        webView.evaluateJavascript(probe, probeRaw -> {
+            int wanted = parseJsInt(probeRaw);
+            if (wanted <= 0) {
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("image_index", index);
+                    meta.put("image_total", total);
+                    meta.put("material_page", sourcePage);
+                    meta.put("action", "skipped_not_requested_by_ai");
+                    logAutoStage("lesson_image_selection", lesson, meta);
+                } catch (Exception ignored) {}
+                appendAutoImageAt(lesson, index + 1, total);
+                return;
             }
+
+            worker.execute(() -> {
+                try {
+                    // Read only the source page the AI selected for this teaching stage.
+                    // The cached JPEG is sent directly: no bitmap decode or second compression.
+                    String base64 = LessonImageCache.base64At(this, lesson.code, index);
+                    if (base64 == null || base64.isEmpty()) {
+                        throw new IllegalStateException("تعذر قراءة صورة صفحة " + sourcePage);
+                    }
+
+                    runOnUiThread(() -> {
+                        if (!autoActive) return;
+                        status.setText("أضيف الصفحة " + sourcePage + " في موضعها داخل سير الدرس...");
+                        String html = "<div style='display:block;max-width:100%;margin:10px auto;"
+                                + "text-align:center;overflow:hidden;filter:none!important;"
+                                + "mix-blend-mode:normal!important;forced-color-adjust:none;'>"
+                                + "<img src='data:image/jpeg;base64," + base64
+                                + "' alt='محتوى من صفحة " + sourcePage + " من المادة العلمية'"
+                                + " style='display:block;max-width:100%;width:auto;height:auto;"
+                                + "margin:0 auto;object-fit:contain;filter:none!important;"
+                                + "mix-blend-mode:normal!important;forced-color-adjust:none!important;' />"
+                                + "</div>";
+
+                        String js = "(function(){" + baseHelpers()
+                                + "return placeSourceImage('إجراءات سير الدرس'," + sourcePage + ","
+                                + JSONObject.quote(html) + ");"
+                                + "})()";
+
+                        webView.evaluateJavascript(js, raw -> {
+                            int ok = parseJsInt(raw);
+                            try {
+                                JSONObject meta = new JSONObject();
+                                meta.put("image_index", index);
+                                meta.put("image_total", total);
+                                meta.put("material_page", sourcePage);
+                                meta.put("result", ok);
+                                meta.put("source", "ai_selected_cached_jpeg");
+                                logAutoStage("lesson_image_append_result", lesson, meta);
+                            } catch (Exception ignored) {}
+
+                            // If the marker disappeared because the editor normalized the DOM,
+                            // do not append the image to the wrong place. Continue safely.
+                            appendAutoImageAt(lesson, index + 1, total);
+                        });
+                    });
+                } catch (OutOfMemoryError memoryError) {
+                    try {
+                        JSONObject meta = new JSONObject();
+                        meta.put("material_page", sourcePage);
+                        meta.put("image_index", index);
+                        diagnostics.log("lesson_image_memory_skip", meta);
+                    } catch (Exception ignored) {}
+                    runOnUiThread(() -> appendAutoImageAt(lesson, index + 1, total));
+                } catch (Exception imageError) {
+                    try {
+                        JSONObject meta = new JSONObject();
+                        meta.put("material_page", sourcePage);
+                        meta.put("image_index", index);
+                        meta.put("error", imageError.getMessage() == null ? "" : imageError.getMessage());
+                        diagnostics.log("lesson_image_optional_skip", meta);
+                    } catch (Exception ignored) {}
+                    runOnUiThread(() -> appendAutoImageAt(lesson, index + 1, total));
+                }
+            });
         });
     }
 
@@ -2449,7 +2497,7 @@ public class MainActivity extends Activity {
                 + "var levels=setLevels(" + JSONObject.quote(level) + ");"
                 + "var ed=0;ed+=setEditor('المفاهيم'," + JSONObject.quote(toHtml(p.concepts)) + ");"
                 + "ed+=setEditor('التهيئة'," + JSONObject.quote(toHtml(p.intro)) + ");"
-                + "ed+=setEditor('إجراءات سير الدرس'," + JSONObject.quote(toHtml(p.procedures)) + ");"
+                + "ed+=setEditor('إجراءات سير الدرس'," + JSONObject.quote(p.procedures) + ");"
                 + "ed+=setEditor('التقويم التكويني'," + JSONObject.quote(toHtml(p.formative)) + ");"
                 + "ed+=setEditor('التقويم الختامي'," + JSONObject.quote(toHtml(p.summative)) + ");"
                 + "ed+=setEditor('ملاحظات ضمن خطة الدراسة الأسبوعية'," + JSONObject.quote(toHtml(p.weeklyNote)) + ");"
@@ -3122,7 +3170,7 @@ public class MainActivity extends Activity {
                 + "var levels=setLevels(" + JSONObject.quote(level) + ");"
                 + "var ed=0;ed+=setEditor('المفاهيم'," + JSONObject.quote(toHtml(p.concepts)) + ");"
                 + "ed+=setEditor('التهيئة'," + JSONObject.quote(toHtml(p.intro)) + ");"
-                + "ed+=setEditor('إجراءات سير الدرس'," + JSONObject.quote(toHtml(p.procedures)) + ");"
+                + "ed+=setEditor('إجراءات سير الدرس'," + JSONObject.quote(p.procedures) + ");"
                 + "ed+=setEditor('التقويم التكويني'," + JSONObject.quote(toHtml(p.formative)) + ");"
                 + "ed+=setEditor('التقويم الختامي'," + JSONObject.quote(toHtml(p.summative)) + ");"
                 + "ed+=setEditor('ملاحظات ضمن خطة الدراسة الأسبوعية'," + JSONObject.quote(toHtml(p.weeklyNote)) + ");"
@@ -3144,7 +3192,9 @@ public class MainActivity extends Activity {
                 + "function visibleEditors(){var a=[].slice.call(document.querySelectorAll('iframe,[contenteditable=true],textarea'));return a.filter(function(e){var r=e.getBoundingClientRect();return r.width>20&&r.height>20;});}"
                 + "function findEditor(label){var a=findText(label);if(!a)return null;var ar=a.getBoundingClientRect(),cs=visibleEditors(),best=null,d=1e9;for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect(),dy=r.top-ar.bottom;if(dy>=-30&&dy<650&&dy<d){d=dy;best=cs[i];}}return best;}"
                 + "function setEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.innerHTML=html;fire(doc.body);return 1;}}if(best.getAttribute('contenteditable')==='true'){best.innerHTML=html;fire(best);return 1;}if(best.tagName==='TEXTAREA'){best.value=html.replace(/<br\\s*\\/?\\s*>/gi,'\\n').replace(/<[^>]+>/g,'');fire(best);return 1;}}catch(e){}return 0;}"
-                + "function appendToEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.insertAdjacentHTML('beforeend',html);fire(doc.body);return 1;}}if(best.getAttribute('contenteditable')==='true'){best.insertAdjacentHTML('beforeend',html);fire(best);return 1;}if(best.tagName==='TEXTAREA'){best.value+='\\nتمارين الدرس مرفقة كصور في النسخة المرئية.';fire(best);return 1;}}catch(e){}return 0;}"
+                + "function appendToEditor(label,html){var best=findEditor(label);if(!best)return 0;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;if(doc&&doc.body){doc.body.insertAdjacentHTML('beforeend',html);fire(doc.body);return 1;}}if(best.getAttribute('contenteditable')==='true'){best.insertAdjacentHTML('beforeend',html);fire(best);return 1;}if(best.tagName==='TEXTAREA'){best.value+='\\nتمارين الدرس مرفقة كصور في النسخة المرئية.';fire(best);return 1;}}catch(e){}return 0;}"                + "function editorBody(label){var best=findEditor(label);if(!best)return null;try{if(best.tagName==='IFRAME'){var doc=best.contentDocument||best.contentWindow.document;return doc&&doc.body?doc.body:null;}if(best.getAttribute('contenteditable')==='true')return best;}catch(e){}return null;}"
+                + "function hasSourcePageMarker(label,page){var body=editorBody(label);if(!body||!page)return 0;try{return body.querySelector('[data-khutwa-page=\\\"'+String(page)+'\\\"]')?1:0;}catch(e){return 0;}}"
+                + "function placeSourceImage(label,page,html){var body=editorBody(label);if(!body||!page)return 0;try{var m=body.querySelector('[data-khutwa-page=\\\"'+String(page)+'\\\"]');if(!m)return 0;m.insertAdjacentHTML('beforebegin',html);m.remove();fire(body);return 1;}catch(e){return 0;}}"
                 + "function setLevels(target){var n=0,q=norm(target),sels=[].slice.call(document.querySelectorAll('select'));for(var s=0;s<sels.length;s++){var opts=[].slice.call(sels[s].options||[]);for(var o=0;o<opts.length;o++){if(norm(opts[o].text).indexOf(q)>=0){if(sels[s].multiple){opts[o].selected=true;}else{sels[s].value=opts[o].value;}fire(sels[s]);n++;break;}}}return n;}"
                 + "function setMultiSelect(id,names){var el=document.getElementById(id);if(!el)return 0;var opts=[].slice.call(el.options||[]),count=0;for(var z=0;z<opts.length;z++)opts[z].selected=false;for(var a=0;a<names.length;a++){var q=norm(names[a]),best=null;for(var b=0;b<opts.length;b++){var tx=norm(opts[b].text||'');if(tx===q){best=opts[b];break;}if(!best&&tx.indexOf(q)>=0)best=opts[b];}if(best&&!best.selected){best.selected=true;count++;}}fire(el);if(window.jQuery){try{window.jQuery(el).trigger('chosen:updated');}catch(e){}}return count;}"
                 + "function setControlValue(el,val){if(!el)return 0;try{if(el.tagName==='SELECT'){var opts=[].slice.call(el.options||[]),q=norm(val);for(var i=0;i<opts.length;i++){if(norm(opts[i].text)===q||norm(opts[i].text).indexOf(q)>=0||String(opts[i].value)===String(val)){el.value=opts[i].value;fire(el);return 1;}}return 0;}el.value=val;fire(el);return 1;}catch(e){return 0;}}"
