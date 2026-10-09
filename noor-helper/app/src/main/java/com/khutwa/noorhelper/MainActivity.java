@@ -283,8 +283,9 @@ public class MainActivity extends Activity {
                 super.onPageFinished(view, url);
                 lastLoadedUrl = url == null ? "" : url;
                 if (!autoActive) {
-                    String pdf = exercisePdfUri == null ? "لا يوجد PDF مرتبط." : "PDF التمارين مرتبط: " + pdfName(exercisePdfUri);
-                    status.setText("نور مفتوح. اختر درس الصف التاسع أو استخدم التشغيل التلقائي. " + pdf);
+                    int ready = generatedStore == null ? 0 : generatedReadyCount();
+                    status.setText("نور مفتوح. قاعدة التحضير: " + ready + " / " + autoLessons.size()
+                            + " درس. بعد اكتمالها اختر المدى واضغط «ابدأ تلقائي».");
                 }
                 if (learningRecorder != null && learningRecorder.isActive() && isNoorUrl(url)) {
                     webView.postDelayed(() -> {
@@ -1075,7 +1076,7 @@ public class MainActivity extends Activity {
             applyAutoSchedule(lesson);
             return;
         }
-        String html = (index == 0 ? "<hr><p><strong>تمارين الدرس من ملف خطواتي نحو التميز</strong></p>" : "")
+        String html = (index == 0 ? "<hr><p><strong>تمارين الدرس من المادة العلمية المرفقة</strong></p>" : "")
                 + "<p><img src='data:image/jpeg;base64," + images.get(index)
                 + "' style='max-width:100%;height:auto;display:block;margin:12px auto;' /></p>";
         String js = "(function(){" + baseHelpers()
