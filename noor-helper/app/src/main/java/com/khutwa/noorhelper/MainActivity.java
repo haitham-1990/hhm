@@ -317,6 +317,21 @@ public class MainActivity extends Activity {
         }
     }
 
+    private CurriculumLesson findDiscoveredLesson(String title) {
+        if (title == null || title.trim().isEmpty()) return null;
+        for (CurriculumLesson lesson : autoLessons) {
+            if (lessonMatchesNoorTitle(title, lesson)) return lesson;
+        }
+        return null;
+    }
+
+    private LessonPreparation findGeneratedPreparation(String title) {
+        CurriculumLesson lesson = findDiscoveredLesson(title);
+        if (lesson == null || generatedStore == null) return null;
+        GeneratedPreparationStore.Entry entry = generatedStore.get(lesson.code);
+        return entry == null ? null : entry.preparation;
+    }
+
     private void loadDiscoveredLessons() {
         autoLessons.clear();
         if (curriculumStore == null) return;
@@ -935,12 +950,20 @@ public class MainActivity extends Activity {
     private void autoTreeStage(CurriculumLesson lesson, int stage, int retry) {
         if (!autoActive || autoCurrentIndex < 0) return;
 
-        if (stage >= 3) {
+        List<String> path = new ArrayList<>();
+        if (lesson.semester != null && !lesson.semester.trim().isEmpty()) {
+            path.add(lesson.semester.trim());
+        }
+        if (lesson.unit != null && !lesson.unit.trim().isEmpty()) {
+            path.add(lesson.unit.trim());
+        }
+
+        if (stage >= path.size()) {
             webView.evaluateJavascript(treeClickLessonScript(lesson), raw -> {
                 int ok = parseJsInt(raw);
                 if (ok <= 0) {
                     if (retry < 14) {
-                        webView.postDelayed(() -> autoTreeStage(lesson, 2, retry + 1), 700);
+                        webView.postDelayed(() -> autoTreeStage(lesson, Math.max(0, path.size() - 1), retry + 1), 700);
                     } else {
                         stopAutoWithError("لم أجد درس «" + lesson.displayName() + "» ظاهرًا في شجرة المنهج.");
                     }
@@ -952,22 +975,9 @@ public class MainActivity extends Activity {
             return;
         }
 
-        String parent;
-        String child;
-        boolean exactParent = false;
-        if (stage == 0) {
-            parent = "عرض الشجرة -";
-            child = "الأول";
-        } else if (stage == 1) {
-            parent = "الأول";
-            exactParent = true;
-            int p = lesson.unit.indexOf(':');
-            child = p >= 0 ? lesson.unit.substring(p + 1).trim() : lesson.unit;
-        } else {
-            int p = lesson.unit.indexOf(':');
-            parent = p >= 0 ? lesson.unit.substring(p + 1).trim() : lesson.unit;
-            child = lesson.noorCode();
-        }
+        String parent = stage == 0 ? "عرض الشجرة -" : path.get(stage - 1);
+        String child = path.get(stage);
+        boolean exactParent = stage > 0;
 
         webView.evaluateJavascript(treeEnsureChildScript(parent, child, exactParent), raw -> {
             int state = parseJsInt(raw);
@@ -983,12 +993,13 @@ public class MainActivity extends Activity {
         });
     }
 
+
     private String treeEnsureChildScript(String parentQuery, String childQuery, boolean exactParent) {
         return "(function(){"
                 + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim();}"
                 + "function visible(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}"
                 + "var a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a')),cq=norm(" + JSONObject.quote(childQuery) + "),cqc=cq.replace(/[\\s\\-–]+/g,'');"
-                + "for(var i=0;i<a.length;i++){if(!visible(a[i]))continue;var ct=norm(a[i].innerText||a[i].textContent),ctc=ct.replace(/[\\s\\-–]+/g,'');if(ct&&(ct===cq||ct.indexOf(cq)>=0||ctc.indexOf(cqc)>=0))return '2';}"
+                + "for(var i=0;i<a.length;i++){if(!visible(a[i]))continue;var ct=norm(a[i].innerText||a[i].textContent),ctc=ct.replace(/[\\s\\-–]+/g,'');if(ct&&(ct===cq||ct.indexOf(cq)>=0||cq.indexOf(ct)>=0||ctc.indexOf(cqc)>=0||cqc.indexOf(ctc)>=0))return '2';}"
                 + "var pq=norm(" + JSONObject.quote(parentQuery) + "),best=null,bestLen=1e9;"
                 + "for(var j=0;j<a.length;j++){if(!visible(a[j]))continue;var t=norm(a[j].innerText||a[j].textContent);if(!t)continue;"
                 + "var m=" + (exactParent ? "t===pq" : "(t.indexOf(pq)>=0||pq.indexOf(t)>=0)") + ";if(m&&t.length<bestLen){best=a[j];bestLen=t.length;}}"
@@ -999,30 +1010,25 @@ public class MainActivity extends Activity {
         return "(function(){"
                 + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
                 + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim());}"
-                + "function codeOf(s){var m=norm(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
-                + "function compact(s){return norm(s).replace(/[\\s\\-–]+/g,'');}"
-                + "var code=codeOf(" + JSONObject.quote(lesson.noorCode()) + "),title=compact(" + JSONObject.quote(lesson.title) + ");"
+                + "function compact(s){return norm(s).replace(/[^\\p{L}\\p{N}]+/gu,'');}"
+                + "var code=compact(" + JSONObject.quote(lesson.noorCode()) + "),title=compact(" + JSONObject.quote(lesson.title) + ");"
                 + "var a=[].slice.call(document.querySelectorAll('a[id$=_anchor],a')),best=null,bestLen=1e9;"
-                + "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var raw=a[i].innerText||a[i].textContent||'';"
-                + "if(codeOf(raw)===code){var tx=compact(raw),score=(tx.indexOf(title)>=0?0:1000)+tx.length;if(score<bestLen){best=a[i];bestLen=score;}}}"
-                + "if(!best){for(var j=0;j<a.length;j++){var rr=a[j].getBoundingClientRect();if(rr.width===0&&rr.height===0)continue;var tt=compact(a[j].innerText||a[j].textContent);"
-                + "if(tt&&tt.indexOf(title)>=0&&tt.length<bestLen){best=a[j];bestLen=tt.length;}}}"
+                + "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var raw=a[i].innerText||a[i].textContent||'',tx=compact(raw);"
+                + "var codeHit=code&&tx.indexOf(code)>=0;var titleHit=title&&tx.indexOf(title)>=0;"
+                + "if(codeHit||titleHit){var score=(codeHit?0:500)+(titleHit?0:200)+tx.length;if(score<bestLen){best=a[i];bestLen=score;}}}"
                 + "if(!best)return '0';best.click();return '1';})()";
     }
 
 
     private boolean lessonMatchesNoorTitle(String foundTitle, CurriculumLesson lesson) {
         if (foundTitle == null || lesson == null) return false;
-        String normalized = latinDigits(foundTitle);
-        Matcher m = Pattern.compile("([0-9]+)\\s*[-–]\\s*([0-9]+)").matcher(normalized);
-        if (m.find()) {
-            String code = m.group(1) + "-" + m.group(2);
-            if (code.equals(lesson.code)) return true;
-        }
-        String a = normalizeArabicTitle(foundTitle);
-        String b = normalizeArabicTitle(lesson.title);
-        return !b.isEmpty() && (a.contains(b) || b.contains(a));
+        String full = normalizeArabicTitle(foundTitle);
+        String visibleCode = normalizeArabicTitle(lesson.noorCode());
+        if (!visibleCode.isEmpty() && full.contains(visibleCode)) return true;
+        String title = normalizeArabicTitle(lesson.title);
+        return !title.isEmpty() && (full.contains(title) || title.contains(full));
     }
+
 
     private static String latinDigits(String s) {
         String ar = "٠١٢٣٤٥٦٧٨٩";
@@ -1762,9 +1768,8 @@ public class MainActivity extends Activity {
             return;
         }
 
-        currentPreparation = LessonGenerator.generate(currentTitle, currentOutcomes);
-        status.setText("الدرس غير موجود في قاعدة المنهج؛ استخدمت قالبًا محليًا احتياطيًا.");
-        showPreparationPreview("قالب محلي احتياطي — 0 توكن");
+        status.setText("الدرس غير موجود في قاعدة البيانات المكتشفة. أعد تجهيز قاعدة البيانات.");
+        toast("لا يوجد تحضير مخزن لهذا الدرس.");
     }
 
     private void generateAiPreview() {
@@ -1800,8 +1805,7 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     currentPreparation = findGeneratedPreparation(title);
-                    if (currentPreparation == null) currentPreparation = LessonGenerator.generate(title, outcomes);
-                    status.setText("تعذر اتصال AI؛ بقي التحضير الجاهز داخل التطبيق.");
+                    status.setText("تعذر اتصال AI ولا يوجد تحضير بديل خارج قاعدة البيانات.");
                     showPreparationPreview("التحضير المحلي — 0 توكن");
                 });
             }
@@ -1840,7 +1844,10 @@ public class MainActivity extends Activity {
         currentLesson = findDiscoveredLesson(currentTitle);
         if (currentPreparation == null) {
             currentPreparation = findGeneratedPreparation(currentTitle);
-            if (currentPreparation == null) currentPreparation = LessonGenerator.generate(currentTitle, currentOutcomes);
+            if (currentPreparation == null) {
+                toast("لا يوجد تحضير مخزن لهذا الدرس.");
+                return;
+            }
         }
 
         status.setText("أعبئ التحضير وأضع تاريخ النشر...");
