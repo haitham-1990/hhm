@@ -551,7 +551,7 @@ public class MainActivity extends Activity {
                 + "\nالمادة: " + material
                 + "\nالدروس المكتشفة: " + autoLessons.size()
                 + "\nالتحاضير الجاهزة: " + ready + " / " + autoLessons.size()
-                + "\nتقرير التشخيص: " + diagnosticState);
+                + "\nالتقرير الشامل: " + diagnosticState);
     }
 
     private void prepareGeneratedDatabase() {
@@ -582,7 +582,10 @@ public class MainActivity extends Activity {
             refreshLessonSpinners();
         }
 
-        diagnostics.startSession(pdfName(studyPlanPdfUri), pdfName(subjectMaterialPdfUri));
+        diagnostics.startSession(
+                pdfName(studyPlanPdfUri),
+                pdfName(subjectMaterialPdfUri),
+                changedGenerated || changedCatalog || !diagnostics.hasReport());
         try {
             JSONObject meta = new JSONObject();
             meta.put("source_changed", changedGenerated || changedCatalog);
