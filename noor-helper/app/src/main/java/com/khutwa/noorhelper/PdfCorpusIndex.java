@@ -143,6 +143,24 @@ final class PdfCorpusIndex {
         return out.toString();
     }
 
+
+    List<String> materialDiscoveryBatches(int maxChars) {
+        List<String> batches = new ArrayList<>();
+        int limit = Math.max(6000, maxChars);
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < materialPages.size(); i++) {
+            String page = clean(materialPages.get(i));
+            String block = "\n[MATERIAL PDF " + (i + 1) + "] " + compactSnippet(page, 260);
+            if (current.length() > 0 && current.length() + block.length() > limit) {
+                batches.add(current.toString());
+                current.setLength(0);
+            }
+            current.append(block);
+        }
+        if (current.length() > 0) batches.add(current.toString());
+        return batches;
+    }
+
     List<DiscoveredCurriculumStore.Entry> resolveMaterialRanges(
             List<DiscoveredCurriculumStore.Entry> catalog) {
         List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
