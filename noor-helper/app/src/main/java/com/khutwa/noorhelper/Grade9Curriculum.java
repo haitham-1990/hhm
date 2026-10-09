@@ -5,6 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 final class Grade9Curriculum {
     static final class Lesson {
@@ -169,8 +171,27 @@ final class Grade9Curriculum {
     private Grade9Curriculum() {}
 
     static Lesson find(String noorTitle) {
+        String text = noorTitle == null ? "" : noorTitle;
+        Matcher matcher = Pattern.compile("([0-9٠-٩]+)\\s*[-–]\\s*([0-9٠-٩]+)").matcher(text);
+        if (matcher.find()) {
+            String code = arabicDigitsToLatin(matcher.group(1)) + "-" + arabicDigitsToLatin(matcher.group(2));
+            Lesson direct = LESSONS.get(code);
+            if (direct != null) return direct;
+        }
         ExerciseMap.Lesson mapped = ExerciseMap.find(noorTitle);
         return mapped == null ? null : LESSONS.get(mapped.code);
+    }
+
+    private static String arabicDigitsToLatin(String s) {
+        String ar = "٠١٢٣٤٥٦٧٨٩";
+        StringBuilder out = new StringBuilder(s == null ? 0 : s.length());
+        if (s == null) return "";
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            int idx = ar.indexOf(c);
+            out.append(idx >= 0 ? (char) ('0' + idx) : c);
+        }
+        return out.toString();
     }
 
     static Lesson byCode(String code) {
