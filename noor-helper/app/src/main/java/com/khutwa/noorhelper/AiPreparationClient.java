@@ -164,6 +164,7 @@ final class AiPreparationClient {
                     meta.put("plan_page", page);
                     meta.put("segment", segmentIndex);
                     meta.put("segment_chars", segment == null ? 0 : segment.length());
+                    meta.put("segment_excerpt", limitRaw(segment == null ? "" : segment, 1400));
                     JSONArray found = new JSONArray();
                     for (DiscoveredCurriculumStore.Entry e : pageLessons) {
                         JSONObject x = new JSONObject();
