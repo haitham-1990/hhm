@@ -63,9 +63,26 @@ final class LessonImageCache {
     }
 
     static boolean has(Context context, String lessonCode) {
+        return imageCount(context, lessonCode) > 0;
+    }
+
+    static int imageCount(Context context, String lessonCode) {
+        File[] files = imageFiles(context, lessonCode);
+        return files.length;
+    }
+
+    static Bitmap loadAt(Context context, String lessonCode, int index) {
+        File[] files = imageFiles(context, lessonCode);
+        if (index < 0 || index >= files.length) return null;
+        return BitmapFactory.decodeFile(files[index].getAbsolutePath());
+    }
+
+    private static File[] imageFiles(Context context, String lessonCode) {
         File dir = lessonDir(context, lessonCode);
         File[] files = dir.listFiles((d, name) -> name != null && name.endsWith(".jpg"));
-        return files != null && files.length > 0;
+        if (files == null) return new File[0];
+        Arrays.sort(files, Comparator.comparing(File::getName));
+        return files;
     }
 
     static void clearAll(Context context) {
