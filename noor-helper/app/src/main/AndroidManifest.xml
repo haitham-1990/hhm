@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="نور الذكي - تجربة الملفات"
+        android:label="نور الذكي - قاعدة التحضير"
         android:usesCleartextTraffic="false"
         android:theme="@style/AppTheme">
         <activity
