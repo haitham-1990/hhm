@@ -46,7 +46,7 @@ final class GeneratedPreparationStore {
     private static final String PREFS = "noor_generated_db_v1";
     private static final String KEY_PLAN = "_source_plan";
     private static final String KEY_MATERIAL = "_source_material";
-    private static final String PREFIX = "lesson_";
+    private static final String PREFIX = "lesson_flow_v2_";
 
     private final SharedPreferences prefs;
 
