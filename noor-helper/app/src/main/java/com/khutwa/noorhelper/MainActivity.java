@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - اكتشاف حر 1.0.0");
+        title.setText("نور الذكي - اكتشاف حر 1.0.1");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -583,8 +583,9 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this)
                             .setTitle("اكتمل اكتشاف المنهج")
                             .setMessage("نور الذكي اكتشف " + autoLessons.size()
-                                    + " درسًا من الملفين، قسم المادة، وجهز التحاضير والصور وخزنها محليًا.")
+                                    + " درسًا من الملفين، قسم المادة، وجهز التحاضير والصور وخزنها محليًا.\n\nإذا لاحظت أن العدد أو التقسيم غير صحيح، احفظ تقرير التشخيص وارفعه لي.")
                             .setPositiveButton("ممتاز", null)
+                            .setNeutralButton("حفظ تقرير التشخيص", (d, w) -> exportDiagnosticReport())
                             .show();
                 } else {
                     StringBuilder msg = new StringBuilder();
@@ -597,8 +598,9 @@ public class MainActivity extends Activity {
                     msg.append("\n\nاضغط تجهيز قاعدة البيانات مرة أخرى لإعادة محاولة الناقص فقط.");
                     new AlertDialog.Builder(this)
                             .setTitle("اكتمل التجهيز مع ملاحظات")
-                            .setMessage(msg.toString())
+                            .setMessage(msg.toString() + "\n\nاحفظ تقرير التشخيص وارفعه لي لأحدد موضع الخطأ.")
                             .setPositiveButton("حسنًا", null)
+                            .setNeutralButton("حفظ تقرير التشخيص", (d, w) -> exportDiagnosticReport())
                             .show();
                 }
             });
