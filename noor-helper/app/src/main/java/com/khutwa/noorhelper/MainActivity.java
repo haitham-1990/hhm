@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - اكتشاف حر 1.0.1");
+        title.setText("نور الذكي - اكتشاف حر 1.0.2");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -184,6 +184,22 @@ public class MainActivity extends Activity {
         databaseStatus.setPadding(dp(12), dp(2), dp(12), dp(4));
         databaseStatus.setTextDirection(View.TEXT_DIRECTION_RTL);
         root.addView(databaseStatus);
+
+        Button diagnosticReport = makeButton("حفظ تقرير التشخيص (أرسله لي)");
+        diagnosticReport.setTextSize(13);
+        diagnosticReport.setOnClickListener(v -> exportDiagnosticReport());
+        LinearLayout.LayoutParams diagnosticParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        diagnosticParams.setMargins(dp(6), dp(1), dp(6), dp(2));
+        root.addView(diagnosticReport, diagnosticParams);
+
+        TextView diagnosticHint = new TextView(this);
+        diagnosticHint.setText("إذا ظهر عدد دروس أو تقسيم غير صحيح، احفظ التقرير بعد التجهيز — أو بعد أي خطأ — وأرسله لي.");
+        diagnosticHint.setTextSize(11);
+        diagnosticHint.setTextColor(Color.DKGRAY);
+        diagnosticHint.setPadding(dp(12), 0, dp(12), dp(4));
+        diagnosticHint.setTextDirection(View.TEXT_DIRECTION_RTL);
+        root.addView(diagnosticHint);
 
         LinearLayout autoStartRow = new LinearLayout(this);
         autoStartRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -374,10 +390,17 @@ public class MainActivity extends Activity {
         int ready = generatedReadyCount();
         String plan = studyPlanPdfUri == null ? "غير مرفقة" : pdfName(studyPlanPdfUri);
         String material = subjectMaterialPdfUri == null ? "غير مرفقة" : pdfName(subjectMaterialPdfUri);
+        String diagnosticState;
+        if (diagnostics != null && diagnostics.hasReport()) {
+            diagnosticState = databaseBuilding ? "يُسجّل الآن ويمكن حفظ نسخة جزئية" : "جاهز للحفظ";
+        } else {
+            diagnosticState = databaseBuilding ? "يُسجّل الآن" : "سيبدأ مع تجهيز القاعدة";
+        }
         databaseStatus.setText("الخطة: " + plan
                 + "\nالمادة: " + material
                 + "\nالدروس المكتشفة: " + autoLessons.size()
-                + "\nالتحاضير الجاهزة: " + ready + " / " + autoLessons.size());
+                + "\nالتحاضير الجاهزة: " + ready + " / " + autoLessons.size()
+                + "\nتقرير التشخيص: " + diagnosticState);
     }
 
     private void prepareGeneratedDatabase() {
@@ -613,11 +636,24 @@ public class MainActivity extends Activity {
             toast("لا يوجد تقرير تشخيص بعد. شغّل «تجهيز قاعدة البيانات» أولاً.");
             return;
         }
+        try {
+            JSONObject snapshot = new JSONObject();
+            snapshot.put("database_building", databaseBuilding);
+            snapshot.put("discovered_lessons", autoLessons.size());
+            snapshot.put("ready_lessons", generatedReadyCount());
+            snapshot.put("plan_file", studyPlanPdfUri == null ? "" : pdfName(studyPlanPdfUri));
+            snapshot.put("material_file", subjectMaterialPdfUri == null ? "" : pdfName(subjectMaterialPdfUri));
+            diagnostics.log("manual_report_export", snapshot);
+            if (curriculumStore != null) {
+                diagnostics.logLessons("catalog_at_export", curriculumStore.load());
+            }
+        } catch (Exception ignored) {}
+
         pendingDiagnosticReport = diagnostics.exportReport();
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "noor-smart-diagnostic.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Diagnostic-1.0.2.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
