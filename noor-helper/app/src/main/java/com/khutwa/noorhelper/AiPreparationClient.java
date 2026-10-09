@@ -196,6 +196,17 @@ final class AiPreparationClient {
             throw new IllegalStateException("لم تبق دروس صالحة بعد التحقق من بنية الخطة.");
         }
 
+        // A timetable often prints unit dates once in a footer/header instead of
+        // repeating them beside every lesson. Re-read the plan globally and attach
+        // those unit-level facts to each discovered lesson. This is generic and
+        // source-driven; it does not contain any subject/grade-specific schedule.
+        try {
+            validated = enrichPlanningMetadata(validated, planOutline, scope);
+            diagnostics.logLessons("catalog_after_planning_metadata", validated);
+        } catch (Exception e) {
+            diagnostics.logMessage("planning_metadata_enrichment_error", e.getMessage());
+        }
+
         // Locate lesson starts from the material's own page-by-page outline with AI.
         // This avoids confusing objective numbers inside questions with real lesson headings.
         try {
@@ -258,6 +269,82 @@ final class AiPreparationClient {
         String answer = cleanJson(postForAnswer(payload));
         return parseDiscoveredCurriculum(answer);
     }
+
+    private List<DiscoveredCurriculumStore.Entry> enrichPlanningMetadata(
+            List<DiscoveredCurriculumStore.Entry> source,
+            String planOutline,
+            JSONObject scope) throws Exception {
+        if (source == null || source.isEmpty()) return source;
+
+        JSONArray lessons = new JSONArray();
+        for (int i = 0; i < source.size(); i++) {
+            CurriculumLesson l = source.get(i).lesson;
+            JSONObject o = new JSONObject();
+            o.put("i", i);
+            o.put("code", l.code);
+            o.put("title", l.title);
+            o.put("unit", l.unit);
+            o.put("semester", l.semester);
+            o.put("periods", l.periods);
+            o.put("start", l.periodStart);
+            o.put("end", l.periodEnd);
+            lessons.put(o);
+        }
+
+        StringBuilder prompt = new StringBuilder(60000);
+        prompt.append("أنت تربط بيانات الجدول الزمني بخطة دراسية مكتوبة. ");
+        prompt.append("اعتمد حصراً على الخطة المرفقة وهوية الوثيقة. لا تستخدم أي معرفة مسبقة بالمادة أو الصف. ");
+        prompt.append("لكل درس في القائمة أعد: اسم الوحدة كما يظهر في الخطة، الفصل الدراسي، عدد الحصص، تاريخ بداية فترة الوحدة وتاريخ نهايتها. ");
+        prompt.append("مهم جداً: قد تُكتب تواريخ الوحدة مرة واحدة في أسفل الصفحة أو رأسها تحت اسم الوحدة، ولا تتكرر أمام كل درس. ");
+        prompt.append("في هذه الحالة انقل تاريخ بداية ونهاية الوحدة إلى جميع دروس الوحدة نفسها إذا كان الربط واضحاً من ترتيب الأعمدة/العناوين. ");
+        prompt.append("لا تخترع تاريخاً. إذا لم يوجد دليل واضح اترك start/end فارغين. ");
+        prompt.append("لا تغيّر code أو title ولا تعيد ترتيب الدروس. ");
+        prompt.append("أرجع JSON فقط: {\"lessons\":[{\"i\":0,\"unit\":\"\",\"semester\":\"\",\"periods\":0,\"start\":\"YYYY-MM-DD أو فارغ\",\"end\":\"YYYY-MM-DD أو فارغ\"}]}.");
+        prompt.append("\n\nهوية الوثيقة: ").append(limitRaw(scope == null ? "" : scope.toString(), 1500));
+        prompt.append("\n\n=== الدروس المكتشفة ===\n").append(lessons.toString());
+        prompt.append("\n\n=== مخطط الخطة كاملاً ===\n").append(limitRaw(planOutline, 30000));
+
+        JSONObject payload = new JSONObject();
+        payload.put("message", prompt.toString());
+        JSONObject answer = new JSONObject(cleanJson(postForAnswer(payload)));
+        JSONArray rows = answer.optJSONArray("lessons");
+        if (rows == null) return source;
+
+        List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>(source);
+        for (int r = 0; r < rows.length(); r++) {
+            JSONObject row = rows.optJSONObject(r);
+            if (row == null) continue;
+            int i = row.optInt("i", -1);
+            if (i < 0 || i >= source.size()) continue;
+
+            DiscoveredCurriculumStore.Entry old = source.get(i);
+            CurriculumLesson l = old.lesson;
+
+            String unit = row.optString("unit", "").trim();
+            String semester = row.optString("semester", "").trim();
+            int periods = row.optInt("periods", 0);
+            String start = row.optString("start", "").trim();
+            String end = row.optString("end", "").trim();
+
+            CurriculumLesson enriched = new CurriculumLesson(
+                    l.code,
+                    l.title,
+                    unit.isEmpty() ? l.unit : unit,
+                    semester.isEmpty() ? l.semester : semester,
+                    periods > 0 ? periods : l.periods,
+                    start.isEmpty() ? l.periodStart : start,
+                    end.isEmpty() ? l.periodEnd : end,
+                    l.level,
+                    l.objectives,
+                    l.strategies,
+                    l.resources
+            );
+            out.set(i, new DiscoveredCurriculumStore.Entry(
+                    enriched, old.materialStartPage, old.materialEndPage));
+        }
+        return out;
+    }
+
 
     private List<DiscoveredCurriculumStore.Entry> validateLessonHierarchy(
             List<DiscoveredCurriculumStore.Entry> candidates, String planOutline) throws Exception {
