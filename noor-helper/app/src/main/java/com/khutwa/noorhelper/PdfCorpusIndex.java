@@ -36,6 +36,54 @@ final class PdfCorpusIndex {
         return new PdfCorpusIndex(readAllPages(context, planUri), readAllPages(context, materialUri));
     }
 
+    String planDiscoveryContext() {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < planPages.size(); i++) {
+            String page = clean(planPages.get(i));
+            if (page.isEmpty()) continue;
+            String block = "\n--- صفحة الخطة PDF " + (i + 1) + " ---\n" + page;
+            if (out.length() + block.length() > 76000) {
+                int remain = 76000 - out.length();
+                if (remain > 300) out.append(block, 0, Math.min(block.length(), remain));
+                break;
+            }
+            out.append(block);
+        }
+        return out.toString();
+    }
+
+    String materialDiscoveryOutline() {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < materialPages.size(); i++) {
+            String page = clean(materialPages.get(i));
+            if (page.isEmpty()) continue;
+            String snippet = page.length() > 420 ? page.substring(0, 420) : page;
+            String block = "\n[PDF " + (i + 1) + "] " + snippet.replace('\n', ' ');
+            if (out.length() + block.length() > 38000) break;
+            out.append(block);
+        }
+        return out.toString();
+    }
+
+    String materialRangeText(int startPage, int endPage) {
+        if (startPage <= 0) return "";
+        int start = Math.max(0, startPage - 1);
+        int end = Math.min(materialPages.size() - 1, Math.max(start, endPage - 1));
+        StringBuilder out = new StringBuilder();
+        for (int i = start; i <= end; i++) {
+            String page = clean(materialPages.get(i));
+            if (page.isEmpty()) continue;
+            String block = "\n--- صفحة PDF " + (i + 1) + " ---\n" + page;
+            if (out.length() + block.length() > MATERIAL_MAX_CHARS) {
+                int remain = MATERIAL_MAX_CHARS - out.length();
+                if (remain > 250) out.append(block, 0, Math.min(block.length(), remain));
+                break;
+            }
+            out.append(block);
+        }
+        return out.toString().trim();
+    }
+
     PdfLessonContext.Result forLesson(String lessonTitle) {
         LessonKey key = LessonKey.from(lessonTitle);
         Selection plan = selectPlanWindow(planPages, key);
