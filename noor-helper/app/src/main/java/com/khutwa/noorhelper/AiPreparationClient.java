@@ -361,7 +361,8 @@ final class AiPreparationClient {
             List<String> objectives = new ArrayList<>(baseEntry.lesson.objectives);
             List<String> strategies = new ArrayList<>(baseEntry.lesson.strategies);
             List<String> resources = new ArrayList<>(baseEntry.lesson.resources);
-            int periods = parent != null ? Math.max(1, baseEntry.lesson.periods) : 0;
+            int parentPeriods = parent != null ? Math.max(1, baseEntry.lesson.periods) : 0;
+            int childPeriods = 0;
             int startPage = baseEntry.materialStartPage;
             int endPage = baseEntry.materialEndPage;
             String periodStart = baseEntry.lesson.periodStart;
@@ -370,7 +371,7 @@ final class AiPreparationClient {
             for (Integer idx : idxs) {
                 if (parent != null && idx == parent) continue;
                 DiscoveredCurriculumStore.Entry child = working.get(idx);
-                if (parent == null || idx != anchor) periods += Math.max(1, child.lesson.periods);
+                if (parent == null || idx != anchor) childPeriods += Math.max(1, child.lesson.periods);
                 for (String x : child.lesson.objectives) if (!objectives.contains(x)) objectives.add(x);
                 for (String x : child.lesson.strategies) if (!strategies.contains(x)) strategies.add(x);
                 for (String x : child.lesson.resources) if (!resources.contains(x)) resources.add(x);
@@ -390,7 +391,7 @@ final class AiPreparationClient {
                     title,
                     unit,
                     baseEntry.lesson.semester,
-                    Math.max(1, periods),
+                    Math.max(1, parent != null ? Math.max(parentPeriods, childPeriods) : childPeriods),
                     periodStart,
                     periodEnd,
                     baseEntry.lesson.level,
