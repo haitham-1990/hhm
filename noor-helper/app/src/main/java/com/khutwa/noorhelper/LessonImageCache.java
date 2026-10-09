@@ -21,45 +21,31 @@ final class LessonImageCache {
                      String lessonTitle, String nextLessonTitle,
                      int startPage, int endPage,
                      int previousEndPage, int nextStartPage) throws Exception {
-        PdfExerciseExtractor.ExtractResult result =
-                PdfExerciseExtractor.extractBetween(
-                        context, materialUri,
-                        lessonTitle, nextLessonTitle,
-                        startPage, endPage, previousEndPage, nextStartPage
-                );
-
         File lessonDir = lessonDir(context, lessonCode);
         deleteRecursively(lessonDir);
         if (!lessonDir.mkdirs() && !lessonDir.isDirectory()) {
             throw new IllegalStateException("تعذر إنشاء مجلد صور الدرس.");
         }
 
-        int saved = 0;
         try {
-            for (int i = 0; i < result.images.size(); i++) {
-                Bitmap bitmap = result.images.get(i);
-                if (bitmap == null) continue;
-                File outFile = new File(lessonDir, String.format("%03d.jpg", i + 1));
-                try (FileOutputStream out = new FileOutputStream(outFile)) {
-                    if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 72, out)) {
-                        throw new IllegalStateException("تعذر ضغط صورة الدرس.");
-                    }
-                    out.flush();
-                    saved++;
-                } finally {
-                    if (!bitmap.isRecycled()) bitmap.recycle();
-                }
+            int saved = PdfExerciseExtractor.saveBetweenToDirectory(
+                    context, materialUri,
+                    lessonTitle, nextLessonTitle,
+                    startPage, endPage, previousEndPage, nextStartPage,
+                    lessonDir
+            );
+            if (saved <= 0) {
+                deleteRecursively(lessonDir);
+                throw new IllegalStateException("لم تُحفظ أي صورة للدرس.");
             }
+            return saved;
+        } catch (OutOfMemoryError e) {
+            deleteRecursively(lessonDir);
+            throw e;
         } catch (Exception e) {
             deleteRecursively(lessonDir);
             throw e;
         }
-
-        if (saved == 0) {
-            deleteRecursively(lessonDir);
-            throw new IllegalStateException("لم تُحفظ أي صورة للدرس.");
-        }
-        return saved;
     }
 
 
