@@ -90,13 +90,7 @@ final class ExerciseMap {
         String c = compact(text);
         if (m.find()) {
             Lesson lesson = LESSONS.get(m.group(1) + "-" + m.group(2));
-            // Noor/PDF may display the lesson/unit numbers in the opposite order
-            // from our internal unit/lesson map. Trust a numeric match only when
-            // the lesson title also matches; otherwise fall back to title matching.
-            if (lesson != null) {
-                String expectedTitle = compact(lesson.title);
-                if (!expectedTitle.isEmpty() && c.contains(expectedTitle)) return lesson;
-            }
+            if (lesson != null) return lesson;
         }
 
 
