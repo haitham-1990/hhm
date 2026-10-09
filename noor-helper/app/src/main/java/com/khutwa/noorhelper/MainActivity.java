@@ -654,6 +654,13 @@ public class MainActivity extends Activity {
                     System.gc();
                 }
 
+                try {
+                    catalog = repairMissingMaterialRanges(catalog);
+                } catch (Exception repairError) {
+                    diagnostics.logMessage("catalog_range_repair_error",
+                            repairError.getMessage() == null ? "" : repairError.getMessage());
+                }
+
                 autoLessons.clear();
                 for (DiscoveredCurriculumStore.Entry e : catalog) autoLessons.add(e.lesson);
                 runOnUiThread(() -> {
@@ -868,6 +875,77 @@ public class MainActivity extends Activity {
                 }
             });
         });
+    }
+
+
+    private List<DiscoveredCurriculumStore.Entry> repairMissingMaterialRanges(
+            List<DiscoveredCurriculumStore.Entry> source) throws Exception {
+        if (source == null || source.isEmpty()) return source;
+
+        List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>(source);
+        boolean changed = false;
+
+        for (int i = 0; i < out.size(); i++) {
+            DiscoveredCurriculumStore.Entry current = out.get(i);
+            if (current.materialStartPage > 0) continue;
+
+            int from = 1;
+            int to = 0;
+
+            for (int p = i - 1; p >= 0; p--) {
+                DiscoveredCurriculumStore.Entry previous = out.get(p);
+                if (previous.materialStartPage > 0) {
+                    from = previous.materialStartPage;
+                    break;
+                }
+            }
+
+            for (int n = i + 1; n < out.size(); n++) {
+                DiscoveredCurriculumStore.Entry next = out.get(n);
+                if (next.materialStartPage > 0) {
+                    to = next.materialStartPage;
+                    break;
+                }
+            }
+
+            if (to > 0 && from > to) from = Math.max(1, to - 18);
+
+            int found = PdfCorpusIndex.findLessonStartPage(
+                    this,
+                    subjectMaterialPdfUri,
+                    current.lesson.noorCode(),
+                    current.lesson.title,
+                    from,
+                    to
+            );
+
+            if (found <= 0) continue;
+
+            int end = to > 0 ? Math.max(found, to) : found;
+            DiscoveredCurriculumStore.Entry repaired =
+                    new DiscoveredCurriculumStore.Entry(current.lesson, found, end);
+            out.set(i, repaired);
+            changed = true;
+
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("code", current.lesson.code);
+                meta.put("title", current.lesson.title);
+                meta.put("search_from", from);
+                meta.put("search_to", to);
+                meta.put("found_start", found);
+                meta.put("assigned_end", end);
+                diagnostics.log("material_range_repaired_locally", meta);
+            } catch (Exception ignored) {}
+
+            System.gc();
+        }
+
+        if (changed) {
+            curriculumStore.save(out);
+            diagnostics.logLessons("catalog_after_local_range_repair", out);
+        }
+        return out;
     }
 
 
