@@ -1103,8 +1103,9 @@ final class AiPreparationClient {
                 int stable = uniqueKey.hashCode();
                 if (!usedPages.contains(stable)) {
                     usedPages.add(stable);
-                    out.append("<div data-khutwa-question=\"1\" data-khutwa-page=\"")
-                            .append(qPage)
+                    out.append("<div data-khutwa-question=\"1\" data-khutwa-qid=\"")
+                            .append(written)
+                            .append("\" data-khutwa-page=\"").append(qPage)
                             .append("\" data-khutwa-q=\"").append(html(q))
                             .append("\" data-khutwa-qend=\"").append(html(qEnd))
                             .append("\" style=\"margin:8px 0;\"></div>");
