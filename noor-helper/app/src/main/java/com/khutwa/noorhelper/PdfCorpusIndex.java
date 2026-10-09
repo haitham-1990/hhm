@@ -38,20 +38,23 @@ final class PdfCorpusIndex {
 
     PdfLessonContext.Result forLesson(String lessonTitle) {
         LessonKey key = LessonKey.from(lessonTitle);
-        Selection plan = select(planPages, key, true);
-        Selection material = select(materialPages, key, false);
+        Selection plan = selectPlanWindow(planPages, key);
+        Selection material;
 
-        if (material.text.trim().isEmpty()) {
-            ExerciseMap.Lesson mapped = ExerciseMap.find(lessonTitle);
-            if (mapped != null && mapped.segments != null) {
-                List<Integer> exactPages = new ArrayList<>();
-                for (ExerciseMap.Segment segment : mapped.segments) {
-                    if (segment != null && segment.pdfPage > 0 && !exactPages.contains(segment.pdfPage)) {
-                        exactPages.add(segment.pdfPage);
-                    }
+        // Material pages are a sequence, not independent search results.
+        // Prefer the exact lesson page map so the same neighbouring pages are
+        // not pulled into several lessons.
+        ExerciseMap.Lesson mapped = ExerciseMap.find(lessonTitle);
+        if (mapped != null && mapped.segments != null) {
+            List<Integer> exactPages = new ArrayList<>();
+            for (ExerciseMap.Segment segment : mapped.segments) {
+                if (segment != null && segment.pdfPage > 0 && !exactPages.contains(segment.pdfPage)) {
+                    exactPages.add(segment.pdfPage);
                 }
-                material = selectExact(materialPages, exactPages, MATERIAL_MAX_CHARS);
             }
+            material = selectExact(materialPages, exactPages, MATERIAL_MAX_CHARS);
+        } else {
+            material = select(materialPages, key, false);
         }
 
         return new PdfLessonContext.Result(
@@ -72,6 +75,49 @@ final class PdfCorpusIndex {
             }
             return out;
         }
+    }
+
+    private static Selection selectPlanWindow(List<String> pages, LessonKey key) {
+        int bestPage = -1;
+        int bestLine = -1;
+        int bestScore = 0;
+        String[] bestLines = null;
+
+        for (int p = 0; p < pages.size(); p++) {
+            String raw = pages.get(p) == null ? "" : pages.get(p);
+            String[] lines = raw.split("\\n");
+            for (int i = 0; i < lines.length; i++) {
+                int s = score(lines[i], key, true);
+                if (s > bestScore) {
+                    bestScore = s;
+                    bestPage = p;
+                    bestLine = i;
+                    bestLines = lines;
+                }
+            }
+        }
+
+        if (bestPage < 0 || bestLines == null || bestScore <= 0) {
+            // Safer fallback: best page only. Do not include previous/next pages,
+            // because that was the main cause of lesson overlap.
+            Selection fallback = select(pages, key, true);
+            if (fallback.pages.size() <= 1) return fallback;
+            List<Integer> one = new ArrayList<>();
+            one.add(fallback.pages.get(fallback.pages.size() / 2));
+            return selectExact(pages, one, PLAN_MAX_CHARS);
+        }
+
+        int from = Math.max(0, bestLine - 4);
+        int to = Math.min(bestLines.length - 1, bestLine + 5);
+        StringBuilder out = new StringBuilder();
+        for (int i = from; i <= to; i++) {
+            String line = clean(bestLines[i]);
+            if (!line.isEmpty()) out.append(line).append("\n");
+        }
+
+        List<Integer> human = new ArrayList<>();
+        human.add(bestPage + 1);
+        return new Selection(out.toString().trim(), human);
     }
 
     private static Selection selectExact(List<String> pages, List<Integer> humanPages, int maxChars) {
@@ -115,10 +161,7 @@ final class PdfCorpusIndex {
         Set<Integer> chosen = new LinkedHashSet<>();
         if (plan) {
             if (!scored.isEmpty() && scored.get(0).score > 0) {
-                int best = scored.get(0).index;
-                if (best > 0) chosen.add(best - 1);
-                chosen.add(best);
-                if (best + 1 < pages.size()) chosen.add(best + 1);
+                chosen.add(scored.get(0).index);
             }
         } else {
             int count = 0;
@@ -127,11 +170,8 @@ final class PdfCorpusIndex {
                 chosen.add(p.index);
                 if (++count >= MATERIAL_TOP_PAGES) break;
             }
-            if (!chosen.isEmpty()) {
-                int first = chosen.iterator().next();
-                if (first > 0) chosen.add(first - 1);
-                if (first + 1 < pages.size()) chosen.add(first + 1);
-            }
+            // Do not add neighbouring pages automatically. Each lesson keeps
+            // only pages that actually scored for it.
         }
 
         if (chosen.isEmpty()) return new Selection("", new ArrayList<>());
