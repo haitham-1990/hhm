@@ -17,9 +17,17 @@ final class LessonImageCache {
 
     private LessonImageCache() {}
 
-    static int build(Context context, Uri materialUri, String lessonCode, List<Integer> pages) throws Exception {
-        PdfExerciseExtractor.ExtractResult result =
-                PdfExerciseExtractor.renderPages(context, materialUri, pages);
+    static int build(Context context, Uri materialUri, String lessonCode,
+                     String lessonTitle, List<Integer> pages) throws Exception {
+        PdfExerciseExtractor.ExtractResult result;
+        try {
+            // For the known exercise file this uses the exact lesson map, including
+            // half-page crops such as the shared page between two lessons.
+            result = PdfExerciseExtractor.extract(context, materialUri, lessonTitle);
+        } catch (Exception exactError) {
+            // Generic fallback for future files.
+            result = PdfExerciseExtractor.renderPages(context, materialUri, pages);
+        }
 
         File lessonDir = lessonDir(context, lessonCode);
         deleteRecursively(lessonDir);
