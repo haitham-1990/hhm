@@ -53,8 +53,12 @@ public class MainActivity extends Activity {
     private static final String NOOR_URL = "https://lms.moe.gov.om/teacher#networkfirst";
     private static final int REQUEST_PICK_PDF = 301;
     private static final int REQUEST_EXPORT_REPORT = 302;
+    private static final int REQUEST_PICK_PLAN_PDF = 303;
+    private static final int REQUEST_PICK_MATERIAL_PDF = 304;
     private static final String PREFS = "noor_helper";
     private static final String KEY_PDF_URI = "exercise_pdf_uri";
+    private static final String KEY_PLAN_PDF_URI = "study_plan_pdf_uri";
+    private static final String KEY_MATERIAL_PDF_URI = "subject_material_pdf_uri";
     private static final String KEY_AUTO_LAST_INDEX = "auto_last_index";
     private static final String KEY_AUTO_TARGET_INDEX = "auto_target_index";
     private static final String KEY_AUTO_PENDING_INDEX = "auto_pending_index";
@@ -84,6 +88,9 @@ public class MainActivity extends Activity {
     private final List<Grade9Curriculum.Lesson> autoLessons = Grade9Curriculum.allLessons();
 
     private Uri exercisePdfUri;
+    private Uri studyPlanPdfUri;
+    private Uri subjectMaterialPdfUri;
+    private AiPreparationClient.SourceResult currentSourceResult;
     private final List<Bitmap> exerciseImages = new ArrayList<>();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
@@ -95,6 +102,7 @@ public class MainActivity extends Activity {
         learningRecorder = new NoorLearningRecorder(this);
         buildUi();
         loadSavedPdf();
+        loadSavedSourcePdfs();
         restoreAutoUi();
         configureWebView();
         webView.loadUrl(NOOR_URL);
@@ -111,7 +119,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.6.9");
+        title.setText("نور الذكي - تجربة الملفات 0.7.0");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -124,7 +132,7 @@ public class MainActivity extends Activity {
         root.addView(top);
 
         status = new TextView(this);
-        status.setText("اختر درس الصف التاسع في نور ثم اضغط «تجهيز كامل». التحضير الأساسي جاهز داخل التطبيق بدون توكنات.");
+        status.setText("اختر الخطة PDF + المادة العلمية PDF، ثم حدد «ابدأ من / حضّر حتى» واضغط «ابدأ تلقائي».");
         status.setTextSize(13);
         status.setTextColor(Color.DKGRAY);
         status.setPadding(dp(12), dp(4), dp(12), dp(6));
@@ -172,6 +180,24 @@ public class MainActivity extends Activity {
         pdfActions.addView(aiImprove, weightedButton());
 
         root.addView(pdfActions);
+
+        LinearLayout sourceFilesRow = new LinearLayout(this);
+        sourceFilesRow.setOrientation(LinearLayout.HORIZONTAL);
+        sourceFilesRow.setPadding(dp(4), dp(1), dp(4), dp(3));
+
+        Button choosePlanPdf = makeButton("الخطة PDF");
+        choosePlanPdf.setOnClickListener(v -> pickSourcePdf(REQUEST_PICK_PLAN_PDF));
+        sourceFilesRow.addView(choosePlanPdf, weightedButton());
+
+        Button chooseMaterialPdf = makeButton("المادة العلمية PDF");
+        chooseMaterialPdf.setOnClickListener(v -> pickSourcePdf(REQUEST_PICK_MATERIAL_PDF));
+        sourceFilesRow.addView(chooseMaterialPdf, weightedButton());
+
+        Button sourceInfo = makeButton("حالة الملفين");
+        sourceInfo.setOnClickListener(v -> showSourceFilesStatus());
+        sourceFilesRow.addView(sourceInfo, weightedButton());
+
+        root.addView(sourceFilesRow);
 
         LinearLayout learningActions = new LinearLayout(this);
         learningActions.setOrientation(LinearLayout.HORIZONTAL);
@@ -337,6 +363,33 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void pickSourcePdf(int requestCode) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/pdf");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, requestCode);
+    }
+
+    private void loadSavedSourcePdfs() {
+        String p = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_PLAN_PDF_URI, "");
+        String m = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_MATERIAL_PDF_URI, "");
+        try { studyPlanPdfUri = p.isEmpty() ? null : Uri.parse(p); } catch (Exception ignored) { studyPlanPdfUri = null; }
+        try { subjectMaterialPdfUri = m.isEmpty() ? null : Uri.parse(m); } catch (Exception ignored) { subjectMaterialPdfUri = null; }
+        if (subjectMaterialPdfUri != null) exercisePdfUri = subjectMaterialPdfUri;
+    }
+
+    private void showSourceFilesStatus() {
+        String plan = studyPlanPdfUri == null ? "غير محددة" : pdfName(studyPlanPdfUri);
+        String material = subjectMaterialPdfUri == null ? "غير محددة" : pdfName(subjectMaterialPdfUri);
+        new AlertDialog.Builder(this)
+                .setTitle("ملفات الذكاء")
+                .setMessage("الخطة الدراسية: " + plan + "\n\nالمادة العلمية: " + material
+                        + "\n\nفي التشغيل التلقائي سيُنشأ كل درس من هذين الملفين ثم يُحفظ الناتج محليًا.")
+                .setPositiveButton("حسنًا", null)
+                .show();
+    }
+
     private void pickPdf() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -348,6 +401,33 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if ((requestCode == REQUEST_PICK_PLAN_PDF || requestCode == REQUEST_PICK_MATERIAL_PDF)
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            try {
+                int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                getContentResolver().takePersistableUriPermission(uri, flags & Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) {}
+
+            if (requestCode == REQUEST_PICK_PLAN_PDF) {
+                studyPlanPdfUri = uri;
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_PLAN_PDF_URI, uri.toString()).apply();
+                status.setText("تم ربط الخطة الدراسية: " + pdfName(uri));
+                toast("تم حفظ ملف الخطة.");
+            } else {
+                subjectMaterialPdfUri = uri;
+                exercisePdfUri = uri;
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString(KEY_MATERIAL_PDF_URI, uri.toString())
+                        .putString(KEY_PDF_URI, uri.toString())
+                        .apply();
+                status.setText("تم ربط المادة العلمية: " + pdfName(uri));
+                toast("تم حفظ المادة العلمية وستستخدم أيضًا لصور الدرس.");
+            }
+            currentSourceResult = null;
+            return;
+        }
+
         if (requestCode == REQUEST_PICK_PDF && resultCode == RESULT_OK && data != null && data.getData() != null) {
             Uri uri = data.getData();
             try {
@@ -420,15 +500,15 @@ public class MainActivity extends Activity {
             toast("سجّل الدخول إلى نور أولاً.");
             return;
         }
-        if (exercisePdfUri == null) {
+        if (studyPlanPdfUri == null || subjectMaterialPdfUri == null) {
             new AlertDialog.Builder(this)
-                    .setTitle("ملف التمارين مطلوب")
-                    .setMessage("اختر أولاً ملف PDF «خطواتي نحو التميز». التشغيل التلقائي سيستخرج صور كل درس منه ويضيفها للتحضير.")
-                    .setPositiveButton("اختيار PDF", (d, w) -> pickPdf())
-                    .setNegativeButton("إلغاء", null)
+                    .setTitle("الخطة والمادة مطلوبتان")
+                    .setMessage("اختر أولاً ملف الخطة الدراسية PDF وملف المادة العلمية PDF.\n\nهذه النسخة لن تستخدم بنك التحاضير الجاهز أثناء التشغيل التلقائي.")
+                    .setPositiveButton("حسنًا", null)
                     .show();
             return;
         }
+        exercisePdfUri = subjectMaterialPdfUri;
         if (autoLessons.isEmpty()) {
             toast("قائمة دروس التاسع غير متوفرة.");
             return;
@@ -638,13 +718,9 @@ public class MainActivity extends Activity {
         autoPreparingIndex = index;
         Grade9Curriculum.Lesson lesson = autoLessons.get(index);
         currentLesson = lesson;
-        currentPreparation = Grade9PreparationBank.get(lesson.title);
+        currentPreparation = null;
+        currentSourceResult = null;
         currentTitle = lesson.noorCode() + " " + lesson.title;
-
-        if (currentPreparation == null) {
-            stopAutoWithError("لا يوجد تحضير محلي جاهز للدرس «" + lesson.displayName() + "».");
-            return;
-        }
 
         status.setText("الدرس " + (index + 1) + " من " + (autoTargetIndex + 1)
                 + " — أختار «" + lesson.displayName() + "» من شجرة نور...");
@@ -768,16 +844,52 @@ public class MainActivity extends Activity {
             }
 
             currentTitle = foundTitle;
-            currentPreparation = Grade9PreparationBank.get(foundTitle);
-            if (currentPreparation == null) currentPreparation = Grade9PreparationBank.get(lesson.title);
-            fillAutoLessonContent(lesson);
+            generateSourcePreparationAndFill(lesson, foundTitle);
+        });
+    }
+
+    private void generateSourcePreparationAndFill(Grade9Curriculum.Lesson lesson, String foundTitle) {
+        if (!autoActive) return;
+        status.setText("أحلل الخطة والمادة للدرس " + lesson.displayName() + "...");
+
+        final String lessonTitle = foundTitle;
+        final List<String> noorOutcomes = new ArrayList<>(currentOutcomes);
+
+        worker.execute(() -> {
+            try {
+                PdfLessonContext.Result context = PdfLessonContext.extract(
+                        this, studyPlanPdfUri, subjectMaterialPdfUri, lessonTitle);
+                runOnUiThread(() -> status.setText("وجدت سياق الدرس: " + context.summary() + " — أطلب التحضير من ذكاء خطوة..."));
+
+                AiPreparationClient.SourceResult generated = aiClient.generateFromSources(
+                        lessonTitle, noorOutcomes, context.planContext, context.materialContext);
+
+                runOnUiThread(() -> {
+                    if (!autoActive || autoCurrentIndex < 0 || autoCurrentIndex >= autoLessons.size()) return;
+                    Grade9Curriculum.Lesson active = autoLessons.get(autoCurrentIndex);
+                    if (!active.code.equals(lesson.code)) return;
+
+                    currentSourceResult = generated;
+                    currentPreparation = generated.preparation;
+                    status.setText("تم إنشاء تحضير " + lesson.displayName() + " من الملفين — أعبئ نور...");
+                    fillAutoLessonContent(lesson);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> stopAutoWithError("تعذر إنشاء تحضير «" + lesson.displayName()
+                        + "» من الملفين: " + e.getMessage()));
+            }
         });
     }
 
     private void fillAutoLessonContent(Grade9Curriculum.Lesson lesson) {
         if (!autoActive || currentPreparation == null) return;
         status.setText("أعبئ محتوى " + lesson.displayName() + "...");
-        webView.evaluateJavascript(guidedContentScript(currentPreparation, lesson), raw -> {
+        List<String> sourceStrategies = currentSourceResult != null && !currentSourceResult.strategies.isEmpty()
+                ? currentSourceResult.strategies : lesson.strategies;
+        List<String> sourceResources = currentSourceResult != null && !currentSourceResult.resources.isEmpty()
+                ? currentSourceResult.resources : lesson.resources;
+        String sourceLevel = currentSourceResult != null ? currentSourceResult.level : lesson.level;
+        webView.evaluateJavascript(guidedContentScript(currentPreparation, lesson, sourceStrategies, sourceResources, sourceLevel), raw -> {
             int editors = 0;
             try {
                 JSONObject o = new JSONObject(decodeJsString(raw));
@@ -982,6 +1094,8 @@ public class MainActivity extends Activity {
 
         autoAwaitingSave = false;
         autoPreparingIndex = -1;
+        currentSourceResult = null;
+        currentPreparation = null;
         updateAutoProgressText(done);
 
         if (done >= autoTargetIndex) {
@@ -1122,16 +1236,20 @@ public class MainActivity extends Activity {
     }
 
     private String guidedContentScript(LessonPreparation p, Grade9Curriculum.Lesson lesson) {
-        List<String> strategyList = lesson == null
+        List<String> strategies = lesson == null
                 ? Arrays.asList("التعلم التعاوني", "التعلم بالاكتشاف", "التعلم المبني على حل المشكلات", "التعلم المتمايز")
                 : lesson.strategies;
-        List<String> resourceList = lesson == null
+        List<String> resources = lesson == null
                 ? Arrays.asList("الكتاب", "السبورة التقليدية", "جهاز عرض البيانات")
                 : lesson.resources;
+        String level = lesson == null ? "الفهم" : lesson.level;
+        return guidedContentScript(p, lesson, strategies, resources, level);
+    }
 
+    private String guidedContentScript(LessonPreparation p, Grade9Curriculum.Lesson lesson,
+                                       List<String> strategyList, List<String> resourceList, String level) {
         String strategies = new JSONArray(strategyList).toString();
         String resources = new JSONArray(resourceList).toString();
-        String level = lesson == null ? "الفهم" : lesson.level;
 
         return "(function(){" + baseHelpers()
                 + "window.__khutwaNoorLearningMute=true;"
