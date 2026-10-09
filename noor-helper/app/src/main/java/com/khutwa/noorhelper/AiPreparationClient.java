@@ -162,12 +162,17 @@ final class AiPreparationClient {
 
         for (Integer page : pages) {
             if (page == null) continue;
-            List<DiscoveredCurriculumStore.Entry> pageLessons = discoverLessonsOnPlanPage(
-                    page,
-                    scope,
-                    corpus.planPageWindow(page)
-            );
-            mergeExactCandidates(candidates, pageLessons);
+            List<String> segments = corpus.planPageSegments(page);
+            if (segments.isEmpty()) segments = java.util.Collections.singletonList(corpus.planPageWindow(page));
+
+            for (String segment : segments) {
+                List<DiscoveredCurriculumStore.Entry> pageLessons = discoverLessonsOnPlanPage(
+                        page,
+                        scope,
+                        segment
+                );
+                mergeExactCandidates(candidates, pageLessons);
+            }
         }
 
         if (candidates.isEmpty()) {
@@ -255,7 +260,8 @@ final class AiPreparationClient {
         prompt.append("مهمتك فقط تصحيح البنية: حدد المرشحين الذين يمثلون دروساً مستقلة فعلاً بحسب تسلسل وعناوين الخطة، ");
         prompt.append("واجمع المرشحين الذين هم موضوعات فرعية أو أجزاء تابعة تحت درسهم الأب. ");
         prompt.append("لا تستخدم معرفة مسبقة عن مادة أو صف، ولا تفترض عدداً مطلوباً من الدروس. ");
-        prompt.append("أرجع JSON فقط: {\"keep\":[0,1],\"merge\":[{\"into\":0,\"from\":[2,3]}]}. ");
+        prompt.append("ممنوع إسقاط أي مرشح مستقل من القائمة. مهمتك الدمج فقط عندما يكون المرشح موضوعاً فرعياً تابعاً بوضوح لمرشح أب. ");
+        prompt.append("أرجع JSON فقط: {\"merge\":[{\"into\":0,\"from\":[2,3]}]}. ");
         prompt.append("إذا لم يحتج شيء للدمج أرجع merge فارغة.\n");
         prompt.append("\n=== المرشحون ===\n").append(compact.toString());
         prompt.append("\n\n=== مخطط صفحات الخطة للاستدلال على الهيكل ===\n")
@@ -326,22 +332,10 @@ final class AiPreparationClient {
             }
         }
 
-        java.util.Set<Integer> keepSet = new java.util.LinkedHashSet<>();
-        JSONArray keep = decision.optJSONArray("keep");
-        if (keep != null) {
-            for (int i = 0; i < keep.length(); i++) {
-                int idx = keep.optInt(i, -1);
-                if (idx >= 0 && idx < working.size()) keepSet.add(idx);
-            }
-        }
-        if (keepSet.isEmpty()) {
-            for (int i = 0; i < working.size(); i++) keepSet.add(i);
-        }
-
         List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
-        for (Integer idx : keepSet) {
-            if (idx == null || mergedAway.contains(idx)) continue;
-            out.add(working.get(idx));
+        for (int i = 0; i < working.size(); i++) {
+            if (mergedAway.contains(i)) continue;
+            out.add(working.get(i));
         }
         return out;
     }
