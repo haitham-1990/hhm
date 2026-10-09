@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
     private static final int REQUEST_EXPORT_REPORT = 302;
     private static final int REQUEST_PICK_PLAN_PDF = 303;
     private static final int REQUEST_PICK_MATERIAL_PDF = 304;
+    private static final int REQUEST_EXPORT_DIAGNOSTIC = 305;
     private static final String PREFS = "noor_helper";
     private static final String KEY_PDF_URI = "exercise_pdf_uri";
     private static final String KEY_PLAN_PDF_URI = "study_plan_pdf_uri";
@@ -81,6 +82,8 @@ public class MainActivity extends Activity {
     private NoorLearningRecorder learningRecorder;
     private Button learnButton;
     private String pendingReport = "";
+    private String pendingDiagnosticReport = "";
+    private DiscoveryDiagnostics diagnostics;
     private volatile String lastLoadedUrl = "";
     private boolean guidedLearningWaiting = false;
     private String guidedFilledTitle = "";
@@ -106,6 +109,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         PDFBoxResourceLoader.init(getApplicationContext());
         aiClient = new AiPreparationClient(this);
+        diagnostics = new DiscoveryDiagnostics(this);
         generatedStore = new GeneratedPreparationStore(this);
         curriculumStore = new DiscoveredCurriculumStore(this);
         learningRecorder = new NoorLearningRecorder(this);
@@ -180,6 +184,14 @@ public class MainActivity extends Activity {
         databaseStatus.setPadding(dp(12), dp(2), dp(12), dp(4));
         databaseStatus.setTextDirection(View.TEXT_DIRECTION_RTL);
         root.addView(databaseStatus);
+
+        Button diagnosticButton = makeButton("حفظ تقرير التشخيص");
+        diagnosticButton.setTextSize(12);
+        diagnosticButton.setOnClickListener(v -> exportDiagnosticReport());
+        LinearLayout.LayoutParams diagParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
+        diagParams.setMargins(dp(6), 0, dp(6), dp(2));
+        root.addView(diagnosticButton, diagParams);
 
         LinearLayout autoStartRow = new LinearLayout(this);
         autoStartRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -404,6 +416,14 @@ public class MainActivity extends Activity {
             refreshLessonSpinners();
         }
 
+        diagnostics.startSession(pdfName(studyPlanPdfUri), pdfName(subjectMaterialPdfUri));
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("source_changed", changedGenerated || changedCatalog);
+            meta.put("cached_catalog_count", autoLessons.size());
+            diagnostics.log("database_build_requested", meta);
+        } catch (Exception ignored) {}
+
         databaseBuilding = true;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         try {
@@ -419,12 +439,21 @@ public class MainActivity extends Activity {
             List<String> failed = new ArrayList<>();
             try {
                 PdfCorpusIndex corpus = PdfCorpusIndex.build(this, studyPlanPdfUri, subjectMaterialPdfUri);
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("plan_pages", corpus.planPageCount());
+                    meta.put("material_pages", corpus.materialPageCount());
+                    diagnostics.log("pdf_index_ready", meta);
+                } catch (Exception ignored) {}
 
                 List<DiscoveredCurriculumStore.Entry> catalog = curriculumStore.load();
                 if (catalog.isEmpty()) {
                     runOnUiThread(() -> status.setText("الذكاء يحدد الصف والوحدات والدروس وترتيبها من الملفين..."));
                     catalog = aiClient.discoverCurriculum(corpus);
                     curriculumStore.save(catalog);
+                    diagnostics.logLessons("catalog_saved", catalog);
+                } else {
+                    diagnostics.logLessons("catalog_loaded_from_store", catalog);
                 }
 
                 autoLessons.clear();
@@ -501,12 +530,31 @@ public class MainActivity extends Activity {
                                 "تقسيم تلقائي: ص" + entry.materialStartPage + "–" + entry.materialEndPage
                         );
 
+                        try {
+                            JSONObject meta = new JSONObject();
+                            meta.put("code", lesson.code);
+                            meta.put("title", lesson.title);
+                            meta.put("material_start_page", entry.materialStartPage);
+                            meta.put("material_end_page", entry.materialEndPage);
+                            meta.put("objectives_count", lesson.objectives.size());
+                            diagnostics.log("lesson_build_success", meta);
+                        } catch (Exception ignored) {}
+
                         final int ready = generatedReadyCount();
                         runOnUiThread(() -> {
                             status.setText("تم " + lesson.displayName() + " — القاعدة " + ready + " / " + total);
                             updateDatabaseStatus();
                         });
                     } catch (Exception lessonError) {
+                        try {
+                            JSONObject meta = new JSONObject();
+                            meta.put("code", lesson.code);
+                            meta.put("title", lesson.title);
+                            meta.put("material_start_page", entry.materialStartPage);
+                            meta.put("material_end_page", entry.materialEndPage);
+                            meta.put("error", lessonError.getMessage() == null ? "" : lessonError.getMessage());
+                            diagnostics.log("lesson_build_error", meta);
+                        } catch (Exception ignored) {}
                         failed.add(lesson.displayName() + ": " + lessonError.getMessage());
                         final String shortError = lessonError.getMessage() == null
                                 ? "خطأ غير معروف" : lessonError.getMessage();
@@ -515,6 +563,7 @@ public class MainActivity extends Activity {
                     }
                 }
             } catch (Exception e) {
+                diagnostics.logMessage("database_build_fatal_error", e.getMessage());
                 failed.add("اكتشاف/فهرسة المنهج: " + e.getMessage());
             }
 
@@ -525,6 +574,16 @@ public class MainActivity extends Activity {
                 loadDiscoveredLessons();
                 refreshLessonSpinners();
                 int ready = generatedReadyCount();
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("discovered_lessons", autoLessons.size());
+                    meta.put("ready_lessons", ready);
+                    meta.put("failed_count", failed.size());
+                    JSONArray errors = new JSONArray();
+                    for (String x : failed) errors.put(x);
+                    meta.put("errors", errors);
+                    diagnostics.log("database_build_summary", meta);
+                } catch (Exception ignored) {}
 
                 if (failed.isEmpty() && !autoLessons.isEmpty() && ready == autoLessons.size()) {
                     status.setText("القاعدة جاهزة: اكتشف " + autoLessons.size()
@@ -554,6 +613,19 @@ public class MainActivity extends Activity {
         });
     }
 
+
+    private void exportDiagnosticReport() {
+        if (diagnostics == null || !diagnostics.hasReport()) {
+            toast("لا يوجد تقرير تشخيص بعد. شغّل «تجهيز قاعدة البيانات» أولاً.");
+            return;
+        }
+        pendingDiagnosticReport = diagnostics.exportReport();
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, "noor-smart-diagnostic.json");
+        startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
+    }
 
     private void pickSourcePdf(int requestCode) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -643,6 +715,23 @@ public class MainActivity extends Activity {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_PDF_URI, uri.toString()).apply();
             status.setText("تم ربط ملف التمارين: " + pdfName(uri));
             toast("تم حفظ ملف التمارين لهذا التطبيق.");
+            return;
+        }
+
+        if (requestCode == REQUEST_EXPORT_DIAGNOSTIC && resultCode == RESULT_OK
+                && data != null && data.getData() != null && !pendingDiagnosticReport.isEmpty()) {
+            try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+                if (out != null) {
+                    out.write(pendingDiagnosticReport.getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                    toast("تم حفظ تقرير التشخيص.");
+                    status.setText("تم حفظ تقرير التشخيص. أرسله لي وسأحدد مرحلة الخطأ بدقة.");
+                }
+            } catch (Exception e) {
+                toast("تعذر حفظ تقرير التشخيص.");
+            } finally {
+                pendingDiagnosticReport = "";
+            }
             return;
         }
 
