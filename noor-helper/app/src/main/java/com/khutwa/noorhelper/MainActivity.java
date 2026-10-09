@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - تشخيص شامل 1.0.5");
+        title.setText("نور الذكي - قارئ الشجرة 1.0.6");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -1312,19 +1312,15 @@ public class MainActivity extends Activity {
                     meta.put("path_size", path.size());
                     logAutoStage("tree_lesson_click_result", lesson, meta);
                 } catch (Exception ignored) {}
-                if (ok <= 0) {
-                    if (retry == 0 || retry >= 13) {
-                        captureNoorDiagnosticSnapshot("tree_lesson_not_found_retry_" + retry, lesson);
-                    }
-                    if (retry < 14) {
-                        webView.postDelayed(() -> autoTreeStage(lesson, Math.max(0, path.size() - 1), retry + 1), 700);
-                    } else {
-                        stopAutoWithError("لم أجد درس «" + lesson.displayName() + "» ظاهرًا في شجرة المنهج.");
-                    }
+
+                if (ok > 0) {
+                    status.setText("تم اختيار " + lesson.displayName() + " — أنتظر نور ليحمّل العنوان والأهداف...");
+                    webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1400);
                     return;
                 }
-                status.setText("تم اختيار " + lesson.displayName() + " — أنتظر نور ليحمّل العنوان والأهداف...");
-                webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1400);
+
+                captureNoorDiagnosticSnapshot("tree_direct_lesson_not_found", lesson);
+                autoExploreTreeForLesson(lesson, 0);
             });
             return;
         }
@@ -1345,40 +1341,116 @@ public class MainActivity extends Activity {
                 meta.put("result", state);
                 logAutoStage("tree_path_result", lesson, meta);
             } catch (Exception ignored) {}
-            if (state <= 0 && (retry == 0 || retry >= 13)) {
-                captureNoorDiagnosticSnapshot("tree_path_failure_stage_" + stage + "_retry_" + retry, lesson);
-            }
+
             if (state == 2) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage + 1, 0), 250);
-            } else if (state == 1) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 700);
-            } else if (retry < 14) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 700);
-            } else {
-                stopAutoWithError("لم أتمكن من فتح مسار الدرس «" + lesson.displayName() + "» في شجرة نور.");
+                webView.postDelayed(() -> autoTreeStage(lesson, stage + 1, 0), 300);
+                return;
             }
+
+            if (state == 1 && retry < 8) {
+                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 650);
+                return;
+            }
+
+            if (state <= 0 && retry < 4) {
+                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 650);
+                return;
+            }
+
+            // Noor sometimes abbreviates nodes (e.g. "الأول" instead of
+            // "الفصل الدراسي الأول") or changes unit labels. Fall back to
+            // discovering the live tree instead of relying on curriculum labels.
+            captureNoorDiagnosticSnapshot("tree_path_fallback_stage_" + stage + "_retry_" + retry, lesson);
+            autoExploreTreeForLesson(lesson, 0);
+        });
+    }
+
+
+    private void autoExploreTreeForLesson(CurriculumLesson lesson, int attempt) {
+        if (!autoActive || lesson == null) return;
+        if (attempt == 0) {
+            status.setText("أقرأ شجرة نور كما تظهر فعليًا وأبحث عن «" + lesson.displayName() + "»...");
+        }
+
+        webView.evaluateJavascript(treeExploreLessonScript(lesson), raw -> {
+            String result = "";
+            try {
+                result = decodeJsString(raw).trim();
+            } catch (Exception ignored) {
+                result = raw == null ? "" : raw.replace("\"", "").trim();
+            }
+
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("attempt", attempt);
+                meta.put("result", result);
+                logAutoStage("tree_explore_result", lesson, meta);
+            } catch (Exception ignored) {}
+
+            if ("clicked".equals(result)) {
+                status.setText("وجدت " + lesson.displayName() + " في شجرة نور — أنتظر تحميل النموذج...");
+                webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1400);
+                return;
+            }
+
+            if (("opened".equals(result) || "waiting".equals(result) || "no_tree".equals(result))
+                    && attempt < 80) {
+                webView.postDelayed(() -> autoExploreTreeForLesson(lesson, attempt + 1), 550);
+                return;
+            }
+
+            captureNoorDiagnosticSnapshot("tree_explore_failed_attempt_" + attempt, lesson);
+            stopAutoWithError("قرأت شجرة نور كاملة ولم أجد الدرس «" + lesson.displayName()
+                    + "». التقرير الشامل يحتوي أسماء العقد التي ظهرت فعليًا.");
         });
     }
 
 
     private String treeEnsureChildScript(String parentQuery, String childQuery, boolean exactParent) {
         return "(function(){"
-                + "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim();}"
-                + "function visible(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}"
-                + "function sameish(a,b){a=norm(a);b=norm(b);if(!a||!b)return false;var ac=a.replace(/[\\s\\-–:]+/g,''),bc=b.replace(/[\\s\\-–:]+/g,'');return a===b||a.indexOf(b)>=0||b.indexOf(a)>=0||ac.indexOf(bc)>=0||bc.indexOf(ac)>=0;}"
+                + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
+                + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim());}"
+                + "function sem(s){var a=norm(s).replace(/[:\\-–]+/g,' ').split(/\\s+/),m={'الاول':'1','الاولى':'1','الثاني':'2','الثانية':'2','الثالث':'3','الثالثة':'3','الرابع':'4','الرابعة':'4','الخامس':'5','الخامسة':'5','السادس':'6','السادسة':'6','السابع':'7','السابعة':'7','الثامن':'8','الثامنة':'8','التاسع':'9','التاسعة':'9','العاشر':'10','العاشرة':'10'},o=[];for(var i=0;i<a.length;i++){var w=a[i];if(!w||w==='الفصل'||w==='الدراسي'||w==='الوحدة')continue;o.push(m[w]||w);}return o.join(' ');}"
+                + "function compact(s){return sem(s).replace(/[^\\p{L}\\p{N}]+/gu,'');}"
+                + "function visible(e){try{var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(x){return false;}}"
+                + "function sameish(a,b){a=sem(a);b=sem(b);if(!a||!b)return false;var ac=compact(a),bc=compact(b);return a===b||a.indexOf(b)>=0||b.indexOf(a)>=0||ac.indexOf(bc)>=0||bc.indexOf(ac)>=0;}"
                 + "function openNode(anchor){var li=anchor&&anchor.closest?anchor.closest('li'):null;if(!li)return 2;"
-                + "var cls=li.className||'';if(cls.indexOf('jstree-open')>=0)return 2;"
+                + "var cls=String(li.className||'');if(cls.indexOf('jstree-open')>=0||anchor.getAttribute('aria-expanded')==='true')return 2;"
                 + "var kids=li.children||[],ul=null,ocl=null;for(var k=0;k<kids.length;k++){var ch=kids[k];if(ch.tagName==='UL')ul=ch;if((ch.className||'').indexOf('jstree-ocl')>=0)ocl=ch;}"
                 + "if(ul){var st=window.getComputedStyle?getComputedStyle(ul):null;if(!st||st.display!=='none')return 2;}"
                 + "try{if(window.jQuery){var tr=jQuery(li).closest('.jstree');if(tr.length&&tr.jstree){tr.jstree('open_node',li);return 1;}}}catch(e){}"
-                + "if(ocl&&ocl.click){ocl.click();return 1;}anchor.click();return 1;}"
-                + "var anchors=[].slice.call(document.querySelectorAll('a[id$=_anchor],a')),cq=" + JSONObject.quote(childQuery) + ";"
-                + "var child=null,bestLen=1e9;for(var i=0;i<anchors.length;i++){if(!visible(anchors[i]))continue;var t=anchors[i].innerText||anchors[i].textContent||'';if(sameish(t,cq)&&norm(t).length<bestLen){child=anchors[i];bestLen=norm(t).length;}}"
+                + "if(ocl&&ocl.click){ocl.click();return 1;}if(anchor.click){anchor.click();return 1;}return 0;}"
+                + "var root=document.getElementById('jstree_node_tree')||document.querySelector('.jstree')||document;"
+                + "var anchors=[].slice.call(root.querySelectorAll('a[id$=_anchor],a')),cq=" + JSONObject.quote(childQuery) + ";"
+                + "var child=null,bestLen=1e9;for(var i=0;i<anchors.length;i++){if(!visible(anchors[i]))continue;var t=anchors[i].innerText||anchors[i].textContent||'';if(sameish(t,cq)&&sem(t).length<bestLen){child=anchors[i];bestLen=sem(t).length;}}"
                 + "if(child)return String(openNode(child));"
                 + "var pq=" + JSONObject.quote(parentQuery) + ",parent=null,parentLen=1e9;"
                 + "for(var j=0;j<anchors.length;j++){if(!visible(anchors[j]))continue;var tx=anchors[j].innerText||anchors[j].textContent||'';"
-                + "var ok=" + (exactParent ? "norm(tx)===norm(pq)||sameish(tx,pq)" : "sameish(tx,pq)") + ";if(ok&&norm(tx).length<parentLen){parent=anchors[j];parentLen=norm(tx).length;}}"
-                + "if(!parent)return '0';openNode(parent);return '1';})()";
+                + "var ok=" + (exactParent ? "sameish(tx,pq)" : "sameish(tx,pq)") + ";if(ok&&sem(tx).length<parentLen){parent=anchors[j];parentLen=sem(tx).length;}}"
+                + "if(!parent)return '0';return String(openNode(parent));})()";
+    }
+
+
+    private String treeExploreLessonScript(CurriculumLesson lesson) {
+        return "(function(){"
+                + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
+                + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim());}"
+                + "function compact(s){return norm(s).replace(/[^\\p{L}\\p{N}]+/gu,'');}"
+                + "function numCode(s){var m=norm(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
+                + "function words(s){var a=norm(s).replace(/[0-9]+\\s*[-–]\\s*[0-9]+/g,' ').split(/\\s+/),o=[];for(var i=0;i<a.length;i++){var w=a[i].replace(/[^\\p{L}\\p{N}]/gu,'');if(w.length>=2&&o.indexOf(w)<0)o.push(w);}return o;}"
+                + "function score(raw,title,code){var t=norm(raw),cw=words(raw),tw=words(title),hits=0;for(var i=0;i<tw.length;i++){if(cw.indexOf(tw[i])>=0||t.indexOf(tw[i])>=0)hits++;}var s=tw.length?Math.round((hits/tw.length)*340):0;var ct=compact(title),cr=compact(raw);if(ct&&cr.indexOf(ct)>=0)s+=420;var tc=numCode(code),cc=numCode(raw);if(tc&&cc===tc)s+=1000;return s;}"
+                + "function vis(e){try{var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(x){return false;}}"
+                + "var root=document.getElementById('jstree_node_tree')||document.querySelector('.jstree');if(!root)return 'no_tree';"
+                + "var code=" + JSONObject.quote(lesson.noorCode()) + ",title=" + JSONObject.quote(lesson.title) + ";"
+                + "var a=[].slice.call(root.querySelectorAll('a[id$=_anchor],a')),best=null,bestScore=-1;"
+                + "for(var i=0;i<a.length;i++){if(!vis(a[i]))continue;var raw=a[i].innerText||a[i].textContent||'';var sc=score(raw,title,code);if(sc>bestScore){bestScore=sc;best=a[i];}}"
+                + "if(best&&bestScore>=180){best.click();return 'clicked';}"
+                + "var closed=[].slice.call(root.querySelectorAll('li.jstree-closed'));"
+                + "for(var j=0;j<closed.length;j++){var li=closed[j],an=li.querySelector(':scope > a.jstree-anchor, :scope > a[id$=_anchor]');if(!an||!vis(an))continue;"
+                + "try{if(window.jQuery){var tr=jQuery(li).closest('.jstree');if(tr.length&&tr.jstree){tr.jstree('open_node',li);return 'opened';}}}catch(e){}"
+                + "var oc=li.querySelector(':scope > .jstree-ocl');if(oc&&oc.click){oc.click();return 'opened';}if(an.click){an.click();return 'opened';}}"
+                + "var loading=root.querySelector('li.jstree-loading');if(loading)return 'waiting';return 'not_found';"
+                + "})()";
     }
 
 
@@ -1570,7 +1642,11 @@ public class MainActivity extends Activity {
                         || msg.contains("HTTP 503")
                         || msg.contains("HTTP 504")
                         || msg.contains("Unable to resolve host")
-                        || msg.contains("failed to connect");
+                        || msg.contains("failed to connect")
+                        || msg.contains("Software caused connection abort")
+                        || msg.contains("Connection aborted")
+                        || msg.contains("Broken pipe")
+                        || msg.contains("unexpected end of stream");
                 if (!transientError || attempt >= attempts) break;
 
                 try {
