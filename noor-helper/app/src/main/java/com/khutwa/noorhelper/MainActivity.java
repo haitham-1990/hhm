@@ -311,9 +311,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    private int generatedReadyCount() {
+        int n = 0;
+        for (Grade9Curriculum.Lesson lesson : autoLessons) {
+            if (generatedStore.has(lesson.code) && LessonImageCache.has(this, lesson.code)) n++;
+        }
+        return n;
+    }
+
     private void updateDatabaseStatus() {
         if (databaseStatus == null || generatedStore == null) return;
-        int ready = generatedStore.count(autoLessons);
+        int ready = generatedReadyCount();
         String plan = studyPlanPdfUri == null ? "غير مرفقة" : pdfName(studyPlanPdfUri);
         String material = subjectMaterialPdfUri == null ? "غير مرفقة" : pdfName(subjectMaterialPdfUri);
         databaseStatus.setText("الخطة: " + plan
@@ -338,6 +346,7 @@ public class MainActivity extends Activity {
         boolean sourceChanged = generatedStore.bindSources(
                 studyPlanPdfUri.toString(), subjectMaterialPdfUri.toString());
         if (sourceChanged) {
+            LessonImageCache.clearAll(this);
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putInt(KEY_AUTO_LAST_INDEX, -1)
                     .putInt(KEY_AUTO_PENDING_INDEX, 0)
@@ -363,8 +372,8 @@ public class MainActivity extends Activity {
 
                 for (int i = 0; i < total; i++) {
                     Grade9Curriculum.Lesson lesson = autoLessons.get(i);
-                    if (generatedStore.has(lesson.code)) {
-                        final int ready = generatedStore.count(autoLessons);
+                    if (generatedStore.has(lesson.code) && LessonImageCache.has(this, lesson.code)) {
+                        final int ready = generatedReadyCount();
                         runOnUiThread(() -> {
                             status.setText("قاعدة البيانات: " + ready + " / " + total
                                     + " — أتجاوز الدروس المحفوظة...");
@@ -390,6 +399,13 @@ public class MainActivity extends Activity {
                         AiPreparationClient.SourceResult generated = aiClient.generateFromSources(
                                 title, new ArrayList<>(), ctx.planContext, ctx.materialContext);
 
+                        LessonImageCache.build(
+                                this,
+                                subjectMaterialPdfUri,
+                                lesson.code,
+                                ctx.materialPages
+                        );
+
                         generatedStore.save(
                                 lesson.code,
                                 title,
@@ -398,7 +414,7 @@ public class MainActivity extends Activity {
                                 ctx.summary()
                         );
 
-                        final int ready = generatedStore.count(autoLessons);
+                        final int ready = generatedReadyCount();
                         runOnUiThread(() -> {
                             status.setText("تم إنشاء " + lesson.displayName()
                                     + " — قاعدة البيانات " + ready + " / " + total);
@@ -422,7 +438,7 @@ public class MainActivity extends Activity {
                 try { stopService(new Intent(this, AutoRunService.class)); } catch (Exception ignored) {}
                 updateDatabaseStatus();
 
-                int ready = generatedStore.count(autoLessons);
+                int ready = generatedReadyCount();
                 if (failed.isEmpty() && ready == autoLessons.size()) {
                     status.setText("قاعدة البيانات جاهزة بالكامل: " + ready + " درس. الآن اختر المدى واضغط «ابدأ تلقائي».");
                     new AlertDialog.Builder(this)
@@ -512,6 +528,11 @@ public class MainActivity extends Activity {
             }
             currentSourceResult = null;
             currentDbEntry = null;
+            if (studyPlanPdfUri != null && subjectMaterialPdfUri != null) {
+                boolean changed = generatedStore.bindSources(
+                        studyPlanPdfUri.toString(), subjectMaterialPdfUri.toString());
+                if (changed) LessonImageCache.clearAll(this);
+            }
             updateDatabaseStatus();
             return;
         }
@@ -610,11 +631,12 @@ public class MainActivity extends Activity {
         }
 
         for (int i = start; i <= target && i < autoLessons.size(); i++) {
-            if (!generatedStore.has(autoLessons.get(i).code)) {
+            if (!generatedStore.has(autoLessons.get(i).code)
+                    || !LessonImageCache.has(this, autoLessons.get(i).code)) {
                 new AlertDialog.Builder(this)
                         .setTitle("قاعدة البيانات غير مكتملة")
                         .setMessage("الدرس «" + autoLessons.get(i).displayName()
-                                + "» غير موجود في قاعدة البيانات. اضغط «تجهيز قاعدة البيانات» أولاً.")
+                                + "» غير مكتمل في قاعدة البيانات (التحضير/الصور). اضغط «تجهيز قاعدة البيانات» أولاً.")
                         .setPositiveButton("حسنًا", null)
                         .show();
                 return;
@@ -1022,27 +1044,30 @@ public class MainActivity extends Activity {
 
     private void attachAutoPdf(Grade9Curriculum.Lesson lesson) {
         if (!autoActive) return;
-        status.setText("أستخرج صور درس " + lesson.displayName() + " من PDF...");
-        final String lessonTitleForPdf = currentTitle;
+        status.setText("أضيف صور " + lesson.displayName() + " من قاعدة البيانات...");
         worker.execute(() -> {
             try {
-                PdfExerciseExtractor.ExtractResult result = PdfExerciseExtractor.extract(this, exercisePdfUri, lessonTitleForPdf);
+                List<Bitmap> bitmaps = LessonImageCache.load(this, lesson.code);
+                if (bitmaps.isEmpty()) {
+                    throw new IllegalStateException("صور الدرس غير موجودة في قاعدة البيانات.");
+                }
                 List<String> base64Images = new ArrayList<>();
-                for (Bitmap bitmap : result.images) {
+                for (Bitmap bitmap : bitmaps) {
                     ByteArrayOutputStream out = new ByteArrayOutputStream();
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 68, out);
                     base64Images.add(Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP));
                     if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
                 }
                 runOnUiThread(() -> {
-                    status.setText("وجدت صور التمارين ص" + result.startPage + "–" + result.endPage + " — أضيفها للتحضير...");
+                    status.setText("صور الدرس جاهزة من القاعدة — أضيفها للتحضير...");
                     appendAutoImageAt(base64Images, 0, lesson);
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> stopAutoWithError("تعذر استخراج صور الدرس من ملف PDF: " + e.getMessage()));
+                runOnUiThread(() -> stopAutoWithError("تعذر تحميل صور الدرس من قاعدة البيانات: " + e.getMessage()));
             }
         });
     }
+
 
     private void appendAutoImageAt(List<String> images, int index, Grade9Curriculum.Lesson lesson) {
         if (!autoActive) return;
