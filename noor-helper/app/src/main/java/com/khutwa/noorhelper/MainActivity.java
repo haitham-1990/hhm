@@ -1041,6 +1041,17 @@ public class MainActivity extends Activity {
         autoCurrentIndex = start;
         autoTargetIndex = Math.max(start, Math.min(autoLessons.size() - 1, target));
 
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("start_index", autoCurrentIndex);
+            meta.put("target_index", autoTargetIndex);
+            meta.put("lesson_count", autoLessons.size());
+            meta.put("start_lesson", autoLessons.get(autoCurrentIndex).displayName());
+            meta.put("target_lesson", autoLessons.get(autoTargetIndex).displayName());
+            logAutoStage("auto_run_start", autoLessons.get(autoCurrentIndex), meta);
+        } catch (Exception ignored) {}
+        captureNoorDiagnosticSnapshot("auto_run_start", autoLessons.get(autoCurrentIndex));
+
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putBoolean(KEY_AUTO_ACTIVE, true)
                 .putInt(KEY_AUTO_TARGET_INDEX, autoTargetIndex)
@@ -1059,6 +1070,15 @@ public class MainActivity extends Activity {
     }
 
     private void stopAutoRun(boolean completed) {
+        CurriculumLesson stoppedLesson = autoCurrentIndex >= 0 && autoCurrentIndex < autoLessons.size()
+                ? autoLessons.get(autoCurrentIndex) : null;
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("completed", completed);
+            meta.put("last_completed_index", getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1));
+            logAutoStage("auto_run_stop", stoppedLesson, meta);
+        } catch (Exception ignored) {}
+        captureNoorDiagnosticSnapshot(completed ? "auto_run_completed" : "auto_run_stopped", stoppedLesson);
         autoActive = false;
         autoAwaitingSave = false;
         autoPreparingIndex = -1;
@@ -1083,6 +1103,14 @@ public class MainActivity extends Activity {
     }
 
     private void stopAutoWithError(String message) {
+        CurriculumLesson failingLesson = autoCurrentIndex >= 0 && autoCurrentIndex < autoLessons.size()
+                ? autoLessons.get(autoCurrentIndex) : currentLesson;
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("message", message == null ? "" : message);
+            logAutoStage("auto_stop_error", failingLesson, meta);
+        } catch (Exception ignored) {}
+        captureNoorDiagnosticSnapshot("auto_stop_error: " + (message == null ? "" : message), failingLesson);
         autoActive = false;
         autoAwaitingSave = false;
         autoPreparingIndex = -1;
@@ -1105,6 +1133,13 @@ public class MainActivity extends Activity {
 
     private void handleAutoPage(String url) {
         if (!autoActive || url == null) return;
+        CurriculumLesson routeLesson = autoCurrentIndex >= 0 && autoCurrentIndex < autoLessons.size()
+                ? autoLessons.get(autoCurrentIndex) : null;
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("incoming_location", safeNoorLocation(url));
+            logAutoStage("auto_page_route", routeLesson, meta);
+        } catch (Exception ignored) {}
         if (autoCurrentIndex < 0 || autoCurrentIndex >= autoLessons.size()) {
             stopAutoWithError("فقدت رقم الدرس الحالي.");
             return;
@@ -1176,6 +1211,14 @@ public class MainActivity extends Activity {
 
         webView.evaluateJavascript(js, raw -> {
             String v = raw == null ? "" : raw.replace("\"", "").trim();
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("attempt", attempt);
+                meta.put("js_result", v);
+                logAutoStage("navigate_add_preparation_result",
+                        autoCurrentIndex >= 0 && autoCurrentIndex < autoLessons.size() ? autoLessons.get(autoCurrentIndex) : null,
+                        meta);
+            } catch (Exception ignored) {}
             if (v.contains("add_")) return;
 
             if ((v.contains("opened") || v.contains("none")) && attempt < 8) {
@@ -1202,6 +1245,12 @@ public class MainActivity extends Activity {
         currentSourceResult = null;
         currentPreparation = currentDbEntry == null ? null : currentDbEntry.preparation;
         currentTitle = lesson.noorCode() + " " + lesson.title;
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("database_entry_present", currentDbEntry != null);
+            meta.put("preparation_present", currentPreparation != null);
+            logAutoStage("auto_lesson_prepare_begin", lesson, meta);
+        } catch (Exception ignored) {}
 
         if (currentDbEntry == null || currentPreparation == null) {
             stopAutoWithError("الدرس «" + lesson.displayName()
@@ -1229,7 +1278,18 @@ public class MainActivity extends Activity {
         if (stage >= path.size()) {
             webView.evaluateJavascript(treeClickLessonScript(lesson), raw -> {
                 int ok = parseJsInt(raw);
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("stage", stage);
+                    meta.put("retry", retry);
+                    meta.put("result", ok);
+                    meta.put("path_size", path.size());
+                    logAutoStage("tree_lesson_click_result", lesson, meta);
+                } catch (Exception ignored) {}
                 if (ok <= 0) {
+                    if (retry == 0 || retry >= 13) {
+                        captureNoorDiagnosticSnapshot("tree_lesson_not_found_retry_" + retry, lesson);
+                    }
                     if (retry < 14) {
                         webView.postDelayed(() -> autoTreeStage(lesson, Math.max(0, path.size() - 1), retry + 1), 700);
                     } else {
@@ -1249,6 +1309,19 @@ public class MainActivity extends Activity {
 
         webView.evaluateJavascript(treeEnsureChildScript(parent, child, exactParent), raw -> {
             int state = parseJsInt(raw);
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("stage", stage);
+                meta.put("retry", retry);
+                meta.put("parent_query", parent);
+                meta.put("child_query", child);
+                meta.put("exact_parent", exactParent);
+                meta.put("result", state);
+                logAutoStage("tree_path_result", lesson, meta);
+            } catch (Exception ignored) {}
+            if (state <= 0 && (retry == 0 || retry >= 13)) {
+                captureNoorDiagnosticSnapshot("tree_path_failure_stage_" + stage + "_retry_" + retry, lesson);
+            }
             if (state == 2) {
                 webView.postDelayed(() -> autoTreeStage(lesson, stage + 1, 0), 250);
             } else if (state == 1) {
@@ -1343,7 +1416,10 @@ public class MainActivity extends Activity {
         String js = "(function(){var t=document.getElementById('PreparationTitle');"
                 + "var v=t?(t.value||''):'';"
                 + "var xs=document.querySelectorAll('input'),n=0;for(var xi=0;xi<xs.length;xi++){if((xs[xi].name||'').indexOf('Preparation[criteria]')===0)n++;}"
-                + "return JSON.stringify({title:v,criteria:n});})()";
+                + "var ed=document.querySelectorAll('iframe,[contenteditable=true],textarea');"
+                + "var sel=document.querySelectorAll('select');"
+                + "var pub=document.querySelectorAll('input[id^=publishdate-]');"
+                + "return JSON.stringify({title:v,titlePresent:!!t,criteria:n,editors:ed.length,selects:sel.length,publishRows:pub.length,readyState:document.readyState||''});})()";
         webView.evaluateJavascript(js, raw -> {
             boolean ready = false;
             String foundTitle = "";
@@ -1353,7 +1429,24 @@ public class MainActivity extends Activity {
                 foundTitle = o.optString("title", "");
                 criteria = o.optInt("criteria", 0);
                 ready = lessonMatchesNoorTitle(foundTitle, lesson) && criteria > 0;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                diagnostics.logException("lesson_form_probe_parse_error", e);
+            }
+
+            if (ready || attempt == 0 || attempt % 5 == 0 || attempt >= 35) {
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("attempt", attempt);
+                    meta.put("found_title", foundTitle);
+                    meta.put("criteria_count", criteria);
+                    meta.put("title_matches", lessonMatchesNoorTitle(foundTitle, lesson));
+                    meta.put("ready", ready);
+                    logAutoStage("lesson_form_probe", lesson, meta);
+                } catch (Exception ignored) {}
+                if (!ready && (attempt == 0 || attempt >= 35)) {
+                    captureNoorDiagnosticSnapshot("lesson_form_probe_attempt_" + attempt, lesson);
+                }
+            }
 
             if (!ready) {
                 if (attempt < 36) {
@@ -1485,16 +1578,29 @@ public class MainActivity extends Activity {
                 ? currentDbEntry.level : lesson.level;
         webView.evaluateJavascript(guidedContentScript(currentPreparation, lesson, sourceStrategies, sourceResources, sourceLevel), raw -> {
             int editors = 0;
+            JSONObject fillResult = null;
             try {
-                JSONObject o = new JSONObject(decodeJsString(raw));
-                editors = o.optInt("editors", 0);
-            } catch (Exception ignored) {}
+                fillResult = new JSONObject(decodeJsString(raw));
+                editors = fillResult.optInt("editors", 0);
+                logAutoStage("content_fill_result", lesson, fillResult);
+            } catch (Exception e) {
+                diagnostics.logException("content_fill_parse_error", e);
+            }
             if (editors < 4) {
+                captureNoorDiagnosticSnapshot("content_fill_incomplete", lesson);
                 stopAutoWithError("لم أستطع تعبئة جميع حقول محتوى الدرس.");
                 return;
             }
 
-            webView.evaluateJavascript(autoFlagsScript(), ignored -> attachAutoPdf(lesson));
+            webView.evaluateJavascript(autoFlagsScript(), flagsRaw -> {
+                try {
+                    JSONObject flags = new JSONObject(decodeJsString(flagsRaw));
+                    logAutoStage("preparation_flags_result", lesson, flags);
+                } catch (Exception e) {
+                    diagnostics.logException("preparation_flags_parse_error", e);
+                }
+                attachAutoPdf(lesson);
+            });
         });
     }
 
@@ -1514,6 +1620,11 @@ public class MainActivity extends Activity {
         worker.execute(() -> {
             try {
                 List<Bitmap> bitmaps = LessonImageCache.load(this, lesson.code);
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("cached_images", bitmaps.size());
+                    logAutoStage("lesson_images_loaded", lesson, meta);
+                } catch (Exception ignored) {}
                 if (bitmaps.isEmpty()) {
                     throw new IllegalStateException("صور الدرس غير موجودة في قاعدة البيانات.");
                 }
@@ -1549,6 +1660,13 @@ public class MainActivity extends Activity {
                 + "})()";
         webView.evaluateJavascript(js, raw -> {
             int ok = parseJsInt(raw);
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("image_index", index);
+                meta.put("image_total", images.size());
+                meta.put("result", ok);
+                logAutoStage("lesson_image_append_result", lesson, meta);
+            } catch (Exception ignored) {}
             if (ok > 0) {
                 appendAutoImageAt(images, index + 1, lesson);
             } else {
@@ -1564,6 +1682,12 @@ public class MainActivity extends Activity {
             return;
         }
         status.setText("أجهز " + dates.size() + " تاريخ/تواريخ نشر حسب الخطة...");
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("dates", new JSONArray(dates));
+            meta.put("date_count", dates.size());
+            logAutoStage("schedule_dates_ready", lesson, meta);
+        } catch (Exception ignored) {}
         ensurePublicationRows(lesson, dates, 0);
     }
 
@@ -1581,6 +1705,15 @@ public class MainActivity extends Activity {
                 + "if(best){best.click();return '0';}return '-1';})()";
         webView.evaluateJavascript(js, raw -> {
             int count = parseJsInt(raw);
+            if (attempt == 0 || attempt % 4 == 0 || count >= dates.size() || attempt >= 15) {
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("attempt", attempt);
+                    meta.put("rows_found", count);
+                    meta.put("rows_needed", dates.size());
+                    logAutoStage("publication_rows_probe", lesson, meta);
+                } catch (Exception ignored) {}
+            }
             if (count >= dates.size()) {
                 configureAutoPublicationRow(lesson, dates, 0, 0);
             } else if (count == 0 && attempt < 16) {
@@ -1605,6 +1738,14 @@ public class MainActivity extends Activity {
         status.setText("أحدد تاريخ النشر " + date + " وأسبوع العمل (" + row + "/" + dates.size() + ")...");
         webView.evaluateJavascript(setAutoPublicationRowScript(row, date), raw -> {
             int ok = parseJsInt(raw);
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("row", row);
+                meta.put("date", date);
+                meta.put("retry", retry);
+                meta.put("result", ok);
+                logAutoStage("publication_row_config_result", lesson, meta);
+            } catch (Exception ignored) {}
             if (ok <= 0) {
                 if (retry < 7) {
                     webView.postDelayed(() -> configureAutoPublicationRow(lesson, dates, index, retry + 1), 500);
@@ -1635,6 +1776,16 @@ public class MainActivity extends Activity {
                 + "var n=0;for(var i=0;i<a.length;i++){if(!a[i].checked)a[i].click();if(a[i].checked)n++;}return String(n);})()";
         webView.evaluateJavascript(js, raw -> {
             int selected = parseJsInt(raw);
+            if (attempt == 0 || selected > 0 || attempt >= 8) {
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("row", row);
+                    meta.put("date", dates.get(index));
+                    meta.put("attempt", attempt);
+                    meta.put("selected_timeslots", selected);
+                    logAutoStage("timeslot_selection_result", lesson, meta);
+                } catch (Exception ignored) {}
+            }
             if (selected <= 0) {
                 if (attempt < 9) {
                     status.setText("أنتظر نور ليحمّل حصص " + dates.get(index) + "...");
@@ -1652,6 +1803,12 @@ public class MainActivity extends Activity {
     private void finalizeAutoLessonAndSave(CurriculumLesson lesson) {
         if (!autoActive) return;
         webView.evaluateJavascript(autoFlagsScript(), raw -> {
+            try {
+                JSONObject flags = new JSONObject(decodeJsString(raw));
+                logAutoStage("final_flags_result", lesson, flags);
+            } catch (Exception e) {
+                diagnostics.logException("final_flags_parse_error", e);
+            }
             status.setText("اكتمل " + lesson.displayName() + " — أحفظ في نور...");
             autoAwaitingSave = true;
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
@@ -1663,7 +1820,14 @@ public class MainActivity extends Activity {
                     + "if(!s)return '0';s.click();return '1';})()";
             webView.evaluateJavascript(js, saveRaw -> {
                 int ok = parseJsInt(saveRaw);
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("save_button_clicked", ok > 0);
+                    meta.put("raw_result", saveRaw == null ? "" : saveRaw);
+                    logAutoStage("save_submit_result", lesson, meta);
+                } catch (Exception ignored) {}
                 if (ok <= 0) {
+                    captureNoorDiagnosticSnapshot("save_button_not_found", lesson);
                     autoAwaitingSave = false;
                     stopAutoWithError("لم أجد زر حفظ نموذج التحضير.");
                     return;
@@ -1683,6 +1847,13 @@ public class MainActivity extends Activity {
     private void markAutoLessonSaved() {
         if (!autoActive) return;
         int done = autoCurrentIndex;
+        CurriculumLesson savedLesson = done >= 0 && done < autoLessons.size() ? autoLessons.get(done) : currentLesson;
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("saved_index", done);
+            meta.put("redirect_location", safeNoorLocation(webView == null ? "" : webView.getUrl()));
+            logAutoStage("lesson_save_confirmed", savedLesson, meta);
+        } catch (Exception ignored) {}
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putInt(KEY_AUTO_LAST_INDEX, done)
                 .putInt(KEY_AUTO_PENDING_INDEX, done + 1)
