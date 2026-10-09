@@ -30,7 +30,7 @@ final class DiscoveryDiagnostics {
             try (BufferedWriter out = new BufferedWriter(new OutputStreamWriter(
                     context.openFileOutput(FILE, Context.MODE_PRIVATE), StandardCharsets.UTF_8))) {
                 JSONObject event = base("session_start");
-                event.put("app_version", BuildConfig.VERSION_NAME);
+                event.put("app_version", appVersion());
                 event.put("plan_file", safeName(planName));
                 event.put("material_file", safeName(materialName));
                 out.write(event.toString());
@@ -104,7 +104,7 @@ final class DiscoveryDiagnostics {
             try {
                 JSONObject root = new JSONObject();
                 root.put("report_type", "noor_smart_discovery_diagnostic");
-                root.put("app_version", BuildConfig.VERSION_NAME);
+                root.put("app_version", appVersion());
                 root.put("generated_at", isoNow());
                 root.put("privacy_note",
                         "لا يحتوي التقرير على كلمة مرور نور أو الكوكيز أو نصوص ملفات PDF الكاملة. يسجل نتائج الاكتشاف والتقسيم والأخطاء فقط.");
@@ -123,6 +123,16 @@ final class DiscoveryDiagnostics {
                     && context.getFileStreamPath(FILE).length() > 0;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private String appVersion() {
+        try {
+            android.content.pm.PackageInfo info = context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(), 0);
+            return info.versionName == null ? "" : info.versionName;
+        } catch (Exception e) {
+            return "";
         }
     }
 
