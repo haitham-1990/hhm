@@ -125,7 +125,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - قاعدة التحضير 0.8.0");
+        title.setText("نور الذكي - قاعدة التحضير 0.8.1");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -138,7 +138,7 @@ public class MainActivity extends Activity {
         root.addView(top);
 
         status = new TextView(this);
-        status.setText("1) أرفق الخطة والمادة  2) جهّز قاعدة البيانات مرة واحدة  3) اختر المدى واضغط ابدأ تلقائي.");
+        status.setText("1) أرفق الخطة والمادة  2) جهّز قاعدة البيانات مرة واحدة  3) اختر المدى واضغط ابدأ تلقائي. التقطيع الآن يمنع تداخل صفحات الدروس.");
         status.setTextSize(13);
         status.setTextColor(Color.DKGRAY);
         status.setPadding(dp(12), dp(4), dp(12), dp(6));
@@ -404,6 +404,7 @@ public class MainActivity extends Activity {
                                 this,
                                 subjectMaterialPdfUri,
                                 lesson.code,
+                                title,
                                 ctx.materialPages
                         );
 
