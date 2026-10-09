@@ -2,7 +2,7 @@ name: Build Noor Helper APK
 
 on:
   push:
-    branches: [ "noor-smart-v1.0.9-memory-safe" ]
+    branches: [ "noor-smart-v1.0.10-tree-path" ]
     paths:
       - "noor-helper/**"
       - ".github/workflows/build-noor-helper.yml"
@@ -39,10 +39,10 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging noor-helper/app/build/outputs/apk/debug/app-debug.apk | head -n 8
       - name: Copy APK
-        run: cp noor-helper/app/build/outputs/apk/debug/app-debug.apk NoorSmart-1.0.9-MemorySafe.apk
+        run: cp noor-helper/app/build/outputs/apk/debug/app-debug.apk NoorSmart-1.0.10-TreePath.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NoorSmart-1.0.9-MemorySafe
-          path: NoorSmart-1.0.9-MemorySafe.apk
+          name: NoorSmart-1.0.10-TreePath
+          path: NoorSmart-1.0.10-TreePath.apk
           if-no-files-found: error
