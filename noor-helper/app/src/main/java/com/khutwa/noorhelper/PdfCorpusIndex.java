@@ -297,6 +297,33 @@ final class PdfCorpusIndex {
         return best;
     }
 
+    static String readRangeText(Context context, Uri uri, int startPage, int endPage) throws Exception {
+        if (uri == null || startPage <= 0 || endPage < startPage) return "";
+        try (InputStream in = context.getContentResolver().openInputStream(uri);
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
+            if (doc.getNumberOfPages() <= 0) return "";
+            int start = Math.max(1, startPage);
+            int end = Math.min(doc.getNumberOfPages(), Math.max(start, endPage));
+            PDFTextStripper stripper = new PDFTextStripper();
+            stripper.setSortByPosition(true);
+            StringBuilder out = new StringBuilder();
+            for (int p = start; p <= end; p++) {
+                stripper.setStartPage(p);
+                stripper.setEndPage(p);
+                String page = clean(stripper.getText(doc));
+                if (page.isEmpty()) continue;
+                String block = "\n--- صفحة PDF " + p + " ---\n" + page;
+                if (out.length() + block.length() > MATERIAL_MAX_CHARS) {
+                    int remain = MATERIAL_MAX_CHARS - out.length();
+                    if (remain > 250) out.append(block, 0, Math.min(block.length(), remain));
+                    break;
+                }
+                out.append(block);
+            }
+            return out.toString().trim();
+        }
+    }
+
     String materialRangeText(int startPage, int endPage) {
         if (startPage <= 0) return "";
         int start = Math.max(0, startPage - 1);
