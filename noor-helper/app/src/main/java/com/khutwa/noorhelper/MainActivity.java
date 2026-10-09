@@ -1387,7 +1387,7 @@ public class MainActivity extends Activity {
         return "(function(){"
                 + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
                 + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/\\s+/g,' ').trim());}"
-                + "function compact(s){return norm(s).replace(/[\\s\\-–—_:؛،,.()\\[\\]{}\/\\\\]+/g,'');}"
+                + "function compact(s){return norm(s).replace(/[\\s\\-–—_:؛،,.()\\[\\]{}]+/g,'');}"
                 + "function semKey(s){var n=norm(s).replace(/الفصل/g,'').replace(/الدراسي/g,'').trim();"
                 + "var m={'الاول':'1','الاولى':'1','الثاني':'2','الثانية':'2','الثالث':'3','الثالثة':'3','الرابع':'4','الرابعة':'4','الخامس':'5','الخامسة':'5','السادس':'6','السادسة':'6','السابع':'7','السابعة':'7','الثامن':'8','الثامنة':'8','التاسع':'9','التاسعة':'9','العاشر':'10','العاشرة':'10'};"
                 + "return m[n]||n;}"
