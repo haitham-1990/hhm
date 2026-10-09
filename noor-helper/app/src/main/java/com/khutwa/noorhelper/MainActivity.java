@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - محرك عام آمن 1.0.9");
+        title.setText("نور الذكي - سائق نور 0.6.9 العام 1.0.11");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -859,7 +859,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.9.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.11.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1322,11 +1322,12 @@ public class MainActivity extends Activity {
         if (!autoActive || lesson == null || autoCurrentIndex < 0) return;
 
         if (retry == 0) {
-            status.setText("أقرأ شجرة نور بأسلوب مساعد نور 0.6.9 وأبحث عن «"
-                    + lesson.displayName() + "»...");
+            if (stage == 0) status.setText("أفتح الفصل الدراسي...");
+            else if (stage == 1) status.setText("أفتح الوحدة «" + lesson.unit + "»...");
+            else status.setText("أختار الدرس «" + lesson.displayName() + "»...");
         }
 
-        webView.evaluateJavascript(treeDriver069GenericScript(lesson), raw -> {
+        webView.evaluateJavascript(treeStage069AnchorScript(lesson, stage), raw -> {
             String result;
             try {
                 result = decodeJsString(raw).trim();
@@ -1336,64 +1337,82 @@ public class MainActivity extends Activity {
 
             try {
                 JSONObject meta = new JSONObject();
-                meta.put("driver", "0.6.9-generic");
+                meta.put("driver", "0.6.9-anchor");
                 meta.put("stage", stage);
                 meta.put("retry", retry);
                 meta.put("result", result);
+                meta.put("semester", lesson.semester);
+                meta.put("unit", lesson.unit);
+                meta.put("code", lesson.noorCode());
                 logAutoStage("tree_path_result", lesson, meta);
             } catch (Exception ignored) {}
 
-            if ("clicked".equals(result)) {
+            if ("semester_ready".equals(result)) {
+                webView.postDelayed(() -> autoTreeStage(lesson, 1, 0), 250);
+                return;
+            }
+            if ("unit_ready".equals(result)) {
+                webView.postDelayed(() -> autoTreeStage(lesson, 2, 0), 250);
+                return;
+            }
+            if ("clicked_lesson".equals(result)) {
                 status.setText("تم اختيار " + lesson.displayName()
                         + " — أنتظر نور ليحمّل العنوان والأهداف...");
                 webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1400);
                 return;
             }
 
-            if (retry == 0 || retry % 10 == 0) {
-                captureNoorDiagnosticSnapshot("tree_069_generic_retry_" + retry + "_" + result, lesson);
+            if (retry == 0 || retry % 8 == 0) {
+                captureNoorDiagnosticSnapshot(
+                        "tree_anchor_stage_" + stage + "_" + result + "_retry_" + retry,
+                        lesson);
             }
 
-            if (retry < 80) {
-                long delay = "waiting".equals(result) || "not_found".equals(result) ? 750L : 550L;
+            if (retry < 45) {
+                long delay = ("semester_clicked".equals(result)
+                        || "unit_clicked".equals(result)
+                        || "root_clicked".equals(result)) ? 850L : 650L;
                 webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), delay);
                 return;
             }
 
-            captureNoorDiagnosticSnapshot("tree_069_generic_failed", lesson);
-            stopAutoWithError("لم أجد درس «" + lesson.displayName()
-                    + "» بعد قراءة شجرة نور كاملة.");
+            captureNoorDiagnosticSnapshot("tree_anchor_failed_stage_" + stage, lesson);
+            stopAutoWithError("تعذر فتح مسار الدرس في نور: "
+                    + lesson.semester + " ← " + lesson.unit + " ← " + lesson.displayName());
         });
     }
 
 
-    private String treeDriver069GenericScript(CurriculumLesson lesson) {
+    private String treeStage069AnchorScript(CurriculumLesson lesson, int stage) {
         return "(function(){"
                 + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
-                + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim());}"
-                + "function semesterKey(s){return norm(s).replace(/الفصل/g,'').replace(/الدراسي/g,'').replace(/semester/ig,'').replace(/term/ig,'').replace(/\\s+/g,' ').trim();}"
-                + "function compact(s){return norm(s).replace(/[^\\p{L}\\p{N}]+/gu,'');}"
+                + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/\\s+/g,' ').trim());}"
+                + "function compact(s){return norm(s).replace(/[\\s\\-–—_:؛،,.()\\[\\]{}\/\\\\]+/g,'');}"
+                + "function semKey(s){var n=norm(s).replace(/الفصل/g,'').replace(/الدراسي/g,'').trim();"
+                + "var m={'الاول':'1','الاولى':'1','الثاني':'2','الثانية':'2','الثالث':'3','الثالثة':'3','الرابع':'4','الرابعة':'4','الخامس':'5','الخامسة':'5','السادس':'6','السادسة':'6','السابع':'7','السابعة':'7','الثامن':'8','الثامنة':'8','التاسع':'9','التاسعة':'9','العاشر':'10','العاشرة':'10'};"
+                + "return m[n]||n;}"
                 + "function codeOf(s){var m=norm(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
-                + "function vis(e){try{var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(x){return false;}}"
-                + "function openLi(li){if(!li)return false;var cls=String(li.className||'');if(cls.indexOf('jstree-open')>=0)return false;"
-                + "try{if(window.jQuery){var tr=jQuery(li).closest('.jstree');if(tr.length&&tr.jstree){tr.jstree('open_node',li);return true;}}}catch(e){}"
-                + "var oc=null;for(var i=0;i<li.children.length;i++){var ch=li.children[i];if((ch.className||'').indexOf('jstree-ocl')>=0){oc=ch;break;}}"
-                + "if(oc&&oc.click){oc.click();return true;}var a=li.querySelector(':scope > a');if(a&&a.click){a.click();return true;}return false;}"
+                + "function directAnchor(li){if(!li)return null;for(var i=0;i<li.children.length;i++){var x=li.children[i];if(x.tagName==='A')return x;}return null;}"
+                + "function directChildAnchors(li){var out=[],ul=null;if(!li)return out;for(var i=0;i<li.children.length;i++){if(li.children[i].tagName==='UL'){ul=li.children[i];break;}}if(!ul)return out;"
+                + "for(var j=0;j<ul.children.length;j++){var cli=ul.children[j];if(cli.tagName!=='LI')continue;var a=directAnchor(cli);if(a)out.push(a);}return out;}"
+                + "function visible(e){try{var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(x){return false;}}"
+                + "function words(s){var a=norm(s).split(/[^\\p{L}\\p{N}]+/u),o=[];for(var i=0;i<a.length;i++){var w=a[i];if(w.indexOf('ال')===0&&w.length>4)w=w.substring(2);if(w.length>=2)o.push(w);}return o;}"
+                + "function fuzzy(raw,target){var a=words(raw),b=words(target),hit=0;if(!b.length)return 0;for(var i=0;i<b.length;i++){for(var j=0;j<a.length;j++){if(a[j]===b[i]||a[j].indexOf(b[i])>=0||b[i].indexOf(a[j])>=0){hit++;break;}}}return hit/b.length;}"
                 + "var root=document.getElementById('jstree_node_tree')||document.querySelector('.jstree');if(!root)return 'no_tree';"
-                + "var semester=" + JSONObject.quote(lesson.semester) + ",sk=semesterKey(semester);"
-                + "var code=" + JSONObject.quote(lesson.noorCode()) + ",tc=codeOf(code),title=" + JSONObject.quote(lesson.title) + ",ct=compact(title);"
-                + "var anchors=[].slice.call(root.querySelectorAll('a[id$=_anchor],a')),sem=null;"
-                + "if(sk){for(var i=0;i<anchors.length;i++){if(!vis(anchors[i]))continue;var tx=semesterKey(anchors[i].innerText||anchors[i].textContent||'');if(tx&&(tx===sk||tx.indexOf(sk)>=0||sk.indexOf(tx)>=0)){sem=anchors[i];break;}}}"
-                + "if(!sem){var rootLi=root.querySelector('li.jstree-closed');if(rootLi&&openLi(rootLi))return 'opened';}"
-                + "var scope=root;if(sem&&sem.closest){var sli=sem.closest('li');if(sli){if((String(sli.className||'')).indexOf('jstree-closed')>=0&&openLi(sli))return 'opened';scope=sli;}}"
-                + "var a=[].slice.call(scope.querySelectorAll('a[id$=_anchor],a')),best=null,bestLen=1e9;"
-                + "for(var j=0;j<a.length;j++){if(!vis(a[j]))continue;var raw=a[j].innerText||a[j].textContent||'';var cc=codeOf(raw);"
-                + "if(tc&&cc===tc){var ln=norm(raw).length;if(ln<bestLen){best=a[j];bestLen=ln;}}}"
-                + "if(!best&&ct){for(var k=0;k<a.length;k++){if(!vis(a[k]))continue;var cr=compact(a[k].innerText||a[k].textContent||'');if(cr&&cr.indexOf(ct)>=0&&cr.length<bestLen){best=a[k];bestLen=cr.length;}}}"
-                + "if(best){best.click();return 'clicked';}"
-                + "var closed=[].slice.call(scope.querySelectorAll('li.jstree-closed'));for(var z=0;z<closed.length;z++){if(openLi(closed[z]))return 'opened';}"
-                + "if(scope.querySelector('li.jstree-loading'))return 'waiting';"
-                + "return 'not_found';"
+                + "var all=[].slice.call(root.querySelectorAll('a[id$=_anchor],a')),sem=null,sk=semKey(" + JSONObject.quote(lesson.semester) + ");"
+                + "for(var i=0;i<all.length;i++){if(!visible(all[i]))continue;var t=semKey(all[i].innerText||all[i].textContent||'');if(t&&sk&&(t===sk||t.indexOf(sk)>=0||sk.indexOf(t)>=0)){sem=all[i];break;}}"
+                + "if(" + stage + "===0){"
+                + "if(!sem){var ra=all.length?all[0]:null;if(ra&&visible(ra)){ra.click();return 'root_clicked';}return 'semester_waiting';}"
+                + "var sli=sem.closest?sem.closest('li'):null;var kids=directChildAnchors(sli);if(kids.length>0)return 'semester_ready';sem.click();return 'semester_clicked';}"
+                + "if(!sem)return 'semester_waiting';var semLi=sem.closest?sem.closest('li'):null;if(!semLi)return 'semester_waiting';"
+                + "var units=directChildAnchors(semLi),unit=null,unitTarget=" + JSONObject.quote(lesson.unit) + ",best=-1;"
+                + "for(var u=0;u<units.length;u++){var sc=fuzzy(units[u].innerText||units[u].textContent||'',unitTarget);if(sc>best){best=sc;unit=units[u];}}"
+                + "var uno='';var tc=codeOf(" + JSONObject.quote(lesson.noorCode()) + ");if(tc)uno=tc.split('-')[0];"
+                + "if((!unit||best<0.45)&&uno){var ix=parseInt(uno,10)-1;if(ix>=0&&ix<units.length)unit=units[ix];}"
+                + "if(" + stage + "===1){if(!unit)return 'unit_waiting';var uli=unit.closest?unit.closest('li'):null;var lessons=directChildAnchors(uli);if(lessons.length>0)return 'unit_ready';unit.click();return 'unit_clicked';}"
+                + "if(!unit)return 'unit_waiting';var unitLi=unit.closest?unit.closest('li'):null;if(!unitLi)return 'unit_waiting';var ls=directChildAnchors(unitLi),target=null,title=" + JSONObject.quote(lesson.title) + ",ct=compact(title),bestL=-1;"
+                + "for(var k=0;k<ls.length;k++){var raw=ls[k].innerText||ls[k].textContent||'',cc=codeOf(raw);if(tc&&cc===tc){target=ls[k];bestL=10;break;}var fs=fuzzy(raw,title);if(compact(raw).indexOf(ct)>=0)fs+=1;if(fs>bestL){bestL=fs;target=ls[k];}}"
+                + "if(target&&bestL>=0.5){target.click();return 'clicked_lesson';}if(!ls.length){unit.click();return 'unit_clicked';}return 'lesson_waiting';"
                 + "})()";
     }
 
