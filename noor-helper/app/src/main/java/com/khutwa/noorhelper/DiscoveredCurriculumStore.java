@@ -12,11 +12,11 @@ import java.util.List;
 
 final class DiscoveredCurriculumStore {
     static final class Entry {
-        final Grade9Curriculum.Lesson lesson;
+        final CurriculumLesson lesson;
         final int materialStartPage;
         final int materialEndPage;
 
-        Entry(Grade9Curriculum.Lesson lesson, int materialStartPage, int materialEndPage) {
+        Entry(CurriculumLesson lesson, int materialStartPage, int materialEndPage) {
             this.lesson = lesson;
             this.materialStartPage = materialStartPage;
             this.materialEndPage = materialEndPage;
@@ -59,15 +59,14 @@ final class DiscoveredCurriculumStore {
         if (entries != null) {
             for (Entry e : entries) {
                 JSONObject o = new JSONObject();
-                Grade9Curriculum.Lesson l = e.lesson;
+                CurriculumLesson l = e.lesson;
                 o.put("code", l.code);
                 o.put("title", l.title);
                 o.put("unit", l.unit);
+                o.put("semester", l.semester);
                 o.put("periods", l.periods);
                 o.put("start", l.periodStart);
                 o.put("end", l.periodEnd);
-                o.put("weekStart", l.weekStart);
-                o.put("weekEnd", l.weekEnd);
                 o.put("level", l.level);
                 o.put("objectives", strings(l.objectives));
                 o.put("strategies", strings(l.strategies));
@@ -88,15 +87,14 @@ final class DiscoveredCurriculumStore {
             JSONArray a = new JSONArray(raw);
             for (int i = 0; i < a.length(); i++) {
                 JSONObject o = a.getJSONObject(i);
-                Grade9Curriculum.Lesson l = new Grade9Curriculum.Lesson(
+                CurriculumLesson l = new CurriculumLesson(
                         o.optString("code", ""),
                         o.optString("title", ""),
                         o.optString("unit", ""),
+                        o.optString("semester", ""),
                         Math.max(1, o.optInt("periods", 1)),
                         o.optString("start", ""),
                         o.optString("end", ""),
-                        o.optInt("weekStart", 0),
-                        o.optInt("weekEnd", 0),
                         o.optString("level", "الفهم"),
                         stringList(o.optJSONArray("objectives")),
                         stringList(o.optJSONArray("strategies")),
