@@ -7,11 +7,11 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.khutwa.noorsmartdb081'
+        applicationId 'com.khutwa.noorsmartdiscovery090'
         minSdk 23
         targetSdk 34
-        versionCode 23
-        versionName '0.8.1'
+        versionCode 24
+        versionName '0.9.0'
     }
 
     signingConfigs {
