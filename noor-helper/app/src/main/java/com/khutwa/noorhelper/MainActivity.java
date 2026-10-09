@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - اكتشاف حر 1.0.2");
+        title.setText("نور الذكي - اكتشاف حر 1.0.3");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
