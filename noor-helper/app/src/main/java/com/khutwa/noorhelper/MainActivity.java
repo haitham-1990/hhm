@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - سائق نور 0.6.9 العام 1.0.11");
+        title.setText("نور الذكي - جدولة مرنة 1.0.12");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -859,7 +859,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.11.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.12.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1947,7 +1947,12 @@ public class MainActivity extends Activity {
 
     private void selectAutoTimeslots(CurriculumLesson lesson, List<String> dates, int index, int attempt) {
         if (!autoActive) return;
+        if (index < 0 || index >= dates.size()) {
+            finalizeAutoLessonAndSave(lesson);
+            return;
+        }
         int row = index + 1;
+        String activeDate = dates.get(index);
         String js = "(function(){var target='data[plane][date" + row + "][timeslot][]';"
                 + "var a=[].slice.call(document.querySelectorAll('input[type=checkbox]')).filter(function(e){var r=e.getBoundingClientRect();return e.name===target&&r.width>0&&r.height>0;});"
                 + "var n=0;for(var i=0;i<a.length;i++){if(!a[i].checked)a[i].click();if(a[i].checked)n++;}return String(n);})()";
@@ -1957,7 +1962,7 @@ public class MainActivity extends Activity {
                 try {
                     JSONObject meta = new JSONObject();
                     meta.put("row", row);
-                    meta.put("date", dates.get(index));
+                    meta.put("date", activeDate);
                     meta.put("attempt", attempt);
                     meta.put("selected_timeslots", selected);
                     logAutoStage("timeslot_selection_result", lesson, meta);
@@ -1965,15 +1970,100 @@ public class MainActivity extends Activity {
             }
             if (selected <= 0) {
                 if (attempt < 9) {
-                    status.setText("أنتظر نور ليحمّل حصص " + dates.get(index) + "...");
+                    status.setText("أنتظر نور ليحمّل حصص " + activeDate + "...");
                     webView.postDelayed(() -> selectAutoTimeslots(lesson, dates, index, attempt + 1), 700);
                 } else {
-                    stopAutoWithError("لم تظهر حصص المادة للتاريخ " + dates.get(index) + ".");
+                    recoverFromUnavailableScheduleDate(lesson, dates, index, activeDate);
                 }
                 return;
             }
-            status.setText("تم تحديد " + selected + " حصة في " + dates.get(index) + ".");
+            status.setText("تم تحديد " + selected + " حصة في " + activeDate + ".");
             webView.postDelayed(() -> configureAutoPublicationRow(lesson, dates, index + 1, 0), 350);
+        });
+    }
+
+    private void recoverFromUnavailableScheduleDate(CurriculumLesson lesson, List<String> dates,
+                                                     int index, String failedDate) {
+        if (!autoActive) return;
+
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("failed_date", failedDate);
+            meta.put("row", index + 1);
+            meta.put("action", "skip_and_try_next");
+            logAutoStage("schedule_date_skipped_no_timeslots", lesson, meta);
+        } catch (Exception ignored) {}
+
+        if (index >= 0 && index < dates.size() && failedDate.equals(dates.get(index))) {
+            dates.remove(index);
+        }
+
+        // If the planner already had a later date queued, reuse the same publication row for it.
+        if (index < dates.size()) {
+            String next = dates.get(index);
+            status.setText("لا توجد حصص في " + failedDate + " — أجرب " + next + " تلقائيًا...");
+            webView.postDelayed(() -> configureAutoPublicationRow(lesson, dates, index, 0), 300);
+            return;
+        }
+
+        // Otherwise search the remaining working days inside the lesson period.
+        List<String> candidates = GenericSchedulePlanner.candidateDates(lesson);
+        String replacement = "";
+        boolean passedFailed = false;
+        for (String candidate : candidates) {
+            if (candidate.equals(failedDate)) {
+                passedFailed = true;
+                continue;
+            }
+            if (!passedFailed && candidate.compareTo(failedDate) <= 0) continue;
+            if (!dates.contains(candidate)) {
+                replacement = candidate;
+                break;
+            }
+        }
+
+        if (!replacement.isEmpty()) {
+            dates.add(replacement);
+            String next = replacement;
+            status.setText("لا توجد حصص في " + failedDate + " — أجرب " + next + " تلقائيًا...");
+            webView.postDelayed(() -> configureAutoPublicationRow(lesson, dates, index, 0), 300);
+            return;
+        }
+
+        // No further date exists. If earlier publication rows succeeded, clear this unused row
+        // and save what Noor actually made available instead of aborting the whole run.
+        if (index > 0) {
+            clearUnusedPublicationRow(index + 1, () -> {
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("failed_date", failedDate);
+                    meta.put("successful_rows", index);
+                    meta.put("action", "save_with_available_rows");
+                    logAutoStage("schedule_recovered_with_available_rows", lesson, meta);
+                } catch (Exception ignored) {}
+                status.setText("لا توجد حصص إضافية بعد " + failedDate
+                        + " — أحفظ التواريخ المتاحة وأكمل.");
+                finalizeAutoLessonAndSave(lesson);
+            });
+            return;
+        }
+
+        stopAutoWithError("لم تظهر أي حصة متاحة لدرس «" + lesson.displayName()
+                + "» ضمن الفترة " + lesson.periodStart + " إلى " + lesson.periodEnd + ".");
+    }
+
+    private void clearUnusedPublicationRow(int row, Runnable done) {
+        String js = "(function(){"
+                + "var d=document.getElementById('publishdate-" + row + "');"
+                + "var w=document.getElementById('week_id-" + row + "');"
+                + "if(d){d.value='';try{d.dispatchEvent(new Event('change',{bubbles:true}));}catch(e){}}"
+                + "if(w){w.selectedIndex=0;try{w.dispatchEvent(new Event('change',{bubbles:true}));}catch(e){}}"
+                + "var target='data[plane][date" + row + "][timeslot][]';"
+                + "var a=[].slice.call(document.querySelectorAll('input[type=checkbox]')).filter(function(e){return e.name===target;});"
+                + "for(var i=0;i<a.length;i++){if(a[i].checked)a[i].click();}"
+                + "return '1';})()";
+        webView.evaluateJavascript(js, raw -> {
+            if (done != null) done.run();
         });
     }
 
