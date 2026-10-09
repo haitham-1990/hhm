@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="نور الذكي - قاعدة التحضير"
+        android:label="نور الذكي - قاعدة التحضير 0.8.1"
         android:usesCleartextTraffic="false"
         android:theme="@style/AppTheme">
         <activity
