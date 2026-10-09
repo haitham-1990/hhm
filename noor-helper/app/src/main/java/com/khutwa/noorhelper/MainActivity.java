@@ -48,6 +48,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
     private static final String NOOR_URL = "https://lms.moe.gov.om/teacher#networkfirst";
@@ -72,6 +74,7 @@ public class MainActivity extends Activity {
     private Grade9Curriculum.Lesson currentLesson;
     private AiPreparationClient aiClient;
     private GeneratedPreparationStore generatedStore;
+    private DiscoveredCurriculumStore curriculumStore;
     private GeneratedPreparationStore.Entry currentDbEntry;
     private TextView databaseStatus;
     private volatile boolean databaseBuilding = false;
@@ -89,7 +92,7 @@ public class MainActivity extends Activity {
     private int autoCurrentIndex = -1;
     private int autoTargetIndex = -1;
     private int autoPreparingIndex = -1;
-    private final List<Grade9Curriculum.Lesson> autoLessons = Grade9Curriculum.allLessons();
+    private final List<Grade9Curriculum.Lesson> autoLessons = new ArrayList<>();
 
     private Uri exercisePdfUri;
     private Uri studyPlanPdfUri;
@@ -104,7 +107,9 @@ public class MainActivity extends Activity {
         PDFBoxResourceLoader.init(getApplicationContext());
         aiClient = new AiPreparationClient(this);
         generatedStore = new GeneratedPreparationStore(this);
+        curriculumStore = new DiscoveredCurriculumStore(this);
         learningRecorder = new NoorLearningRecorder(this);
+        loadDiscoveredLessons();
         buildUi();
         loadSavedPdf();
         loadSavedSourcePdfs();
@@ -125,7 +130,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - قاعدة التحضير 0.8.1");
+        title.setText("نور الذكي - اكتشاف المنهج 0.9.0");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -138,7 +143,7 @@ public class MainActivity extends Activity {
         root.addView(top);
 
         status = new TextView(this);
-        status.setText("1) أرفق الخطة والمادة  2) جهّز قاعدة البيانات مرة واحدة  3) اختر المدى واضغط ابدأ تلقائي. التقطيع الآن يمنع تداخل صفحات الدروس.");
+        status.setText("أرفق الخطة والمادة ثم اضغط تجهيز قاعدة البيانات. نور الذكي سيكتشف الوحدات والدروس ويقسم المادة ويخزنها بنفسه.");
         status.setTextSize(13);
         status.setTextColor(Color.DKGRAY);
         status.setPadding(dp(12), dp(4), dp(12), dp(6));
@@ -312,6 +317,31 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void loadDiscoveredLessons() {
+        autoLessons.clear();
+        if (curriculumStore == null) return;
+        for (DiscoveredCurriculumStore.Entry e : curriculumStore.load()) {
+            autoLessons.add(e.lesson);
+        }
+    }
+
+    private void refreshLessonSpinners() {
+        if (autoStartSpinner == null || autoTargetSpinner == null) return;
+        List<String> names = new ArrayList<>();
+        for (Grade9Curriculum.Lesson l : autoLessons) names.add(l.displayName());
+
+        ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, names);
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        autoStartSpinner.setAdapter(a);
+
+        ArrayAdapter<String> b = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, names);
+        b.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        autoTargetSpinner.setAdapter(b);
+
+        if (!autoLessons.isEmpty()) autoTargetSpinner.setSelection(autoLessons.size() - 1);
+        updateDatabaseStatus();
+    }
+
     private int generatedReadyCount() {
         int n = 0;
         for (Grade9Curriculum.Lesson lesson : autoLessons) {
@@ -327,7 +357,8 @@ public class MainActivity extends Activity {
         String material = subjectMaterialPdfUri == null ? "غير مرفقة" : pdfName(subjectMaterialPdfUri);
         databaseStatus.setText("الخطة: " + plan
                 + "\nالمادة: " + material
-                + "\nقاعدة البيانات: " + ready + " / " + autoLessons.size() + " درس");
+                + "\nالدروس المكتشفة: " + autoLessons.size()
+                + "\nالتحاضير الجاهزة: " + ready + " / " + autoLessons.size());
     }
 
     private void prepareGeneratedDatabase() {
@@ -338,20 +369,24 @@ public class MainActivity extends Activity {
         if (studyPlanPdfUri == null || subjectMaterialPdfUri == null) {
             new AlertDialog.Builder(this)
                     .setTitle("أرفق الملفين أولاً")
-                    .setMessage("اختر ملف الخطة الدراسية PDF وملف المادة العلمية/التمارين PDF، ثم اضغط تجهيز قاعدة البيانات.")
+                    .setMessage("اختر ملف الخطة الدراسية PDF وملف المادة العلمية/التمارين PDF.")
                     .setPositiveButton("حسنًا", null)
                     .show();
             return;
         }
 
-        boolean sourceChanged = generatedStore.bindSources(
+        boolean changedGenerated = generatedStore.bindSources(
                 studyPlanPdfUri.toString(), subjectMaterialPdfUri.toString());
-        if (sourceChanged) {
+        boolean changedCatalog = curriculumStore.bindSources(
+                studyPlanPdfUri.toString(), subjectMaterialPdfUri.toString());
+        if (changedGenerated || changedCatalog) {
             LessonImageCache.clearAll(this);
+            autoLessons.clear();
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putInt(KEY_AUTO_LAST_INDEX, -1)
                     .putInt(KEY_AUTO_PENDING_INDEX, 0)
                     .apply();
+            refreshLessonSpinners();
         }
 
         databaseBuilding = true;
@@ -362,64 +397,98 @@ public class MainActivity extends Activity {
             else startService(keepAlive);
         } catch (Exception ignored) {}
 
-        status.setText("أقرأ الخطة والمادة مرة واحدة وأبني فهرس المنهج...");
+        status.setText("أقرأ الملفين وأكتشف المنهج تلقائيًا...");
         updateDatabaseStatus();
 
         worker.execute(() -> {
             List<String> failed = new ArrayList<>();
             try {
                 PdfCorpusIndex corpus = PdfCorpusIndex.build(this, studyPlanPdfUri, subjectMaterialPdfUri);
-                int total = autoLessons.size();
 
+                List<DiscoveredCurriculumStore.Entry> catalog = curriculumStore.load();
+                if (catalog.isEmpty()) {
+                    runOnUiThread(() -> status.setText("الذكاء يحدد الصف والوحدات والدروس وترتيبها من الملفين..."));
+                    catalog = aiClient.discoverCurriculum(
+                            corpus.planDiscoveryContext(),
+                            corpus.materialDiscoveryOutline()
+                    );
+                    curriculumStore.save(catalog);
+                }
+
+                autoLessons.clear();
+                for (DiscoveredCurriculumStore.Entry e : catalog) autoLessons.add(e.lesson);
+                runOnUiThread(() -> {
+                    refreshLessonSpinners();
+                    status.setText("تم اكتشاف " + autoLessons.size() + " درسًا. أبدأ تقسيم المادة وبناء التحاضير...");
+                });
+
+                int total = catalog.size();
                 for (int i = 0; i < total; i++) {
-                    Grade9Curriculum.Lesson lesson = autoLessons.get(i);
+                    DiscoveredCurriculumStore.Entry entry = catalog.get(i);
+                    Grade9Curriculum.Lesson lesson = entry.lesson;
+                    DiscoveredCurriculumStore.Entry next = i + 1 < total ? catalog.get(i + 1) : null;
+
                     if (generatedStore.has(lesson.code) && LessonImageCache.has(this, lesson.code)) {
                         final int ready = generatedReadyCount();
                         runOnUiThread(() -> {
-                            status.setText("قاعدة البيانات: " + ready + " / " + total
-                                    + " — أتجاوز الدروس المحفوظة...");
+                            status.setText("قاعدة البيانات " + ready + " / " + total + " — أتجاوز الدرس المحفوظ...");
                             updateDatabaseStatus();
                         });
                         continue;
                     }
 
                     final int index = i;
-                    runOnUiThread(() -> status.setText("أجهز قاعدة الدرس " + (index + 1)
-                            + " من " + total + ": " + lesson.displayName()));
+                    runOnUiThread(() -> status.setText("أجهز الدرس " + (index + 1) + " من " + total
+                            + ": " + lesson.displayName()));
 
                     try {
                         String title = lesson.noorCode() + " " + lesson.title;
-                        PdfLessonContext.Result ctx = corpus.forLesson(title);
-                        if (ctx.planContext.trim().isEmpty()) {
-                            throw new IllegalStateException("لم تتم مطابقة الدرس داخل الخطة.");
+                        String materialContext = corpus.materialRangeText(
+                                entry.materialStartPage, entry.materialEndPage);
+                        if (materialContext.trim().isEmpty()) {
+                            throw new IllegalStateException("لم أجد محتوى صفحات الدرس التي اكتشفها الذكاء.");
                         }
-                        if (ctx.materialContext.trim().isEmpty()) {
-                            throw new IllegalStateException("لم تتم مطابقة الدرس داخل المادة العلمية.");
+
+                        StringBuilder planContext = new StringBuilder();
+                        planContext.append(lesson.unit).append("\n")
+                                .append("الدرس: ").append(title).append("\n")
+                                .append("عدد الحصص: ").append(lesson.periods).append("\n")
+                                .append("الفترة: ").append(lesson.periodStart).append(" إلى ").append(lesson.periodEnd);
+                        for (String objective : lesson.objectives) {
+                            planContext.append("\nمخرج: ").append(objective);
                         }
 
                         AiPreparationClient.SourceResult generated = aiClient.generateFromSources(
-                                title, new ArrayList<>(), ctx.planContext, ctx.materialContext);
+                                title, lesson.objectives, planContext.toString(), materialContext);
 
+                        String nextTitle = next == null ? "" : next.lesson.noorCode() + " " + next.lesson.title;
+                        int nextStart = next == null ? 0 : next.materialStartPage;
                         LessonImageCache.build(
                                 this,
                                 subjectMaterialPdfUri,
                                 lesson.code,
                                 title,
-                                ctx.materialPages
+                                nextTitle,
+                                entry.materialStartPage,
+                                entry.materialEndPage,
+                                nextStart
                         );
+
+                        List<Integer> materialPages = new ArrayList<>();
+                        for (int pg = entry.materialStartPage;
+                             pg > 0 && pg <= entry.materialEndPage; pg++) materialPages.add(pg);
 
                         generatedStore.save(
                                 lesson.code,
                                 title,
                                 generated,
-                                ctx.materialPages,
-                                ctx.summary()
+                                materialPages,
+                                "تقسيم تلقائي: ص" + entry.materialStartPage + "–" + entry.materialEndPage
                         );
 
                         final int ready = generatedReadyCount();
                         runOnUiThread(() -> {
-                            status.setText("تم إنشاء " + lesson.displayName()
-                                    + " — قاعدة البيانات " + ready + " / " + total);
+                            status.setText("تم " + lesson.displayName() + " — القاعدة " + ready + " / " + total);
                             updateDatabaseStatus();
                         });
                     } catch (Exception lessonError) {
@@ -427,36 +496,39 @@ public class MainActivity extends Activity {
                         final String shortError = lessonError.getMessage() == null
                                 ? "خطأ غير معروف" : lessonError.getMessage();
                         runOnUiThread(() -> status.setText("تعذر " + lesson.displayName()
-                                + " — سأكمل بقية الدروس. " + shortError));
+                                + " — سأكمل البقية. " + shortError));
                     }
                 }
             } catch (Exception e) {
-                failed.add("فهرسة الملفين: " + e.getMessage());
+                failed.add("اكتشاف/فهرسة المنهج: " + e.getMessage());
             }
 
             runOnUiThread(() -> {
                 databaseBuilding = false;
                 getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 try { stopService(new Intent(this, AutoRunService.class)); } catch (Exception ignored) {}
-                updateDatabaseStatus();
-
+                loadDiscoveredLessons();
+                refreshLessonSpinners();
                 int ready = generatedReadyCount();
-                if (failed.isEmpty() && ready == autoLessons.size()) {
-                    status.setText("قاعدة البيانات جاهزة بالكامل: " + ready + " درس. الآن اختر المدى واضغط «ابدأ تلقائي».");
+
+                if (failed.isEmpty() && !autoLessons.isEmpty() && ready == autoLessons.size()) {
+                    status.setText("القاعدة جاهزة: اكتشف " + autoLessons.size()
+                            + " درسًا وجهزها كلها. اختر البداية والنهاية ثم ابدأ تلقائي.");
                     new AlertDialog.Builder(this)
-                            .setTitle("اكتملت قاعدة البيانات")
-                            .setMessage("تم تجهيز " + ready + " درسًا من الخطة والمادة العلمية.\n\nمن الآن لن يستخدم التشغيل التلقائي الذكاء الاصطناعي لكل درس؛ سيأخذ التحاضير من القاعدة المحفوظة.")
+                            .setTitle("اكتمل اكتشاف المنهج")
+                            .setMessage("نور الذكي اكتشف " + autoLessons.size()
+                                    + " درسًا من الملفين، قسم المادة، وجهز التحاضير والصور وخزنها محليًا.")
                             .setPositiveButton("ممتاز", null)
                             .show();
                 } else {
                     StringBuilder msg = new StringBuilder();
-                    msg.append("تم تجهيز ").append(ready).append(" من ").append(autoLessons.size()).append(" درس.");
+                    msg.append("الدروس المكتشفة: ").append(autoLessons.size())
+                            .append("\nالجاهز: ").append(ready);
                     if (!failed.isEmpty()) {
-                        msg.append("\n\nالدروس التي تحتاج إعادة المحاولة:");
+                        msg.append("\n\nملاحظات:");
                         for (int i = 0; i < Math.min(8, failed.size()); i++) msg.append("\n• ").append(failed.get(i));
-                        if (failed.size() > 8) msg.append("\n• ...");
                     }
-                    msg.append("\n\nاضغط «تجهيز قاعدة البيانات» مرة أخرى؛ سيحتفظ بالناجح ويعيد محاولة الناقص فقط.");
+                    msg.append("\n\nاضغط تجهيز قاعدة البيانات مرة أخرى لإعادة محاولة الناقص فقط.");
                     new AlertDialog.Builder(this)
                             .setTitle("اكتمل التجهيز مع ملاحظات")
                             .setMessage(msg.toString())
@@ -466,6 +538,7 @@ public class MainActivity extends Activity {
             });
         });
     }
+
 
     private void pickSourcePdf(int requestCode) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -531,9 +604,15 @@ public class MainActivity extends Activity {
             currentSourceResult = null;
             currentDbEntry = null;
             if (studyPlanPdfUri != null && subjectMaterialPdfUri != null) {
-                boolean changed = generatedStore.bindSources(
+                boolean changedGenerated = generatedStore.bindSources(
                         studyPlanPdfUri.toString(), subjectMaterialPdfUri.toString());
-                if (changed) LessonImageCache.clearAll(this);
+                boolean changedCatalog = curriculumStore.bindSources(
+                        studyPlanPdfUri.toString(), subjectMaterialPdfUri.toString());
+                if (changedGenerated || changedCatalog) {
+                    LessonImageCache.clearAll(this);
+                    autoLessons.clear();
+                    refreshLessonSpinners();
+                }
             }
             updateDatabaseStatus();
             return;
@@ -874,7 +953,7 @@ public class MainActivity extends Activity {
         String child;
         boolean exactParent = false;
         if (stage == 0) {
-            parent = "عرض الشجرة - الرياضيات";
+            parent = "عرض الشجرة -";
             child = "الأول";
         } else if (stage == 1) {
             parent = "الأول";
@@ -929,6 +1008,39 @@ public class MainActivity extends Activity {
     }
 
 
+    private boolean lessonMatchesNoorTitle(String foundTitle, Grade9Curriculum.Lesson lesson) {
+        if (foundTitle == null || lesson == null) return false;
+        String normalized = latinDigits(foundTitle);
+        Matcher m = Pattern.compile("([0-9]+)\\s*[-–]\\s*([0-9]+)").matcher(normalized);
+        if (m.find()) {
+            String code = m.group(1) + "-" + m.group(2);
+            if (code.equals(lesson.code)) return true;
+        }
+        String a = normalizeArabicTitle(foundTitle);
+        String b = normalizeArabicTitle(lesson.title);
+        return !b.isEmpty() && (a.contains(b) || b.contains(a));
+    }
+
+    private static String latinDigits(String s) {
+        String ar = "٠١٢٣٤٥٦٧٨٩";
+        StringBuilder out = new StringBuilder();
+        if (s == null) return "";
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            int k = ar.indexOf(ch);
+            out.append(k >= 0 ? (char)('0' + k) : ch);
+        }
+        return out.toString();
+    }
+
+    private static String normalizeArabicTitle(String s) {
+        if (s == null) return "";
+        return latinDigits(s)
+                .replaceAll("[\\u064B-\\u065F\\u0670\\u0640]", "")
+                .replace('أ','ا').replace('إ','ا').replace('آ','ا').replace('ى','ي')
+                .replaceAll("[^\\p{L}\\p{N}]+", "");
+    }
+
     private void waitForAutoLessonForm(Grade9Curriculum.Lesson lesson, int attempt) {
         if (!autoActive) return;
         String js = "(function(){var t=document.getElementById('PreparationTitle');"
@@ -943,8 +1055,7 @@ public class MainActivity extends Activity {
                 JSONObject o = new JSONObject(decodeJsString(raw));
                 foundTitle = o.optString("title", "");
                 criteria = o.optInt("criteria", 0);
-                Grade9Curriculum.Lesson found = Grade9Curriculum.find(foundTitle);
-                ready = found != null && found.code.equals(lesson.code) && criteria > 0;
+                ready = lessonMatchesNoorTitle(foundTitle, lesson) && criteria > 0;
             } catch (Exception ignored) {}
 
             if (!ready) {
@@ -1094,7 +1205,7 @@ public class MainActivity extends Activity {
     }
 
     private void applyAutoSchedule(Grade9Curriculum.Lesson lesson) {
-        List<String> dates = Grade9SchedulePlanner.datesFor(lesson);
+        List<String> dates = Grade9SchedulePlanner.datesFor(lesson, autoLessons);
         if (dates.isEmpty()) {
             stopAutoWithError("لم أستطع حساب تواريخ النشر من الخطة.");
             return;
