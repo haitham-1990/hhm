@@ -2,7 +2,7 @@ name: Build Noor Helper APK
 
 on:
   push:
-    branches: [ "noor-helper-v0.6.5-selects" ]
+    branches: [ "noor-helper-v0.6.6-unit-transition" ]
     paths:
       - "noor-helper/**"
       - ".github/workflows/build-noor-helper.yml"
@@ -39,10 +39,10 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging noor-helper/app/build/outputs/apk/debug/app-debug.apk | head -n 8
       - name: Copy APK
-        run: cp noor-helper/app/build/outputs/apk/debug/app-debug.apk NoorHelper-0.6.5-selects.apk
+        run: cp noor-helper/app/build/outputs/apk/debug/app-debug.apk NoorHelper-0.6.6-unit-transition.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NoorHelper-0.6.5-selects
-          path: NoorHelper-0.6.5-selects.apk
+          name: NoorHelper-0.6.6-unit-transition
+          path: NoorHelper-0.6.6-unit-transition.apk
           if-no-files-found: error
