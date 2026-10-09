@@ -10,8 +10,8 @@ android {
         applicationId 'com.khutwa.noorsmartfree114'
         minSdk 23
         targetSdk 34
-        versionCode 42
-        versionName '1.0.15'
+        versionCode 43
+        versionName '1.0.16'
     }
 
     signingConfigs {
