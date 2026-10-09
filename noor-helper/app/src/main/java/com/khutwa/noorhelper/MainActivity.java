@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - جدولة مرنة 1.0.12");
+        title.setText("نور الذكي - مواد طويلة 1.0.13");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -859,7 +859,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.12.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.13.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1775,64 +1775,76 @@ public class MainActivity extends Activity {
 
     private void attachAutoPdf(CurriculumLesson lesson) {
         if (!autoActive) return;
+        int total = LessonImageCache.imageCount(this, lesson.code);
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("cached_images", total);
+            logAutoStage("lesson_images_loaded", lesson, meta);
+        } catch (Exception ignored) {}
+
+        if (total <= 0) {
+            stopAutoWithError("صور الدرس غير موجودة في قاعدة البيانات.");
+            return;
+        }
+
         status.setText("أضيف صور " + lesson.displayName() + " من قاعدة البيانات...");
-        worker.execute(() -> {
-            try {
-                List<Bitmap> bitmaps = LessonImageCache.load(this, lesson.code);
-                try {
-                    JSONObject meta = new JSONObject();
-                    meta.put("cached_images", bitmaps.size());
-                    logAutoStage("lesson_images_loaded", lesson, meta);
-                } catch (Exception ignored) {}
-                if (bitmaps.isEmpty()) {
-                    throw new IllegalStateException("صور الدرس غير موجودة في قاعدة البيانات.");
-                }
-                List<String> base64Images = new ArrayList<>();
-                for (Bitmap bitmap : bitmaps) {
-                    ByteArrayOutputStream out = new ByteArrayOutputStream();
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 68, out);
-                    base64Images.add(Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP));
-                    if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
-                }
-                runOnUiThread(() -> {
-                    status.setText("صور الدرس جاهزة من القاعدة — أضيفها للتحضير...");
-                    appendAutoImageAt(base64Images, 0, lesson);
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> stopAutoWithError("تعذر تحميل صور الدرس من قاعدة البيانات: " + e.getMessage()));
-            }
-        });
+        appendAutoImageAt(lesson, 0, total);
     }
 
 
-    private void appendAutoImageAt(List<String> images, int index, CurriculumLesson lesson) {
+    private void appendAutoImageAt(CurriculumLesson lesson, int index, int total) {
         if (!autoActive) return;
-        if (index >= images.size()) {
+        if (index >= total) {
             applyAutoSchedule(lesson);
             return;
         }
-        String html = (index == 0 ? "<hr><p><strong>تمارين الدرس من المادة العلمية المرفقة</strong></p>" : "")
-                + "<p><img src='data:image/jpeg;base64," + images.get(index)
-                + "' style='max-width:100%;height:auto;display:block;margin:12px auto;' /></p>";
-        String js = "(function(){" + baseHelpers()
-                + "return appendToEditor('إجراءات سير الدرس'," + JSONObject.quote(html) + ");"
-                + "})()";
-        webView.evaluateJavascript(js, raw -> {
-            int ok = parseJsInt(raw);
+
+        worker.execute(() -> {
+            Bitmap bitmap = null;
             try {
-                JSONObject meta = new JSONObject();
-                meta.put("image_index", index);
-                meta.put("image_total", images.size());
-                meta.put("result", ok);
-                logAutoStage("lesson_image_append_result", lesson, meta);
-            } catch (Exception ignored) {}
-            if (ok > 0) {
-                appendAutoImageAt(images, index + 1, lesson);
-            } else {
-                stopAutoWithError("لم أستطع إضافة صور PDF داخل «إجراءات سير الدرس».");
+                bitmap = LessonImageCache.loadAt(this, lesson.code, index);
+                if (bitmap == null) throw new IllegalStateException("تعذر قراءة صورة الدرس رقم " + (index + 1));
+
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 68, out);
+                String base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+
+                runOnUiThread(() -> {
+                    if (!autoActive) return;
+                    status.setText("أضيف صورة " + (index + 1) + " من " + total + "...");
+                    String html = (index == 0 ? "<hr><p><strong>تمارين الدرس من المادة العلمية المرفقة</strong></p>" : "")
+                            + "<p><img src='data:image/jpeg;base64," + base64
+                            + "' style='max-width:100%;height:auto;display:block;margin:12px auto;' /></p>";
+                    String js = "(function(){" + baseHelpers()
+                            + "return appendToEditor('إجراءات سير الدرس'," + JSONObject.quote(html) + ");"
+                            + "})()";
+                    webView.evaluateJavascript(js, raw -> {
+                        int ok = parseJsInt(raw);
+                        try {
+                            JSONObject meta = new JSONObject();
+                            meta.put("image_index", index);
+                            meta.put("image_total", total);
+                            meta.put("result", ok);
+                            logAutoStage("lesson_image_append_result", lesson, meta);
+                        } catch (Exception ignored) {}
+
+                        if (ok > 0) {
+                            appendAutoImageAt(lesson, index + 1, total);
+                        } else {
+                            stopAutoWithError("لم أستطع إضافة صور PDF داخل «إجراءات سير الدرس».");
+                        }
+                    });
+                });
+            } catch (OutOfMemoryError e) {
+                runOnUiThread(() -> stopAutoWithError("ضغط الذاكرة أثناء تحميل صورة الدرس رقم " + (index + 1) + "."));
+            } catch (Exception e) {
+                runOnUiThread(() -> stopAutoWithError("تعذر تحميل صورة الدرس من قاعدة البيانات: " + e.getMessage()));
+            } finally {
+                if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
             }
         });
     }
+
 
     private void applyAutoSchedule(CurriculumLesson lesson) {
         CurriculumLesson scheduleLesson = lesson;
