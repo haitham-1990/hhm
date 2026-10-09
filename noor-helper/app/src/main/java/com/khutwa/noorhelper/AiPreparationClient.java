@@ -117,7 +117,7 @@ final class AiPreparationClient {
     List<DiscoveredCurriculumStore.Entry> discoverCurriculum(PdfCorpusIndex corpus) throws Exception {
         String planOutline = corpus.planDiscoveryOutline();
         String materialOutline = corpus.materialDiscoveryOutline();
-        String key = "catalog_fullscan_v4_" + hashShort(planOutline + "\n" + materialOutline);
+        String key = "catalog_fullscan_v5_longmaterial_" + hashShort(planOutline + "\n" + materialOutline);
 
         String cached = prefs().getString(key, null);
         if (cached != null && !cached.trim().isEmpty()) {
@@ -692,42 +692,70 @@ final class AiPreparationClient {
             compact.put(o);
         }
 
-        StringBuilder prompt = new StringBuilder(60000);
-        prompt.append("لدي قائمة دروس مرتبة ومخطط صفحة بصفحة لملف المادة العلمية نفسه. ");
-        prompt.append("حدد صفحة PDF التي يبدأ عندها كل درس فعلياً من عنوانه داخل المادة. ");
-        prompt.append("لا تعتبر رقم هدف أو سؤال أو مثال داخل الصفحة عنوان درس. ");
-        prompt.append("اعتمد على عنوان الدرس ورمز الدرس ووحدات الملف وترتيب الدروس، مع السماح بأن يبدأ درسان في الصفحة نفسها. ");
-        prompt.append("صفحات أغلفة الوحدات والتمارين الإضافية ليست دروساً مستقلة. ");
-        prompt.append("يجب إرجاع كل i مرة واحدة وبالترتيب نفسه، وأرقام الصفحات تبدأ من 1. ");
-        prompt.append("إذا كان النص مشوهاً جزئياً فاستدل من ترتيب العناوين والوحدات والصفحات المجاورة، ولا تترك الدرس بلا صفحة إلا إذا تعذر تماماً. ");
-        prompt.append("لا تستخدم أي معرفة مسبقة عن مادة أو صف ولا أي عدد متوقع للدروس. ");
-        prompt.append("أرجع JSON فقط: {\"starts\":[{\"i\":0,\"page\":5,\"confidence\":\"high\",\"evidence\":\"عنوان الدرس ظاهر في بداية الصفحة\"}]}.\n");
-        prompt.append("\n=== الدروس المرتبة ===\n").append(compact.toString());
-        prompt.append("\n\n=== مخطط صفحات المادة ===\n")
-                .append(limitRaw(corpus.materialDiscoveryOutline(), 36000));
-
-        JSONObject payload = new JSONObject();
-        payload.put("message", prompt.toString());
-        JSONObject decision = new JSONObject(cleanJson(postForAnswer(payload)));
-        diagnostics.log("material_mapping_decision", decision);
-
         int[] starts = new int[catalog.size()];
-        JSONArray mapped = decision.optJSONArray("starts");
-        if (mapped != null) {
-            for (int i = 0; i < mapped.length(); i++) {
-                JSONObject m = mapped.optJSONObject(i);
+        int[] ranks = new int[catalog.size()];
+        String[] evidences = new String[catalog.size()];
+        List<String> batches = corpus.materialDiscoveryBatches(22000);
+
+        for (int batchIndex = 0; batchIndex < batches.size(); batchIndex++) {
+            String batch = batches.get(batchIndex);
+            StringBuilder prompt = new StringBuilder(52000);
+            prompt.append("لدي قائمة دروس مرتبة ومقطع متصل من مخطط صفحات ملف المادة العلمية. ");
+            prompt.append("ابحث فقط عن بدايات الدروس التي يظهر عنوانها الفعلي داخل هذا المقطع. ");
+            prompt.append("لا تعتبر الفهرس أو قائمة المحتويات أو رقم هدف أو سؤال أو مثال عنوان درس. ");
+            prompt.append("لا تستنتج صفحة لدرس غير ظاهر فعلياً في هذا المقطع، ولا تملأ الدروس المفقودة اعتماداً على الترتيب وحده. ");
+            prompt.append("إذا ظهر عنوان الدرس الحقيقي، أعد رقم صفحة PDF كما هو مكتوب في علامة [MATERIAL PDF N]. ");
+            prompt.append("يمكن أن يبدأ درسان في الصفحة نفسها. أرجع فقط العناصر التي وجدت لها دليلاً في هذا المقطع. ");
+            prompt.append("لا تستخدم معرفة مسبقة بالمادة أو الصف. ");
+            prompt.append("أرجع JSON فقط: {\"starts\":[{\"i\":0,\"page\":5,\"confidence\":\"high\",\"evidence\":\"عنوان الدرس ظاهر\"}]}.");
+            prompt.append("\n\n=== الدروس المرتبة ===\n").append(compact.toString());
+            prompt.append("\n\n=== مقطع مخطط المادة ").append(batchIndex + 1)
+                    .append(" من ").append(batches.size()).append(" ===\n").append(batch);
+
+            JSONObject payload = new JSONObject();
+            payload.put("message", prompt.toString());
+            JSONObject decision = new JSONObject(cleanJson(postForAnswer(payload)));
+
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("batch", batchIndex + 1);
+                meta.put("batch_count", batches.size());
+                meta.put("decision", decision);
+                diagnostics.log("material_mapping_batch_decision", meta);
+            } catch (Exception ignored) {}
+
+            JSONArray mapped = decision.optJSONArray("starts");
+            if (mapped == null) continue;
+            for (int j = 0; j < mapped.length(); j++) {
+                JSONObject m = mapped.optJSONObject(j);
                 if (m == null) continue;
                 int idx = m.optInt("i", -1);
                 int page = m.optInt("page", 0);
-                if (idx >= 0 && idx < starts.length && page >= 1 && page <= corpus.materialPageCount()) {
+                if (idx < 0 || idx >= starts.length || page < 1 || page > corpus.materialPageCount()) continue;
+
+                String confidence = m.optString("confidence", "").trim().toLowerCase(java.util.Locale.ROOT);
+                int rank = "high".equals(confidence) ? 3 : ("medium".equals(confidence) ? 2 : 1);
+
+                // Prefer stronger evidence. On equal evidence prefer the later occurrence:
+                // an early contents page often repeats every lesson title before the real heading.
+                if (rank > ranks[idx] || (rank == ranks[idx] && page > starts[idx])) {
                     starts[idx] = page;
+                    ranks[idx] = rank;
+                    evidences[idx] = m.optString("evidence", "").trim();
                 }
             }
         }
 
         List<DiscoveredCurriculumStore.Entry> lexical = corpus.resolveMaterialRanges(catalog);
         for (int i = 0; i < starts.length; i++) {
-            if (starts[i] <= 0 && i < lexical.size()) starts[i] = lexical.get(i).materialStartPage;
+            if (starts[i] <= 0 && i < lexical.size()) {
+                int lexicalStart = lexical.get(i).materialStartPage;
+                if (lexicalStart > 0) {
+                    starts[i] = lexicalStart;
+                    ranks[i] = 1;
+                    evidences[i] = "مطابقة نصية احتياطية داخل كامل ملف المادة";
+                }
+            }
         }
 
         // Keep source order monotonic while preserving same-page lesson starts.
@@ -737,6 +765,22 @@ final class AiPreparationClient {
             if (starts[i] < floor) starts[i] = floor;
             floor = starts[i];
         }
+
+        try {
+            JSONObject merged = new JSONObject();
+            JSONArray mapped = new JSONArray();
+            for (int i = 0; i < starts.length; i++) {
+                JSONObject m = new JSONObject();
+                m.put("i", i);
+                if (starts[i] > 0) m.put("page", starts[i]); else m.put("page", JSONObject.NULL);
+                m.put("confidence", ranks[i] >= 3 ? "high" : (ranks[i] == 2 ? "medium" : (ranks[i] == 1 ? "fallback" : "unresolved")));
+                m.put("evidence", evidences[i] == null ? "" : evidences[i]);
+                mapped.put(m);
+            }
+            merged.put("batch_count", batches.size());
+            merged.put("starts", mapped);
+            diagnostics.log("material_mapping_decision", merged);
+        } catch (Exception ignored) {}
 
         List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
         for (int i = 0; i < catalog.size(); i++) {
@@ -754,9 +798,22 @@ final class AiPreparationClient {
                     break;
                 }
             }
-            int end = nextStart > 0
-                    ? Math.max(start, nextStart)
-                    : corpus.materialPageCount();
+
+            int end;
+            if (nextStart > 0) {
+                end = Math.max(start, nextStart);
+            } else {
+                // Never let an unresolved tail make one lesson swallow the rest of
+                // a long PDF. Use lexical evidence when available; otherwise keep a
+                // conservative one-page range until a later mapping resolves it.
+                int lexicalEnd = i < lexical.size() ? lexical.get(i).materialEndPage : 0;
+                if (lexicalEnd >= start && lexicalEnd <= corpus.materialPageCount()) {
+                    end = lexicalEnd;
+                } else {
+                    end = start;
+                }
+            }
+
             out.add(new DiscoveredCurriculumStore.Entry(old.lesson, start, end));
         }
         return out;
