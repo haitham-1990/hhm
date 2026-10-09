@@ -196,10 +196,14 @@ final class AiPreparationClient {
             throw new IllegalStateException("لم تبق دروس صالحة بعد التحقق من بنية الخطة.");
         }
 
-        // Locate every lesson in the material using the full text of every PDF page.
-        // This is intentionally independent of any pre-programmed subject/page map
-        // and allows multiple lessons to begin on the same physical page.
-        validated = corpus.resolveMaterialRanges(validated);
+        // Locate lesson starts from the material's own page-by-page outline with AI.
+        // This avoids confusing objective numbers inside questions with real lesson headings.
+        try {
+            validated = locateMaterialRanges(corpus, validated);
+        } catch (Exception e) {
+            diagnostics.logMessage("material_mapping_ai_error", e.getMessage());
+            validated = corpus.resolveMaterialRanges(validated);
+        }
         diagnostics.logLessons("catalog_with_material_ranges", validated);
 
         String serialized = serializeCatalog(validated);
@@ -273,9 +277,15 @@ final class AiPreparationClient {
         prompt.append("مهمتك فقط تصحيح البنية: حدد المرشحين الذين يمثلون دروساً مستقلة فعلاً بحسب تسلسل وعناوين الخطة، ");
         prompt.append("واجمع المرشحين الذين هم موضوعات فرعية أو أجزاء تابعة تحت درسهم الأب. ");
         prompt.append("لا تستخدم معرفة مسبقة عن مادة أو صف، ولا تفترض عدداً مطلوباً من الدروس. ");
-        prompt.append("ممنوع إسقاط أي مرشح مستقل من القائمة. مهمتك الدمج فقط عندما يكون المرشح موضوعاً فرعياً تابعاً بوضوح لمرشح أب. ");
-        prompt.append("أرجع JSON فقط: {\"merge\":[{\"into\":0,\"from\":[2,3]}]}. ");
-        prompt.append("إذا لم يحتج شيء للدمج أرجع merge فارغة.\n");
+        prompt.append("ممنوع إسقاط أي مرشح مستقل من القائمة. ");
+        prompt.append("إذا كان الدرس الأب موجوداً ضمن المرشحين فاستخدم merge لضم أجزائه إليه. ");
+        prompt.append("إذا ظهرت عدة أجزاء متتابعة برمز فرعي مشترك مثل رقم-رقم-حرف، ولم يوجد الدرس الأب نفسه ضمن المرشحين، ");
+        prompt.append("فاجمع هذه الأجزاء في درس أب جديد واحد باستخدام groups، مع عنوان جامع مستنتج فقط من الخطة ورمز الأب بدون الحرف الفرعي. ");
+        prompt.append("لا تنشئ مجموعة إلا إذا كانت البنية في المصدر واضحة، ولا تستخدم أي عدد متوقع مسبقاً للدروس. ");
+        prompt.append("أرجع JSON فقط بهذه البنية: ");
+        prompt.append("{\"merge\":[{\"into\":0,\"from\":[2,3]}],");
+        prompt.append("\"groups\":[{\"from\":[10,11,12],\"code\":\"9-2\",\"title\":\"عنوان الدرس الأب\",\"unit\":\"اسم الوحدة\"}]}. ");
+        prompt.append("إذا لم توجد عمليات اجعل المصفوفتين فارغتين.\n");
         prompt.append("\n=== المرشحون ===\n").append(compact.toString());
         prompt.append("\n\n=== مخطط صفحات الخطة للاستدلال على الهيكل ===\n")
                 .append(limitRaw(planOutline, 26000));
@@ -347,12 +357,88 @@ final class AiPreparationClient {
             }
         }
 
+        JSONArray groups = decision.optJSONArray("groups");
+        java.util.Set<Integer> groupedAway = new java.util.HashSet<>();
+        if (groups != null) {
+            for (int g = 0; g < groups.length(); g++) {
+                JSONObject group = groups.optJSONObject(g);
+                if (group == null) continue;
+                JSONArray from = group.optJSONArray("from");
+                if (from == null || from.length() < 2) continue;
+
+                List<Integer> indexes = new ArrayList<>();
+                for (int j = 0; j < from.length(); j++) {
+                    int idx = from.optInt(j, -1);
+                    if (idx < 0 || idx >= working.size() || mergedAway.contains(idx)) continue;
+                    if (!indexes.contains(idx)) indexes.add(idx);
+                }
+                java.util.Collections.sort(indexes);
+                if (indexes.size() < 2) continue;
+
+                int anchor = indexes.get(0);
+                DiscoveredCurriculumStore.Entry first = working.get(anchor);
+                List<String> objectives = new ArrayList<>();
+                List<String> strategies = new ArrayList<>();
+                List<String> resources = new ArrayList<>();
+                int periods = 0;
+                int startPage = 0;
+                int endPage = 0;
+                String semester = first.lesson.semester;
+                String periodStart = "";
+                String periodEnd = "";
+
+                for (Integer idx : indexes) {
+                    DiscoveredCurriculumStore.Entry child = working.get(idx);
+                    periods += Math.max(1, child.lesson.periods);
+                    for (String x : child.lesson.objectives) if (!objectives.contains(x)) objectives.add(x);
+                    for (String x : child.lesson.strategies) if (!strategies.contains(x)) strategies.add(x);
+                    for (String x : child.lesson.resources) if (!resources.contains(x)) resources.add(x);
+                    if (child.materialStartPage > 0 && (startPage <= 0 || child.materialStartPage < startPage)) {
+                        startPage = child.materialStartPage;
+                    }
+                    if (child.materialEndPage > endPage) endPage = child.materialEndPage;
+                    if (periodStart.isEmpty() && !child.lesson.periodStart.isEmpty()) periodStart = child.lesson.periodStart;
+                    if (!child.lesson.periodEnd.isEmpty()) periodEnd = child.lesson.periodEnd;
+                }
+
+                String code = group.optString("code", "").trim();
+                if (code.isEmpty()) code = baseLessonCode(first.lesson.code);
+                String title = group.optString("title", "").trim();
+                if (title.isEmpty()) title = first.lesson.title;
+                String unit = group.optString("unit", "").trim();
+                if (unit.isEmpty()) unit = first.lesson.unit;
+
+                CurriculumLesson parent = new CurriculumLesson(
+                        code,
+                        title,
+                        unit,
+                        semester,
+                        Math.max(1, periods),
+                        periodStart,
+                        periodEnd,
+                        first.lesson.level,
+                        objectives,
+                        strategies,
+                        resources
+                );
+                working.set(anchor, new DiscoveredCurriculumStore.Entry(parent, startPage, endPage));
+                for (int j = 1; j < indexes.size(); j++) groupedAway.add(indexes.get(j));
+            }
+        }
+
         List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
         for (int i = 0; i < working.size(); i++) {
-            if (mergedAway.contains(i)) continue;
+            if (mergedAway.contains(i) || groupedAway.contains(i)) continue;
             out.add(working.get(i));
         }
         return out;
+    }
+
+    private static String baseLessonCode(String raw) {
+        String v = arabicDigitsToLatin(raw == null ? "" : raw);
+        Matcher m = Pattern.compile("^\\s*([0-9]+)\\s*[-–]\\s*([0-9]+)").matcher(v);
+        if (m.find()) return m.group(1) + "-" + m.group(2);
+        return v.trim();
     }
 
     private void mergeExactCandidates(List<DiscoveredCurriculumStore.Entry> base,
@@ -400,6 +486,89 @@ final class AiPreparationClient {
             );
             base.set(match, new DiscoveredCurriculumStore.Entry(lesson, ps, pe));
         }
+    }
+
+    private List<DiscoveredCurriculumStore.Entry> locateMaterialRanges(
+            PdfCorpusIndex corpus, List<DiscoveredCurriculumStore.Entry> catalog) throws Exception {
+        JSONArray compact = new JSONArray();
+        for (int i = 0; i < catalog.size(); i++) {
+            DiscoveredCurriculumStore.Entry e = catalog.get(i);
+            JSONObject o = new JSONObject();
+            o.put("i", i);
+            o.put("code", e.lesson.code);
+            o.put("title", e.lesson.title);
+            o.put("unit", e.lesson.unit);
+            compact.put(o);
+        }
+
+        StringBuilder prompt = new StringBuilder(60000);
+        prompt.append("لدي قائمة دروس مرتبة ومخطط صفحة بصفحة لملف المادة العلمية نفسه. ");
+        prompt.append("حدد صفحة PDF التي يبدأ عندها كل درس فعلياً من عنوانه داخل المادة. ");
+        prompt.append("لا تعتبر رقم هدف أو سؤال أو مثال داخل الصفحة عنوان درس. ");
+        prompt.append("اعتمد على عنوان الدرس ورمز الدرس ووحدات الملف وترتيب الدروس، مع السماح بأن يبدأ درسان في الصفحة نفسها. ");
+        prompt.append("صفحات أغلفة الوحدات والتمارين الإضافية ليست دروساً مستقلة. ");
+        prompt.append("يجب إرجاع كل i مرة واحدة وبالترتيب نفسه، وأرقام الصفحات تبدأ من 1. ");
+        prompt.append("إذا كان النص مشوهاً جزئياً فاستدل من ترتيب العناوين والوحدات والصفحات المجاورة، ولا تترك الدرس بلا صفحة إلا إذا تعذر تماماً. ");
+        prompt.append("لا تستخدم أي معرفة مسبقة عن مادة أو صف ولا أي عدد متوقع للدروس. ");
+        prompt.append("أرجع JSON فقط: {\"starts\":[{\"i\":0,\"page\":5,\"confidence\":\"high\",\"evidence\":\"عنوان الدرس ظاهر في بداية الصفحة\"}]}.\n");
+        prompt.append("\n=== الدروس المرتبة ===\n").append(compact.toString());
+        prompt.append("\n\n=== مخطط صفحات المادة ===\n")
+                .append(limitRaw(corpus.materialDiscoveryOutline(), 36000));
+
+        JSONObject payload = new JSONObject();
+        payload.put("message", prompt.toString());
+        JSONObject decision = new JSONObject(cleanJson(postForAnswer(payload)));
+        diagnostics.log("material_mapping_decision", decision);
+
+        int[] starts = new int[catalog.size()];
+        JSONArray mapped = decision.optJSONArray("starts");
+        if (mapped != null) {
+            for (int i = 0; i < mapped.length(); i++) {
+                JSONObject m = mapped.optJSONObject(i);
+                if (m == null) continue;
+                int idx = m.optInt("i", -1);
+                int page = m.optInt("page", 0);
+                if (idx >= 0 && idx < starts.length && page >= 1 && page <= corpus.materialPageCount()) {
+                    starts[idx] = page;
+                }
+            }
+        }
+
+        List<DiscoveredCurriculumStore.Entry> lexical = corpus.resolveMaterialRanges(catalog);
+        for (int i = 0; i < starts.length; i++) {
+            if (starts[i] <= 0 && i < lexical.size()) starts[i] = lexical.get(i).materialStartPage;
+        }
+
+        // Keep source order monotonic while preserving same-page lesson starts.
+        int floor = 1;
+        for (int i = 0; i < starts.length; i++) {
+            if (starts[i] <= 0) continue;
+            if (starts[i] < floor) starts[i] = floor;
+            floor = starts[i];
+        }
+
+        List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
+        for (int i = 0; i < catalog.size(); i++) {
+            DiscoveredCurriculumStore.Entry old = catalog.get(i);
+            int start = starts[i];
+            if (start <= 0) {
+                out.add(new DiscoveredCurriculumStore.Entry(old.lesson, 0, 0));
+                continue;
+            }
+
+            int nextStart = 0;
+            for (int j = i + 1; j < starts.length; j++) {
+                if (starts[j] > 0) {
+                    nextStart = starts[j];
+                    break;
+                }
+            }
+            int end = nextStart > 0
+                    ? Math.max(start, nextStart)
+                    : corpus.materialPageCount();
+            out.add(new DiscoveredCurriculumStore.Entry(old.lesson, start, end));
+        }
+        return out;
     }
 
     private String serializeCatalog(List<DiscoveredCurriculumStore.Entry> entries) throws Exception {
@@ -531,7 +700,23 @@ final class AiPreparationClient {
             if (answer.isEmpty()) throw new IllegalStateException("استجابة ذكاء خطوة فارغة");
 
             String json = cleanJson(answer);
-            SourceResult result = parseSourceResult(title, json);
+            SourceResult result;
+            try {
+                result = parseSourceResult(title, json);
+            } catch (Exception firstParseError) {
+                diagnostics.logMessage("preparation_json_parse_error",
+                        title + ": " + firstParseError.getMessage());
+                JSONObject repairPayload = new JSONObject();
+                repairPayload.put("message",
+                        "أصلح النص التالي إلى JSON صحيح فقط دون أي شرح، مع الحفاظ على المعنى وجميع الحقول "
+                        + "o,l,periods,start,end,st,rs,c,i,p,f,s,w. "
+                        + "لا تضف مفاتيح جديدة. الدرس: " + limit(title, 180)
+                        + "\nالنص غير الصالح:\n" + limitRaw(answer, 7000));
+                String repaired = cleanJson(postForAnswer(repairPayload));
+                result = parseSourceResult(title, repaired);
+                json = repaired;
+                diagnostics.logMessage("preparation_json_repaired", title);
+            }
             prefs().edit().putString(key, json).apply();
             return result;
         } finally {
