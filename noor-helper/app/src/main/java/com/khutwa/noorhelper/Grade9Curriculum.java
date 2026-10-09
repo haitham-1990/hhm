@@ -42,7 +42,8 @@ final class Grade9Curriculum {
         }
 
         String noorCode() {
-            return code;
+            String[] parts = code.split("-");
+            return parts.length == 2 ? parts[1] + "-" + parts[0] : code;
         }
 
         String displayName() {
@@ -174,8 +175,12 @@ final class Grade9Curriculum {
         String text = noorTitle == null ? "" : noorTitle;
         Matcher matcher = Pattern.compile("([0-9٠-٩]+)\\s*[-–]\\s*([0-9٠-٩]+)").matcher(text);
         if (matcher.find()) {
-            String code = arabicDigitsToLatin(matcher.group(1)) + "-" + arabicDigitsToLatin(matcher.group(2));
-            Lesson direct = LESSONS.get(code);
+            String first = arabicDigitsToLatin(matcher.group(1));
+            String second = arabicDigitsToLatin(matcher.group(2));
+            // Noor shows lesson-unit (e.g. 1-2 = first lesson in unit 2),
+            // while our internal map is unit-lesson (2-1).
+            String internalCode = second + "-" + first;
+            Lesson direct = LESSONS.get(internalCode);
             if (direct != null) return direct;
         }
         ExerciseMap.Lesson mapped = ExerciseMap.find(noorTitle);
