@@ -117,7 +117,7 @@ final class AiPreparationClient {
     List<DiscoveredCurriculumStore.Entry> discoverCurriculum(PdfCorpusIndex corpus) throws Exception {
         String planOutline = corpus.planDiscoveryOutline();
         String materialOutline = corpus.materialDiscoveryOutline();
-        String key = "catalog_multipass_v3_" + hashShort(planOutline + "\n" + materialOutline);
+        String key = "catalog_fullscan_v4_" + hashShort(planOutline + "\n" + materialOutline);
 
         String cached = prefs().getString(key, null);
         if (cached != null && !cached.trim().isEmpty()) {
@@ -135,39 +135,13 @@ final class AiPreparationClient {
 
         JSONObject scope = discoverDocumentScope(planOutline, materialOutline);
         diagnostics.log("scope_result", scope);
+
+        // Do not trust one predicted start/end range as the sole source of truth.
+        // The plan may be long, split across pages, or the model may identify only
+        // a sample of the matching section. Inspect every plan page and let the AI
+        // reject pages that do not belong to the discovered subject/grade/semester.
         List<Integer> pages = new ArrayList<>();
-
-        int rangeStart = scope.optInt("planStartPage", 0);
-        int rangeEnd = scope.optInt("planEndPage", 0);
-        if (rangeStart > 0 && rangeEnd >= rangeStart) {
-            rangeStart = Math.max(1, rangeStart);
-            rangeEnd = Math.min(corpus.planPageCount(), rangeEnd);
-            for (int p = rangeStart; p <= rangeEnd; p++) pages.add(p);
-        }
-
-        JSONArray pageArray = scope.optJSONArray("planPages");
-        if (pageArray != null) {
-            for (int i = 0; i < pageArray.length(); i++) {
-                int p = pageArray.optInt(i, 0);
-                if (p > 0 && p <= corpus.planPageCount() && !pages.contains(p)) pages.add(p);
-            }
-        }
-
-        // If the scope returned only sample pages, include nearby pages as a safety
-        // net. Page-level extraction still filters by the discovered document scope.
-        if (!pages.isEmpty()) {
-            int min = java.util.Collections.min(pages);
-            int max = java.util.Collections.max(pages);
-            int from = Math.max(1, min - 3);
-            int to = Math.min(corpus.planPageCount(), max + 3);
-            for (int p = from; p <= to; p++) if (!pages.contains(p)) pages.add(p);
-        }
-
-        // Last-resort generic fallback: inspect all plan pages rather than silently
-        // returning a partial curriculum.
-        if (pages.isEmpty()) {
-            for (int p = 1; p <= corpus.planPageCount(); p++) pages.add(p);
-        }
+        for (int p = 1; p <= corpus.planPageCount(); p++) pages.add(p);
 
         java.util.Collections.sort(pages);
         List<DiscoveredCurriculumStore.Entry> candidates = new ArrayList<>();
@@ -256,9 +230,11 @@ final class AiPreparationClient {
     private List<DiscoveredCurriculumStore.Entry> discoverLessonsOnPlanPage(
             int targetPage, JSONObject scope, String planWindow) throws Exception {
         StringBuilder prompt = new StringBuilder(65000);
-        prompt.append("حلل نافذة من الخطة الدراسية مع مخطط المادة العلمية، واعتمد فقط ما يظهر في المصدر. ");
+        prompt.append("حلل هذه الصفحة من الخطة الدراسية واعتمد فقط ما يظهر في المصدر. ");
         prompt.append("الصفحة المستهدفة هي صفحة PDF رقم ").append(targetPage).append(". ");
-        prompt.append("استخرج الدروس المستقلة التي يظهر سجلها/رقمها/عنوانها الأساسي في الصفحة المستهدفة فقط؛ ");
+        prompt.append("قارن محتوى الصفحة بهوية الوثيقة المستنتجة سابقاً (المادة/المستوى/الفصل). ");
+        prompt.append("إذا كانت الصفحة لا تخص نفس المنهج تحديداً فأرجع lessons فارغة، ولا تستخرج دروس صف أو مادة أخرى. ");
+        prompt.append("إذا كانت تخص المنهج، استخرج الدروس المستقلة التي يظهر سجلها/رقمها/عنوانها الأساسي في الصفحة المستهدفة فقط؛ ");
         prompt.append("استخدم الصفحة السابقة والتالية لفهم الاستمرار والهيكل، لكن لا تكرر دروسهما. ");
         prompt.append("استنتج من بنية الخطة نفسها الفرق بين الدرس المستقل وبين عنوان الوحدة أو الموضوع الفرعي أو البند التابع. ");
         prompt.append("لا تعامل كل سطر أو كل حرف فرعي كدرس. لا تفترض عدداً نهائياً للدروس. ");
