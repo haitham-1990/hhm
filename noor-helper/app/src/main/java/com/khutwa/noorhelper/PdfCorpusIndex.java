@@ -36,6 +36,44 @@ final class PdfCorpusIndex {
         return new PdfCorpusIndex(readAllPages(context, planUri), readAllPages(context, materialUri));
     }
 
+    String planDiscoveryOutline() {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < planPages.size(); i++) {
+            String page = clean(planPages.get(i));
+            String snippet = compactSnippet(page, 320);
+            out.append("\n[PLAN PDF ").append(i + 1).append("] ").append(snippet);
+        }
+        return out.toString();
+    }
+
+    String planPageWindow(int pageOneBased) {
+        int index = pageOneBased - 1;
+        if (index < 0 || index >= planPages.size()) return "";
+        StringBuilder out = new StringBuilder();
+        int from = Math.max(0, index - 1);
+        int to = Math.min(planPages.size() - 1, index + 1);
+        for (int i = from; i <= to; i++) {
+            String page = clean(planPages.get(i));
+            if (page.isEmpty()) continue;
+            out.append("\n--- صفحة الخطة PDF ").append(i + 1).append(" ---\n").append(page);
+        }
+        return out.toString();
+    }
+
+    int planPageCount() {
+        return planPages.size();
+    }
+
+    int materialPageCount() {
+        return materialPages.size();
+    }
+
+    private static String compactSnippet(String text, int max) {
+        if (text == null) return "";
+        String v = text.replace('\n', ' ').replaceAll("\\s+", " ").trim();
+        return v.length() <= max ? v : v.substring(0, max);
+    }
+
     String planDiscoveryContext() {
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < planPages.size(); i++) {
@@ -56,11 +94,8 @@ final class PdfCorpusIndex {
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < materialPages.size(); i++) {
             String page = clean(materialPages.get(i));
-            if (page.isEmpty()) continue;
-            String snippet = page.length() > 420 ? page.substring(0, 420) : page;
-            String block = "\n[PDF " + (i + 1) + "] " + snippet.replace('\n', ' ');
-            if (out.length() + block.length() > 38000) break;
-            out.append(block);
+            out.append("\n[MATERIAL PDF ").append(i + 1).append("] ")
+                    .append(compactSnippet(page, 220));
         }
         return out.toString();
     }
