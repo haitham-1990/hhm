@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.net.Uri;
 
+import com.tom_roush.pdfbox.io.MemoryUsageSetting;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.rendering.ImageType;
 import com.tom_roush.pdfbox.rendering.PDFRenderer;
@@ -43,7 +44,7 @@ final class PdfExerciseExtractor {
 
     static ExtractResult extract(Context context, Uri uri, String lessonTitle) throws Exception {
         try (InputStream in = context.getContentResolver().openInputStream(uri);
-             PDDocument doc = PDDocument.load(in)) {
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
             if (doc.getNumberOfPages() == 0) throw new IllegalStateException("ملف PDF فارغ");
 
             return extractByTextSearch(doc, lessonTitle);
@@ -56,7 +57,7 @@ final class PdfExerciseExtractor {
                                         int previousEndPageOneBased,
                                         int nextStartPageOneBased) throws Exception {
         try (InputStream in = context.getContentResolver().openInputStream(uri);
-             PDDocument doc = PDDocument.load(in)) {
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
             if (doc.getNumberOfPages() == 0) throw new IllegalStateException("ملف PDF فارغ");
 
             int start = Math.max(0, startPageOneBased - 1);
@@ -198,7 +199,7 @@ final class PdfExerciseExtractor {
             throw new IllegalArgumentException("لا توجد صفحات محفوظة لهذا الدرس.");
         }
         try (InputStream in = context.getContentResolver().openInputStream(uri);
-             PDDocument doc = PDDocument.load(in)) {
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
             PDFRenderer renderer = new PDFRenderer(doc);
             List<Bitmap> images = new ArrayList<>();
             int first = Integer.MAX_VALUE;
@@ -294,7 +295,7 @@ final class PdfExerciseExtractor {
 
     static ExtractResult extractRange(Context context, Uri uri, int startPageOneBased, int endPageOneBased) throws Exception {
         try (InputStream in = context.getContentResolver().openInputStream(uri);
-             PDDocument doc = PDDocument.load(in)) {
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
             int start = Math.max(0, startPageOneBased - 1);
             int end = Math.min(doc.getNumberOfPages() - 1, Math.max(start, endPageOneBased - 1));
             if (start >= doc.getNumberOfPages()) throw new IllegalArgumentException("رقم صفحة البداية أكبر من عدد صفحات الملف");
