@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - اكتشاف حر 1.0.3");
+        title.setText("نور الذكي - اكتشاف حر 1.0.4");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -515,13 +515,13 @@ public class MainActivity extends Activity {
                             planContext.append("\nمخرج: ").append(objective);
                         }
 
-                        AiPreparationClient.SourceResult generated = aiClient.generateFromSources(
-                                title, lesson.objectives, planContext.toString(), materialContext);
+                        AiPreparationClient.SourceResult generated = generateFromSourcesWithRetry(
+                                title, lesson.objectives, planContext.toString(), materialContext, lesson.code);
 
                         String nextTitle = next == null ? "" : next.lesson.noorCode() + " " + next.lesson.title;
                         int previousEnd = previous == null ? 0 : previous.materialEndPage;
                         int nextStart = next == null ? 0 : next.materialStartPage;
-                        LessonImageCache.build(
+                        int savedImages = LessonImageCache.build(
                                 this,
                                 subjectMaterialPdfUri,
                                 lesson.code,
@@ -552,6 +552,7 @@ public class MainActivity extends Activity {
                             meta.put("material_start_page", entry.materialStartPage);
                             meta.put("material_end_page", entry.materialEndPage);
                             meta.put("objectives_count", lesson.objectives.size());
+                            meta.put("images_saved", savedImages);
                             diagnostics.log("lesson_build_success", meta);
                         } catch (Exception ignored) {}
 
@@ -1246,8 +1247,8 @@ public class MainActivity extends Activity {
                         this, studyPlanPdfUri, subjectMaterialPdfUri, lessonTitle);
                 runOnUiThread(() -> status.setText("وجدت سياق الدرس: " + context.summary() + " — أطلب التحضير من ذكاء خطوة..."));
 
-                AiPreparationClient.SourceResult generated = aiClient.generateFromSources(
-                        lessonTitle, noorOutcomes, context.planContext, context.materialContext);
+                AiPreparationClient.SourceResult generated = generateFromSourcesWithRetry(
+                        lessonTitle, noorOutcomes, context.planContext, context.materialContext, lesson.code);
 
                 runOnUiThread(() -> {
                     if (!autoActive || autoCurrentIndex < 0 || autoCurrentIndex >= autoLessons.size()) return;
@@ -1264,6 +1265,62 @@ public class MainActivity extends Activity {
                         + "» من الملفين: " + e.getMessage()));
             }
         });
+    }
+
+    private AiPreparationClient.SourceResult generateFromSourcesWithRetry(
+            String title,
+            List<String> outcomes,
+            String planContext,
+            String materialContext,
+            String lessonCode) throws Exception {
+        Exception last = null;
+        final int attempts = 3;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            try {
+                if (attempt > 1) {
+                    try {
+                        JSONObject meta = new JSONObject();
+                        meta.put("code", lessonCode == null ? "" : lessonCode);
+                        meta.put("title", title == null ? "" : title);
+                        meta.put("attempt", attempt);
+                        diagnostics.log("ai_request_retry", meta);
+                    } catch (Exception ignored) {}
+                }
+                return aiClient.generateFromSources(title, outcomes, planContext, materialContext);
+            } catch (Exception e) {
+                last = e;
+                String msg = e.getMessage() == null ? "" : e.getMessage();
+                boolean transientError =
+                        msg.contains("Connection reset")
+                        || msg.contains("timed out")
+                        || msg.contains("timeout")
+                        || msg.contains("HTTP 429")
+                        || msg.contains("HTTP 500")
+                        || msg.contains("HTTP 502")
+                        || msg.contains("HTTP 503")
+                        || msg.contains("HTTP 504")
+                        || msg.contains("Unable to resolve host")
+                        || msg.contains("failed to connect");
+                if (!transientError || attempt >= attempts) break;
+
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("code", lessonCode == null ? "" : lessonCode);
+                    meta.put("title", title == null ? "" : title);
+                    meta.put("attempt", attempt);
+                    meta.put("error", msg);
+                    diagnostics.log("ai_request_transient_error", meta);
+                } catch (Exception ignored) {}
+
+                try {
+                    Thread.sleep(900L * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw interrupted;
+                }
+            }
+        }
+        throw last == null ? new IllegalStateException("تعذر الاتصال بخدمة الذكاء.") : last;
     }
 
     private void fillAutoLessonContent(CurriculumLesson lesson) {
