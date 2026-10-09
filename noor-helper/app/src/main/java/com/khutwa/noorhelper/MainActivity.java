@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - اكتشاف حر 1.0.4");
+        title.setText("نور الذكي - تشخيص شامل 1.0.5");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -185,7 +185,7 @@ public class MainActivity extends Activity {
         databaseStatus.setTextDirection(View.TEXT_DIRECTION_RTL);
         root.addView(databaseStatus);
 
-        Button diagnosticReport = makeButton("حفظ تقرير التشخيص (أرسله لي)");
+        Button diagnosticReport = makeButton("حفظ التقرير الشامل (أرسله لي)");
         diagnosticReport.setTextSize(13);
         diagnosticReport.setOnClickListener(v -> exportDiagnosticReport());
         LinearLayout.LayoutParams diagnosticParams = new LinearLayout.LayoutParams(
@@ -194,7 +194,7 @@ public class MainActivity extends Activity {
         root.addView(diagnosticReport, diagnosticParams);
 
         TextView diagnosticHint = new TextView(this);
-        diagnosticHint.setText("إذا ظهر عدد دروس أو تقسيم غير صحيح، احفظ التقرير بعد التجهيز — أو بعد أي خطأ — وأرسله لي.");
+        diagnosticHint.setText("أكمل تجربتك كاملة داخل نور. عند أي مشكلة — الشجرة، اختيار الدرس، الحقول، الصور، التواريخ، الحصص أو الحفظ — احفظ التقرير الشامل وأرسله لي.");
         diagnosticHint.setTextSize(11);
         diagnosticHint.setTextColor(Color.DKGRAY);
         diagnosticHint.setPadding(dp(12), 0, dp(12), dp(4));
@@ -785,9 +785,17 @@ public class MainActivity extends Activity {
 
     private void exportDiagnosticReport() {
         if (diagnostics == null || !diagnostics.hasReport()) {
-            toast("لا يوجد تقرير تشخيص بعد. شغّل «تجهيز قاعدة البيانات» أولاً.");
+            toast("لا يوجد تقرير شامل بعد. شغّل «تجهيز قاعدة البيانات» أو ابدأ تجربة نور أولاً.");
             return;
         }
+
+        CurriculumLesson exportLesson = autoCurrentIndex >= 0 && autoCurrentIndex < autoLessons.size()
+                ? autoLessons.get(autoCurrentIndex) : currentLesson;
+        captureNoorDiagnosticSnapshot("manual_report_export", exportLesson,
+                () -> finalizeDiagnosticReportExport(exportLesson));
+    }
+
+    private void finalizeDiagnosticReportExport(CurriculumLesson exportLesson) {
         try {
             JSONObject snapshot = new JSONObject();
             snapshot.put("database_building", databaseBuilding);
@@ -795,17 +803,32 @@ public class MainActivity extends Activity {
             snapshot.put("ready_lessons", generatedReadyCount());
             snapshot.put("plan_file", studyPlanPdfUri == null ? "" : pdfName(studyPlanPdfUri));
             snapshot.put("material_file", subjectMaterialPdfUri == null ? "" : pdfName(subjectMaterialPdfUri));
+            snapshot.put("auto_active", autoActive);
+            snapshot.put("auto_awaiting_save", autoAwaitingSave);
+            snapshot.put("auto_current_index", autoCurrentIndex);
+            snapshot.put("auto_target_index", autoTargetIndex);
+            snapshot.put("last_completed_index",
+                    getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_LAST_INDEX, -1));
+            snapshot.put("pending_index",
+                    getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_AUTO_PENDING_INDEX, -1));
+            snapshot.put("location", safeNoorLocation(webView == null ? "" : webView.getUrl()));
+            if (exportLesson != null) {
+                snapshot.put("current_lesson_code", exportLesson.code);
+                snapshot.put("current_lesson_title", exportLesson.title);
+            }
             diagnostics.log("manual_report_export", snapshot);
             if (curriculumStore != null) {
                 diagnostics.logLessons("catalog_at_export", curriculumStore.load());
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            diagnostics.logException("manual_report_export_error", e);
+        }
 
         pendingDiagnosticReport = diagnostics.exportReport();
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Diagnostic-1.0.2.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.5.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
