@@ -108,6 +108,98 @@ final class AiPreparationClient {
         }
     }
 
+    List<DiscoveredCurriculumStore.Entry> discoverCurriculum(String planContext,
+                                                                     String materialOutline) throws Exception {
+        String key = "catalog_" + hashShort(planContext + "\n" + materialOutline);
+        String cached = prefs().getString(key, null);
+        if (cached != null && !cached.trim().isEmpty()) {
+            return parseDiscoveredCurriculum(cached);
+        }
+
+        StringBuilder prompt = new StringBuilder(120000);
+        prompt.append("أنت محلل مناهج عمانية. أمامك خطة دراسية قد تحتوي أكثر من صف، وملف مادة/تمارين واحد. ");
+        prompt.append("حدد بنفسك أي صف/مادة في الخطة يطابق ملف المادة من خلال أسماء الوحدات والدروس، ثم استخرج منهج ذلك الصف فقط. ");
+        prompt.append("لا تعتمد على معرفة مسبقة ولا تخترع دروساً. رتب الدروس تماماً كما تظهر في الخطة. ");
+        prompt.append("لكل درس استخرج رقم الدرس كما هو، اسم الدرس، الوحدة، عدد الحصص، تاريخ بداية ونهاية فترة الوحدة/الدرس، والمخرجات الرسمية إن وجدت. ");
+        prompt.append("ومن مخطط صفحات المادة حدد صفحات PDF التي يبدأ وينتهي عندها محتوى كل درس. ");
+        prompt.append("إذا اشترك درسان في صفحة واحدة يجوز أن يكون end/start الصفحة نفسها؛ التطبيق سيقسم الصفحة عند عنوان الدرس. ");
+        prompt.append("أرجع JSON فقط بالشكل: {\"subject\":\"...\",\"grade\":\"...\",\"lessons\":[");
+        prompt.append("{\"code\":\"2-1\",\"title\":\"...\",\"unit\":\"الوحدة ...: ...\",");
+        prompt.append("\"periods\":2,\"start\":\"YYYY-MM-DD\",\"end\":\"YYYY-MM-DD\",");
+        prompt.append("\"objectives\":[\"...\"],\"materialStartPage\":20,\"materialEndPage\":20}]}.");
+        prompt.append("\nلا تضع درساً إذا لم تجد دليلاً عليه في الخطة. أرقام صفحات المادة هي أرقام PDF الفعلية الظاهرة في المخطط أدناه.\n");
+        prompt.append("\n=== الخطة الدراسية ===\n").append(limitRaw(planContext, 76000));
+        prompt.append("\n\n=== مخطط المادة العلمية بحسب صفحات PDF ===\n").append(limitRaw(materialOutline, 38000));
+
+        JSONObject payload = new JSONObject();
+        payload.put("message", prompt.toString());
+        String answer = postForAnswer(payload);
+        String json = cleanJson(answer);
+        List<DiscoveredCurriculumStore.Entry> result = parseDiscoveredCurriculum(json);
+        if (result.isEmpty()) throw new IllegalStateException("لم يستطع الذكاء اكتشاف قائمة الدروس من الملفين.");
+        prefs().edit().putString(key, json).apply();
+        return result;
+    }
+
+    private List<DiscoveredCurriculumStore.Entry> parseDiscoveredCurriculum(String rawJson) throws Exception {
+        JSONObject root = new JSONObject(cleanJson(rawJson));
+        JSONArray lessons = root.optJSONArray("lessons");
+        List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
+        if (lessons == null) return out;
+
+        for (int i = 0; i < lessons.length(); i++) {
+            JSONObject o = lessons.optJSONObject(i);
+            if (o == null) continue;
+            String code = o.optString("code", "").trim();
+            String title = o.optString("title", "").trim();
+            String unit = o.optString("unit", "").trim();
+            if (code.isEmpty() || title.isEmpty()) continue;
+
+            Grade9Curriculum.Lesson lesson = new Grade9Curriculum.Lesson(
+                    code,
+                    title,
+                    unit,
+                    Math.max(1, o.optInt("periods", 1)),
+                    o.optString("start", "").trim(),
+                    o.optString("end", "").trim(),
+                    0, 0,
+                    "الفهم",
+                    stringArray(o.optJSONArray("objectives")),
+                    new ArrayList<>(),
+                    new ArrayList<>()
+            );
+            int ps = Math.max(0, o.optInt("materialStartPage", 0));
+            int pe = Math.max(ps, o.optInt("materialEndPage", ps));
+            out.add(new DiscoveredCurriculumStore.Entry(lesson, ps, pe));
+        }
+        return out;
+    }
+
+    private String postForAnswer(JSONObject payload) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(ENDPOINT).openConnection();
+        try {
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(Math.max(READ_TIMEOUT_MS, 120000));
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            conn.setRequestProperty("Accept", "application/json");
+            byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+            conn.setFixedLengthStreamingMode(body.length);
+            try (OutputStream out = conn.getOutputStream()) { out.write(body); }
+            int code = conn.getResponseCode();
+            InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+            String response = readAll(stream);
+            if (code < 200 || code >= 300) throw new IllegalStateException("خدمة ذكاء خطوة أعادت HTTP " + code);
+            JSONObject envelope = new JSONObject(response);
+            String answer = envelope.optString("answer", "").trim();
+            if (answer.isEmpty()) throw new IllegalStateException("استجابة ذكاء خطوة فارغة");
+            return answer;
+        } finally {
+            conn.disconnect();
+        }
+    }
+
     SourceResult generateFromSources(String title, List<String> noorOutcomes,
                                      String planContext, String materialContext) throws Exception {
         String sourceKey = title + "\n" + planContext + "\n" + materialContext;
