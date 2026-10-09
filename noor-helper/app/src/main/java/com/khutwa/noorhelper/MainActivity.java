@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - قارئ الشجرة 1.0.6");
+        title.setText("نور الذكي - قارئ الشجرة 1.0.7");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -1393,9 +1393,15 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            if (("opened".equals(result) || "waiting".equals(result) || "no_tree".equals(result))
+            if (("opened".equals(result) || "waiting".equals(result)
+                    || "no_tree".equals(result) || "not_found".equals(result))
                     && attempt < 80) {
-                webView.postDelayed(() -> autoExploreTreeForLesson(lesson, attempt + 1), 550);
+                if ("not_found".equals(result) && (attempt == 0 || attempt % 8 == 0)) {
+                    captureNoorDiagnosticSnapshot("tree_explore_waiting_attempt_" + attempt, lesson);
+                }
+                status.setText("أقرأ شجرة نور وأنتظر تحميل الفروع — محاولة " + (attempt + 1));
+                webView.postDelayed(() -> autoExploreTreeForLesson(lesson, attempt + 1),
+                        "not_found".equals(result) ? 700 : 550);
                 return;
             }
 
@@ -1438,7 +1444,7 @@ public class MainActivity extends Activity {
                 + "function compact(s){return norm(s).replace(/[^\\p{L}\\p{N}]+/gu,'');}"
                 + "function numCode(s){var m=norm(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
                 + "function words(s){var a=norm(s).replace(/[0-9]+\\s*[-–]\\s*[0-9]+/g,' ').split(/\\s+/),o=[];for(var i=0;i<a.length;i++){var w=a[i].replace(/[^\\p{L}\\p{N}]/gu,'');if(w.length>=2&&o.indexOf(w)<0)o.push(w);}return o;}"
-                + "function score(raw,title,code){var t=norm(raw),cw=words(raw),tw=words(title),hits=0;for(var i=0;i<tw.length;i++){if(cw.indexOf(tw[i])>=0||t.indexOf(tw[i])>=0)hits++;}var s=tw.length?Math.round((hits/tw.length)*340):0;var ct=compact(title),cr=compact(raw);if(ct&&cr.indexOf(ct)>=0)s+=420;var tc=numCode(code),cc=numCode(raw);if(tc&&cc===tc)s+=1000;return s;}"
+                + "function score(raw,title,code){var t=norm(raw),cw=words(raw),tw=words(title),hits=0;for(var i=0;i<tw.length;i++){if(cw.indexOf(tw[i])>=0||t.indexOf(tw[i])>=0)hits++;}var s=tw.length?Math.round((hits/tw.length)*340):0;var ct=compact(title),cr=compact(raw);if(ct&&cr.indexOf(ct)>=0)s+=420;var tc=numCode(code),cc=numCode(raw);if(tc&&cc===tc)s+=1000;else if(tc&&cc&&s>=170){var p=tc.split('-'),q=cc.split('-');if(p.length===2&&q.length===2&&p[0]===q[1]&&p[1]===q[0])s+=500;}return s;}"
                 + "function vis(e){try{var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(x){return false;}}"
                 + "var root=document.getElementById('jstree_node_tree')||document.querySelector('.jstree');if(!root)return 'no_tree';"
                 + "var code=" + JSONObject.quote(lesson.noorCode()) + ",title=" + JSONObject.quote(lesson.title) + ";"
