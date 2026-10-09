@@ -115,7 +115,7 @@ final class AiPreparationClient {
     List<DiscoveredCurriculumStore.Entry> discoverCurriculum(PdfCorpusIndex corpus) throws Exception {
         String planOutline = corpus.planDiscoveryOutline();
         String materialOutline = corpus.materialDiscoveryOutline();
-        String key = "catalog_multipass_v1_" + hashShort(planOutline + "\n" + materialOutline);
+        String key = "catalog_multipass_v3_" + hashShort(planOutline + "\n" + materialOutline);
 
         String cached = prefs().getString(key, null);
         if (cached != null && !cached.trim().isEmpty()) {
@@ -123,16 +123,38 @@ final class AiPreparationClient {
         }
 
         JSONObject scope = discoverDocumentScope(planOutline, materialOutline);
-        JSONArray pageArray = scope.optJSONArray("planPages");
         List<Integer> pages = new ArrayList<>();
+
+        int rangeStart = scope.optInt("planStartPage", 0);
+        int rangeEnd = scope.optInt("planEndPage", 0);
+        if (rangeStart > 0 && rangeEnd >= rangeStart) {
+            rangeStart = Math.max(1, rangeStart);
+            rangeEnd = Math.min(corpus.planPageCount(), rangeEnd);
+            for (int p = rangeStart; p <= rangeEnd; p++) pages.add(p);
+        }
+
+        JSONArray pageArray = scope.optJSONArray("planPages");
         if (pageArray != null) {
             for (int i = 0; i < pageArray.length(); i++) {
                 int p = pageArray.optInt(i, 0);
                 if (p > 0 && p <= corpus.planPageCount() && !pages.contains(p)) pages.add(p);
             }
         }
+
+        // If the scope returned only sample pages, include nearby pages as a safety
+        // net. Page-level extraction still filters by the discovered document scope.
+        if (!pages.isEmpty()) {
+            int min = java.util.Collections.min(pages);
+            int max = java.util.Collections.max(pages);
+            int from = Math.max(1, min - 3);
+            int to = Math.min(corpus.planPageCount(), max + 3);
+            for (int p = from; p <= to; p++) if (!pages.contains(p)) pages.add(p);
+        }
+
+        // Last-resort generic fallback: inspect all plan pages rather than silently
+        // returning a partial curriculum.
         if (pages.isEmpty()) {
-            throw new IllegalStateException("لم يستطع الذكاء تحديد صفحات الخطة المطابقة للمادة العلمية.");
+            for (int p = 1; p <= corpus.planPageCount(); p++) pages.add(p);
         }
 
         java.util.Collections.sort(pages);
@@ -143,8 +165,7 @@ final class AiPreparationClient {
             List<DiscoveredCurriculumStore.Entry> pageLessons = discoverLessonsOnPlanPage(
                     page,
                     scope,
-                    corpus.planPageWindow(page),
-                    materialOutline
+                    corpus.planPageWindow(page)
             );
             mergeExactCandidates(candidates, pageLessons);
         }
@@ -160,6 +181,11 @@ final class AiPreparationClient {
             throw new IllegalStateException("لم تبق دروس صالحة بعد التحقق من بنية الخطة.");
         }
 
+        // Locate every lesson in the material using the full text of every PDF page.
+        // This is intentionally independent of any pre-programmed subject/page map
+        // and allows multiple lessons to begin on the same physical page.
+        validated = corpus.resolveMaterialRanges(validated);
+
         String serialized = serializeCatalog(validated);
         prefs().edit().putString(key, serialized).apply();
         return validated;
@@ -170,10 +196,13 @@ final class AiPreparationClient {
         prompt.append("قارن مخطط صفحات الخطة الدراسية بمخطط صفحات المادة العلمية. ");
         prompt.append("استنتج فقط من النصين أي مادة/مستوى/فصل دراسي في الخطة يطابق المادة المرفقة. ");
         prompt.append("لا تفترض مادة أو صفاً أو عدداً من الدروس مسبقاً. ");
-        prompt.append("حدد أرقام صفحات PDF في الخطة التي تحتوي فعلياً جدول/قائمة دروس المنهج المطابق، ");
-        prompt.append("وليس صفحات الفهرس العامة أو صفوف مناهج أخرى. ");
+        prompt.append("حدد كامل المدى المتصل من صفحات PDF في الخطة الذي يغطي هذا المنهج من بدايته إلى نهايته، ");
+        prompt.append("ولا ترجع صفحات نموذجية فقط. إذا امتد المنهج على عدة صفحات يجب أن يشمل المدى جميعها. ");
+        prompt.append("يمكنك أيضاً إرجاع planPages لأي صفحات إضافية غير متصلة إن وجدت. ");
+        prompt.append("لا تعتمد على عدد دروس متوقع مسبقاً. ");
         prompt.append("أرجع JSON فقط: {\"subject\":\"\",\"grade\":\"\",\"semester\":\"\",");
-        prompt.append("\"planPages\":[1,2],\"evidence\":\"سبب مختصر من الوثيقتين\"}.\n");
+        prompt.append("\"planStartPage\":0,\"planEndPage\":0,\"planPages\":[],");
+        prompt.append("\"evidence\":\"سبب مختصر من الوثيقتين\"}.\n");
         prompt.append("\n=== مخطط الخطة صفحة بصفحة ===\n").append(limitRaw(planOutline, 30000));
         prompt.append("\n\n=== مخطط المادة صفحة بصفحة ===\n").append(limitRaw(materialOutline, 32000));
 
@@ -184,7 +213,7 @@ final class AiPreparationClient {
     }
 
     private List<DiscoveredCurriculumStore.Entry> discoverLessonsOnPlanPage(
-            int targetPage, JSONObject scope, String planWindow, String materialOutline) throws Exception {
+            int targetPage, JSONObject scope, String planWindow) throws Exception {
         StringBuilder prompt = new StringBuilder(65000);
         prompt.append("حلل نافذة من الخطة الدراسية مع مخطط المادة العلمية، واعتمد فقط ما يظهر في المصدر. ");
         prompt.append("الصفحة المستهدفة هي صفحة PDF رقم ").append(targetPage).append(". ");
@@ -193,15 +222,14 @@ final class AiPreparationClient {
         prompt.append("استنتج من بنية الخطة نفسها الفرق بين الدرس المستقل وبين عنوان الوحدة أو الموضوع الفرعي أو البند التابع. ");
         prompt.append("لا تعامل كل سطر أو كل حرف فرعي كدرس. لا تفترض عدداً نهائياً للدروس. ");
         prompt.append("احتفظ برمز الدرس كما يظهر في المصدر، وبالوحدة والفصل وعدد الحصص والتواريخ والمخرجات الرسمية إن وجدت. ");
-        prompt.append("استخدم مخطط المادة لتقدير أول وآخر صفحة PDF مرتبطة بكل درس، بدون اختراع صفحات. ");
+        prompt.append("لا تحاول تحديد صفحات المادة العلمية في هذه المرحلة؛ سيحددها التطبيق لاحقاً من الملف نفسه. ");
         prompt.append("أرجع JSON فقط: {\"lessons\":[{\"code\":\"\",\"title\":\"\",");
         prompt.append("\"unit\":\"\",\"semester\":\"\",\"periods\":0,");
-        prompt.append("\"start\":\"\",\"end\":\"\",\"objectives\":[],");
-        prompt.append("\"materialStartPage\":0,\"materialEndPage\":0}]}.\n");
+        prompt.append("\"start\":\"\",\"end\":\"\",\"objectives\":[]}]}.\n");
         prompt.append("\nهوية الوثيقة المستنتجة سابقاً: ")
                 .append(limitRaw(scope.toString(), 1200));
         prompt.append("\n\n=== نافذة الخطة ===\n").append(limitRaw(planWindow, 26000));
-        prompt.append("\n\n=== مخطط المادة ===\n").append(limitRaw(materialOutline, 32000));
+
 
         JSONObject payload = new JSONObject();
         payload.put("message", prompt.toString());
