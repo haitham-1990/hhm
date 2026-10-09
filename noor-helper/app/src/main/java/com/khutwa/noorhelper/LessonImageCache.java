@@ -4,9 +4,12 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.util.Base64;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -75,6 +78,22 @@ final class LessonImageCache {
         File[] files = imageFiles(context, lessonCode);
         if (index < 0 || index >= files.length) return null;
         return BitmapFactory.decodeFile(files[index].getAbsolutePath());
+    }
+
+
+    static String base64At(Context context, String lessonCode, int index) throws Exception {
+        File[] files = imageFiles(context, lessonCode);
+        if (index < 0 || index >= files.length) return "";
+        File file = files[index];
+        ByteArrayOutputStream out = new ByteArrayOutputStream((int) Math.min(file.length(), 1024 * 1024));
+        try (FileInputStream in = new FileInputStream(file)) {
+            byte[] buffer = new byte[16384];
+            int n;
+            while ((n = in.read(buffer)) >= 0) {
+                if (n > 0) out.write(buffer, 0, n);
+            }
+        }
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
     }
 
     private static File[] imageFiles(Context context, String lessonCode) {
