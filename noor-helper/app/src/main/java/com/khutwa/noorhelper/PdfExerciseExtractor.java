@@ -55,6 +55,59 @@ final class PdfExerciseExtractor {
         }
     }
 
+    static ExtractResult extractBetween(Context context, Uri uri,
+                                        String currentTitle, String nextTitle,
+                                        int startPageOneBased, int endPageOneBased,
+                                        int nextStartPageOneBased) throws Exception {
+        try (InputStream in = context.getContentResolver().openInputStream(uri);
+             PDDocument doc = PDDocument.load(in)) {
+            if (doc.getNumberOfPages() == 0) throw new IllegalStateException("ملف PDF فارغ");
+
+            int start = Math.max(0, startPageOneBased - 1);
+            if (start >= doc.getNumberOfPages()) throw new IllegalArgumentException("صفحة بداية الدرس خارج الملف");
+            int end = Math.min(doc.getNumberOfPages() - 1,
+                    Math.max(start, endPageOneBased > 0 ? endPageOneBased - 1 : start));
+
+            LessonKey currentKey = LessonKey.from(currentTitle);
+            PageLocator startLocator = PageLocator.locate(doc, start, currentKey);
+            float startY = startLocator.bestStartY;
+
+            int nextPage = nextStartPageOneBased > 0 ? nextStartPageOneBased - 1 : -1;
+            float nextY = -1f;
+            if (nextPage >= start && nextPage < doc.getNumberOfPages()
+                    && nextPage <= end && nextTitle != null && !nextTitle.trim().isEmpty()) {
+                LessonKey nextKey = LessonKey.from(nextTitle);
+                PageLocator nextLocator = PageLocator.locate(doc, nextPage, nextKey);
+                nextY = nextLocator.bestStartY;
+            }
+
+            PDFRenderer renderer = new PDFRenderer(doc);
+            List<Bitmap> images = new ArrayList<>();
+            for (int p = start; p <= end; p++) {
+                Bitmap page = renderer.renderImageWithDPI(p, 135, ImageType.RGB);
+                float pageHeightPt = doc.getPage(p).getCropBox().getHeight();
+                int top = 0;
+                int bottom = page.getHeight();
+
+                if (p == start && startY > 0) {
+                    top = Math.max(0, Math.round((startY - 22f) / pageHeightPt * page.getHeight()));
+                }
+                if (p == nextPage && nextY > 0) {
+                    bottom = Math.min(page.getHeight(),
+                            Math.round((nextY - 14f) / pageHeightPt * page.getHeight()));
+                }
+
+                if (bottom <= top + 10) continue;
+                Bitmap crop = Bitmap.createBitmap(page, 0, top, page.getWidth(), bottom - top);
+                if (crop != page) page.recycle();
+                images.add(downscale(crop, MAX_WIDTH));
+            }
+
+            if (images.isEmpty()) throw new IllegalStateException("تعذر قص صور الدرس بين عنوانه وعنوان الدرس التالي");
+            return new ExtractResult(images, start + 1, end + 1, "تقسيم ديناميكي بين عناوين الدروس", true);
+        }
+    }
+
     static ExtractResult renderPages(Context context, Uri uri, List<Integer> pdfPages) throws Exception {
         if (pdfPages == null || pdfPages.isEmpty()) {
             throw new IllegalArgumentException("لا توجد صفحات محفوظة لهذا الدرس.");
