@@ -60,6 +60,45 @@ final class PdfCorpusIndex {
         return out.toString();
     }
 
+    List<String> planPageSegments(int pageOneBased) {
+        List<String> out = new ArrayList<>();
+        int index = pageOneBased - 1;
+        if (index < 0 || index >= planPages.size()) return out;
+
+        String page = clean(planPages.get(index));
+        if (page.isEmpty()) return out;
+
+        String[] lines = page.split("\\n");
+        final int MAX_CHARS = 5600;
+        final int MAX_LINES = 34;
+        final int OVERLAP_LINES = 4;
+
+        int start = 0;
+        while (start < lines.length) {
+            StringBuilder part = new StringBuilder();
+            int end = start;
+            while (end < lines.length && end - start < MAX_LINES) {
+                String line = clean(lines[end]);
+                if (!line.isEmpty()) {
+                    if (part.length() + line.length() + 1 > MAX_CHARS && part.length() > 0) break;
+                    part.append(line).append("\n");
+                }
+                end++;
+            }
+
+            if (part.length() > 0) {
+                out.add("--- صفحة الخطة PDF " + pageOneBased
+                        + " | مقطع " + (out.size() + 1) + " ---\n" + part.toString());
+            }
+
+            if (end >= lines.length) break;
+            start = Math.max(start + 1, end - OVERLAP_LINES);
+        }
+
+        if (out.isEmpty()) out.add("--- صفحة الخطة PDF " + pageOneBased + " ---\n" + page);
+        return out;
+    }
+
     int planPageCount() {
         return planPages.size();
     }
