@@ -75,6 +75,11 @@ final class GenericSchedulePlanner {
                 && safe(a.periodEnd).equals(safe(b.periodEnd));
     }
 
+    static List<String> candidateDates(CurriculumLesson lesson) {
+        if (lesson == null) return new ArrayList<>();
+        return workingDays(lesson.periodStart, lesson.periodEnd);
+    }
+
     private static List<String> workingDays(String start, String end) {
         List<String> out = new ArrayList<>();
         try {
