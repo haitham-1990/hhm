@@ -53,9 +53,11 @@ final class AiPreparationClient {
     private static final int READ_TIMEOUT_MS = 60000;
 
     private final Context context;
+    private final DiscoveryDiagnostics diagnostics;
 
     AiPreparationClient(Context context) {
         this.context = context.getApplicationContext();
+        this.diagnostics = new DiscoveryDiagnostics(this.context);
     }
 
     LessonPreparation getCached(String title) {
@@ -122,7 +124,17 @@ final class AiPreparationClient {
             return parseCatalogArray(cached);
         }
 
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("plan_pages", corpus.planPageCount());
+            meta.put("material_pages", corpus.materialPageCount());
+            meta.put("plan_outline_chars", planOutline.length());
+            meta.put("material_outline_chars", materialOutline.length());
+            diagnostics.log("discovery_begin", meta);
+        } catch (Exception ignored) {}
+
         JSONObject scope = discoverDocumentScope(planOutline, materialOutline);
+        diagnostics.log("scope_result", scope);
         List<Integer> pages = new ArrayList<>();
 
         int rangeStart = scope.optInt("planStartPage", 0);
@@ -165,15 +177,36 @@ final class AiPreparationClient {
             List<String> segments = corpus.planPageSegments(page);
             if (segments.isEmpty()) segments = java.util.Collections.singletonList(corpus.planPageWindow(page));
 
+            int segmentIndex = 0;
             for (String segment : segments) {
+                segmentIndex++;
                 List<DiscoveredCurriculumStore.Entry> pageLessons = discoverLessonsOnPlanPage(
                         page,
                         scope,
                         segment
                 );
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("plan_page", page);
+                    meta.put("segment", segmentIndex);
+                    meta.put("segment_chars", segment == null ? 0 : segment.length());
+                    JSONArray found = new JSONArray();
+                    for (DiscoveredCurriculumStore.Entry e : pageLessons) {
+                        JSONObject x = new JSONObject();
+                        x.put("code", e.lesson.code);
+                        x.put("title", e.lesson.title);
+                        x.put("unit", e.lesson.unit);
+                        found.put(x);
+                    }
+                    meta.put("count", found.length());
+                    meta.put("lessons", found);
+                    diagnostics.log("plan_segment_result", meta);
+                } catch (Exception ignored) {}
                 mergeExactCandidates(candidates, pageLessons);
             }
         }
+
+        diagnostics.logLessons("candidates_before_hierarchy", candidates);
 
         if (candidates.isEmpty()) {
             throw new IllegalStateException("تم تحديد صفحات الخطة، لكن لم تُكتشف دروس مستقلة فيها.");
@@ -181,6 +214,8 @@ final class AiPreparationClient {
 
         List<DiscoveredCurriculumStore.Entry> validated =
                 validateLessonHierarchy(candidates, planOutline);
+
+        diagnostics.logLessons("catalog_after_hierarchy", validated);
 
         if (validated.isEmpty()) {
             throw new IllegalStateException("لم تبق دروس صالحة بعد التحقق من بنية الخطة.");
@@ -190,6 +225,7 @@ final class AiPreparationClient {
         // This is intentionally independent of any pre-programmed subject/page map
         // and allows multiple lessons to begin on the same physical page.
         validated = corpus.resolveMaterialRanges(validated);
+        diagnostics.logLessons("catalog_with_material_ranges", validated);
 
         String serialized = serializeCatalog(validated);
         prefs().edit().putString(key, serialized).apply();
@@ -272,8 +308,10 @@ final class AiPreparationClient {
 
         try {
             JSONObject decision = new JSONObject(cleanJson(postForAnswer(payload)));
+            diagnostics.log("hierarchy_decision", decision);
             return applyHierarchyDecision(candidates, decision);
         } catch (Exception e) {
+            diagnostics.logMessage("hierarchy_validation_error", e.getMessage());
             // Safe fallback: exact-deduplicated candidates are still preferable to
             // silently dropping lessons because a validation response failed.
             return candidates;
