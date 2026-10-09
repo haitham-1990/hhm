@@ -71,7 +71,10 @@ final class PdfCorpusIndex {
     private static String compactSnippet(String text, int max) {
         if (text == null) return "";
         String v = text.replace('\n', ' ').replaceAll("\\s+", " ").trim();
-        return v.length() <= max ? v : v.substring(0, max);
+        if (v.length() <= max) return v;
+        int head = Math.max(1, max / 2);
+        int tail = Math.max(1, max - head);
+        return v.substring(0, head) + " … " + v.substring(Math.max(head, v.length() - tail));
     }
 
     String planDiscoveryContext() {
@@ -98,6 +101,142 @@ final class PdfCorpusIndex {
                     .append(compactSnippet(page, 220));
         }
         return out.toString();
+    }
+
+    List<DiscoveredCurriculumStore.Entry> resolveMaterialRanges(
+            List<DiscoveredCurriculumStore.Entry> catalog) {
+        List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
+        if (catalog == null || catalog.isEmpty() || materialPages.isEmpty()) return out;
+
+        List<LessonKey> keys = new ArrayList<>();
+        for (DiscoveredCurriculumStore.Entry e : catalog) {
+            CurriculumLesson l = e.lesson;
+            keys.add(LessonKey.from((l.noorCode().isEmpty() ? "" : l.noorCode() + " ") + l.title));
+        }
+
+        int[] crowd = new int[materialPages.size()];
+        for (int p = 0; p < materialPages.size(); p++) {
+            String page = materialPages.get(p);
+            int hits = 0;
+            for (LessonKey key : keys) {
+                if (headingScore(page, key) >= 230) hits++;
+            }
+            crowd[p] = hits;
+        }
+
+        int[] starts = new int[catalog.size()];
+        int previousStart = 1;
+
+        for (int i = 0; i < catalog.size(); i++) {
+            LessonKey key = keys.get(i);
+            int from = Math.max(0, previousStart - 1);
+            int bestPage = -1;
+            int bestScore = Integer.MIN_VALUE;
+
+            for (int p = from; p < materialPages.size(); p++) {
+                String page = materialPages.get(p);
+                int s = score(page, key, false) + headingScore(page, key);
+
+                // Pages containing many different lesson headings are usually a
+                // contents/index page. Penalize them instead of assuming that all
+                // those lessons start there.
+                if (crowd[p] >= 4) s -= 180 + (crowd[p] * 18);
+
+                // Preserve document order without forbidding two lessons from
+                // beginning on the same physical page.
+                int distance = Math.max(0, (p + 1) - previousStart);
+                s -= Math.min(90, distance / 2);
+
+                if (s > bestScore) {
+                    bestScore = s;
+                    bestPage = p;
+                }
+            }
+
+            if (bestPage >= 0 && bestScore > 80) {
+                starts[i] = bestPage + 1;
+                previousStart = starts[i];
+            } else {
+                int fallback = catalog.get(i).materialStartPage;
+                starts[i] = fallback > 0 ? fallback : 0;
+                if (starts[i] > 0) previousStart = starts[i];
+            }
+        }
+
+        // Repair occasional backwards jumps by keeping source order monotonic.
+        int floor = 1;
+        for (int i = 0; i < starts.length; i++) {
+            if (starts[i] <= 0) continue;
+            if (starts[i] < floor) starts[i] = floor;
+            floor = starts[i];
+        }
+
+        for (int i = 0; i < catalog.size(); i++) {
+            DiscoveredCurriculumStore.Entry old = catalog.get(i);
+            int start = starts[i];
+
+            if (start <= 0) {
+                out.add(new DiscoveredCurriculumStore.Entry(old.lesson, 0, 0));
+                continue;
+            }
+
+            int nextStart = 0;
+            for (int j = i + 1; j < starts.length; j++) {
+                if (starts[j] > 0) {
+                    nextStart = starts[j];
+                    break;
+                }
+            }
+
+            int end;
+            if (nextStart > 0) {
+                // Include the next lesson's start page. Image extraction will crop
+                // at the next heading, so half-page boundaries are preserved.
+                end = Math.max(start, nextStart);
+            } else {
+                // Last lesson: use the last page that still contains evidence for
+                // this lesson, with one continuation page when available.
+                LessonKey key = keys.get(i);
+                int lastEvidence = start;
+                for (int p = start - 1; p < materialPages.size(); p++) {
+                    int s = score(materialPages.get(p), key, false);
+                    if (s > 15) lastEvidence = p + 1;
+                }
+                end = Math.min(materialPages.size(), Math.max(start, lastEvidence + 1));
+            }
+
+            out.add(new DiscoveredCurriculumStore.Entry(old.lesson, start, end));
+        }
+
+        return out;
+    }
+
+    private static int headingScore(String raw, LessonKey key) {
+        if (raw == null || raw.isEmpty()) return 0;
+        int best = 0;
+        String targetTitle = normalize(key.title);
+        String targetCode = compactCode(key.code);
+
+        String[] lines = raw.split("\\n");
+        for (String line : lines) {
+            String n = normalize(line);
+            String cc = compactCode(line);
+            int s = 0;
+
+            if (!targetCode.isEmpty() && cc.contains(targetCode)) s += 180;
+            if (!targetTitle.isEmpty() && n.contains(targetTitle)) s += 240;
+
+            int wordHits = 0;
+            for (String word : key.words) {
+                if (word.length() >= 3 && n.contains(word)) wordHits++;
+            }
+            s += Math.min(5, wordHits) * 32;
+
+            String trimmed = line == null ? "" : line.trim();
+            if (trimmed.length() > 0 && trimmed.length() <= 120) s += 22;
+            best = Math.max(best, s);
+        }
+        return best;
     }
 
     String materialRangeText(int startPage, int endPage) {
