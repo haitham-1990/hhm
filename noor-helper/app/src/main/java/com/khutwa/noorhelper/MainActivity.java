@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - سائق نور 0.6.9 العام 1.0.11");
+        title.setText("نور الذكي - سائق نور 0.6.9 العام 1.0.12");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -859,7 +859,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.11.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.12.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1947,32 +1947,76 @@ public class MainActivity extends Activity {
 
     private void selectAutoTimeslots(CurriculumLesson lesson, List<String> dates, int index, int attempt) {
         if (!autoActive) return;
+        if (dates == null || index < 0 || index >= dates.size()) {
+            finalizeAutoLessonAndSave(lesson);
+            return;
+        }
+
         int row = index + 1;
+        String activeDate = dates.get(index);
         String js = "(function(){var target='data[plane][date" + row + "][timeslot][]';"
-                + "var a=[].slice.call(document.querySelectorAll('input[type=checkbox]')).filter(function(e){var r=e.getBoundingClientRect();return e.name===target&&r.width>0&&r.height>0;});"
+                + "var a=[].slice.call(document.querySelectorAll('input[type=checkbox]')).filter(function(e){var r=e.getBoundingClientRect();return e.name===target&&r.width>0&&r.height>0&&!e.disabled;});"
                 + "var n=0;for(var i=0;i<a.length;i++){if(!a[i].checked)a[i].click();if(a[i].checked)n++;}return String(n);})()";
         webView.evaluateJavascript(js, raw -> {
             int selected = parseJsInt(raw);
-            if (attempt == 0 || selected > 0 || attempt >= 8) {
+            if (attempt == 0 || selected > 0 || attempt >= 14) {
                 try {
                     JSONObject meta = new JSONObject();
                     meta.put("row", row);
-                    meta.put("date", dates.get(index));
+                    meta.put("date", activeDate);
                     meta.put("attempt", attempt);
                     meta.put("selected_timeslots", selected);
                     logAutoStage("timeslot_selection_result", lesson, meta);
                 } catch (Exception ignored) {}
             }
+
             if (selected <= 0) {
-                if (attempt < 9) {
-                    status.setText("أنتظر نور ليحمّل حصص " + dates.get(index) + "...");
-                    webView.postDelayed(() -> selectAutoTimeslots(lesson, dates, index, attempt + 1), 700);
-                } else {
-                    stopAutoWithError("لم تظهر حصص المادة للتاريخ " + dates.get(index) + ".");
+                if (attempt < 15) {
+                    status.setText("أنتظر نور ليحمّل حصص " + activeDate + "...");
+                    webView.postDelayed(() -> selectAutoTimeslots(lesson, dates, index, attempt + 1), 750);
+                    return;
                 }
+
+                try {
+                    JSONObject meta = new JSONObject();
+                    meta.put("row", row);
+                    meta.put("date", activeDate);
+                    meta.put("reason", "no_timeslots_after_wait");
+                    meta.put("remaining_dates_before_skip", dates.size() - index - 1);
+                    logAutoStage("publication_date_skipped", lesson, meta);
+                } catch (Exception ignored) {}
+
+                // Clear the exhausted row before reusing it for the next planned date.
+                String clearJs = "(function(){" + baseHelpers()
+                        + "var d=document.getElementById('publishdate-" + row + "');"
+                        + "var w=document.getElementById('week_id-" + row + "');"
+                        + "if(d){d.value='';fire(d);}if(w){w.selectedIndex=0;fire(w);}"
+                        + "var target='data[plane][date" + row + "][timeslot][]';"
+                        + "var a=[].slice.call(document.querySelectorAll('input[type=checkbox]')).filter(function(e){return e.name===target;});"
+                        + "for(var i=0;i<a.length;i++){if(a[i].checked)a[i].click();}return '1';})()";
+
+                webView.evaluateJavascript(clearJs, ignoredRaw -> {
+                    dates.remove(index);
+
+                    if (index < dates.size()) {
+                        status.setText("لا توجد حصص متاحة في " + activeDate
+                                + " — أجرب التاريخ التالي " + dates.get(index) + "...");
+                        webView.postDelayed(() -> configureAutoPublicationRow(lesson, dates, index, 0), 450);
+                        return;
+                    }
+
+                    if (index > 0) {
+                        status.setText("لا توجد حصص إضافية بعد " + activeDate
+                                + " — أحفظ التواريخ التي نجحت.");
+                        webView.postDelayed(() -> finalizeAutoLessonAndSave(lesson), 350);
+                    } else {
+                        stopAutoWithError("لم تظهر أي حصص متاحة ضمن تواريخ الدرس بعد تجربة جميع التواريخ.");
+                    }
+                });
                 return;
             }
-            status.setText("تم تحديد " + selected + " حصة في " + dates.get(index) + ".");
+
+            status.setText("تم تحديد " + selected + " حصة في " + activeDate + ".");
             webView.postDelayed(() -> configureAutoPublicationRow(lesson, dates, index + 1, 0), 350);
         });
     }
