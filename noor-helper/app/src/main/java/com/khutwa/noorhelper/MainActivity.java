@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - قارئ الشجرة 1.0.7");
+        title.setText("نور الذكي - محرك نور العام 1.0.8");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -831,7 +831,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.7.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.8.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1291,78 +1291,82 @@ public class MainActivity extends Activity {
 
 
     private void autoTreeStage(CurriculumLesson lesson, int stage, int retry) {
-        if (!autoActive || autoCurrentIndex < 0) return;
+        if (!autoActive || lesson == null || autoCurrentIndex < 0) return;
 
-        List<String> path = new ArrayList<>();
-        if (lesson.semester != null && !lesson.semester.trim().isEmpty()) {
-            path.add(lesson.semester.trim());
-        }
-        if (lesson.unit != null && !lesson.unit.trim().isEmpty()) {
-            path.add(lesson.unit.trim());
+        if (retry == 0) {
+            status.setText("أقرأ شجرة نور بأسلوب مساعد نور 0.6.9 وأبحث عن «"
+                    + lesson.displayName() + "»...");
         }
 
-        if (stage >= path.size()) {
-            webView.evaluateJavascript(treeClickLessonScript(lesson), raw -> {
-                int ok = parseJsInt(raw);
-                try {
-                    JSONObject meta = new JSONObject();
-                    meta.put("stage", stage);
-                    meta.put("retry", retry);
-                    meta.put("result", ok);
-                    meta.put("path_size", path.size());
-                    logAutoStage("tree_lesson_click_result", lesson, meta);
-                } catch (Exception ignored) {}
+        webView.evaluateJavascript(treeDriver069GenericScript(lesson), raw -> {
+            String result;
+            try {
+                result = decodeJsString(raw).trim();
+            } catch (Exception ignored) {
+                result = raw == null ? "" : raw.replace("\"", "").trim();
+            }
 
-                if (ok > 0) {
-                    status.setText("تم اختيار " + lesson.displayName() + " — أنتظر نور ليحمّل العنوان والأهداف...");
-                    webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1400);
-                    return;
-                }
-
-                captureNoorDiagnosticSnapshot("tree_direct_lesson_not_found", lesson);
-                autoExploreTreeForLesson(lesson, 0);
-            });
-            return;
-        }
-
-        String parent = stage == 0 ? "عرض الشجرة -" : path.get(stage - 1);
-        String child = path.get(stage);
-        boolean exactParent = stage > 0;
-
-        webView.evaluateJavascript(treeEnsureChildScript(parent, child, exactParent), raw -> {
-            int state = parseJsInt(raw);
             try {
                 JSONObject meta = new JSONObject();
+                meta.put("driver", "0.6.9-generic");
                 meta.put("stage", stage);
                 meta.put("retry", retry);
-                meta.put("parent_query", parent);
-                meta.put("child_query", child);
-                meta.put("exact_parent", exactParent);
-                meta.put("result", state);
+                meta.put("result", result);
                 logAutoStage("tree_path_result", lesson, meta);
             } catch (Exception ignored) {}
 
-            if (state == 2) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage + 1, 0), 300);
+            if ("clicked".equals(result)) {
+                status.setText("تم اختيار " + lesson.displayName()
+                        + " — أنتظر نور ليحمّل العنوان والأهداف...");
+                webView.postDelayed(() -> waitForAutoLessonForm(lesson, 0), 1400);
                 return;
             }
 
-            if (state == 1 && retry < 8) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 650);
+            if (retry == 0 || retry % 10 == 0) {
+                captureNoorDiagnosticSnapshot("tree_069_generic_retry_" + retry + "_" + result, lesson);
+            }
+
+            if (retry < 80) {
+                long delay = "waiting".equals(result) || "not_found".equals(result) ? 750L : 550L;
+                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), delay);
                 return;
             }
 
-            if (state <= 0 && retry < 4) {
-                webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), 650);
-                return;
-            }
-
-            // Noor sometimes abbreviates nodes (e.g. "الأول" instead of
-            // "الفصل الدراسي الأول") or changes unit labels. Fall back to
-            // discovering the live tree instead of relying on curriculum labels.
-            captureNoorDiagnosticSnapshot("tree_path_fallback_stage_" + stage + "_retry_" + retry, lesson);
-            autoExploreTreeForLesson(lesson, 0);
+            captureNoorDiagnosticSnapshot("tree_069_generic_failed", lesson);
+            stopAutoWithError("لم أجد درس «" + lesson.displayName()
+                    + "» بعد قراءة شجرة نور كاملة.");
         });
+    }
+
+
+    private String treeDriver069GenericScript(CurriculumLesson lesson) {
+        return "(function(){"
+                + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
+                + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim());}"
+                + "function semesterKey(s){return norm(s).replace(/الفصل/g,'').replace(/الدراسي/g,'').replace(/semester/ig,'').replace(/term/ig,'').replace(/\\s+/g,' ').trim();}"
+                + "function compact(s){return norm(s).replace(/[^\\p{L}\\p{N}]+/gu,'');}"
+                + "function codeOf(s){var m=norm(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
+                + "function vis(e){try{var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(x){return false;}}"
+                + "function openLi(li){if(!li)return false;var cls=String(li.className||'');if(cls.indexOf('jstree-open')>=0)return false;"
+                + "try{if(window.jQuery){var tr=jQuery(li).closest('.jstree');if(tr.length&&tr.jstree){tr.jstree('open_node',li);return true;}}}catch(e){}"
+                + "var oc=null;for(var i=0;i<li.children.length;i++){var ch=li.children[i];if((ch.className||'').indexOf('jstree-ocl')>=0){oc=ch;break;}}"
+                + "if(oc&&oc.click){oc.click();return true;}var a=li.querySelector(':scope > a');if(a&&a.click){a.click();return true;}return false;}"
+                + "var root=document.getElementById('jstree_node_tree')||document.querySelector('.jstree');if(!root)return 'no_tree';"
+                + "var semester=" + JSONObject.quote(lesson.semester) + ",sk=semesterKey(semester);"
+                + "var code=" + JSONObject.quote(lesson.noorCode()) + ",tc=codeOf(code),title=" + JSONObject.quote(lesson.title) + ",ct=compact(title);"
+                + "var anchors=[].slice.call(root.querySelectorAll('a[id$=_anchor],a')),sem=null;"
+                + "if(sk){for(var i=0;i<anchors.length;i++){if(!vis(anchors[i]))continue;var tx=semesterKey(anchors[i].innerText||anchors[i].textContent||'');if(tx&&(tx===sk||tx.indexOf(sk)>=0||sk.indexOf(tx)>=0)){sem=anchors[i];break;}}}"
+                + "if(!sem){var rootLi=root.querySelector('li.jstree-closed');if(rootLi&&openLi(rootLi))return 'opened';}"
+                + "var scope=root;if(sem&&sem.closest){var sli=sem.closest('li');if(sli){if((String(sli.className||'')).indexOf('jstree-closed')>=0&&openLi(sli))return 'opened';scope=sli;}}"
+                + "var a=[].slice.call(scope.querySelectorAll('a[id$=_anchor],a')),best=null,bestLen=1e9;"
+                + "for(var j=0;j<a.length;j++){if(!vis(a[j]))continue;var raw=a[j].innerText||a[j].textContent||'';var cc=codeOf(raw);"
+                + "if(tc&&cc===tc){var ln=norm(raw).length;if(ln<bestLen){best=a[j];bestLen=ln;}}}"
+                + "if(!best&&ct){for(var k=0;k<a.length;k++){if(!vis(a[k]))continue;var cr=compact(a[k].innerText||a[k].textContent||'');if(cr&&cr.indexOf(ct)>=0&&cr.length<bestLen){best=a[k];bestLen=cr.length;}}}"
+                + "if(best){best.click();return 'clicked';}"
+                + "var closed=[].slice.call(scope.querySelectorAll('li.jstree-closed'));for(var z=0;z<closed.length;z++){if(openLi(closed[z]))return 'opened';}"
+                + "if(scope.querySelector('li.jstree-loading'))return 'waiting';"
+                + "return 'not_found';"
+                + "})()";
     }
 
 
@@ -1784,9 +1788,27 @@ public class MainActivity extends Activity {
     }
 
     private void applyAutoSchedule(CurriculumLesson lesson) {
-        List<String> dates = GenericSchedulePlanner.datesFor(lesson, autoLessons);
+        CurriculumLesson scheduleLesson = lesson;
+        if (currentDbEntry != null
+                && (!currentDbEntry.startDate.trim().isEmpty() || !currentDbEntry.endDate.trim().isEmpty())) {
+            scheduleLesson = new CurriculumLesson(
+                    lesson.code,
+                    lesson.title,
+                    lesson.unit,
+                    lesson.semester,
+                    currentDbEntry.periods > 0 ? currentDbEntry.periods : lesson.periods,
+                    currentDbEntry.startDate.trim().isEmpty() ? lesson.periodStart : currentDbEntry.startDate,
+                    currentDbEntry.endDate.trim().isEmpty() ? lesson.periodEnd : currentDbEntry.endDate,
+                    currentDbEntry.level,
+                    currentDbEntry.objectives,
+                    currentDbEntry.strategies,
+                    currentDbEntry.resources
+            );
+        }
+        List<String> dates = GenericSchedulePlanner.datesFor(scheduleLesson, autoLessons);
         if (dates.isEmpty()) {
-            stopAutoWithError("لم أستطع حساب تواريخ النشر من الخطة.");
+            captureNoorDiagnosticSnapshot("schedule_dates_missing_from_content", lesson);
+            stopAutoWithError("لم أستطع حساب تواريخ النشر لأن الخطة المرفقة لم تُربط بهذا الدرس بعد.");
             return;
         }
         status.setText("أجهز " + dates.size() + " تاريخ/تواريخ نشر حسب الخطة...");
