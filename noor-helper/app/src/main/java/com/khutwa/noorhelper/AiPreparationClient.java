@@ -912,7 +912,7 @@ final class AiPreparationClient {
     SourceResult generateFromSources(String title, List<String> noorOutcomes,
                                      String planContext, String materialContext) throws Exception {
         String sourceKey = title + "\n" + planContext + "\n" + materialContext;
-        String key = "source_flow_v2_" + hashShort(sourceKey);
+        String key = "source_flow_v3_questioncrop_" + hashShort(sourceKey);
         String cached = prefs().getString(key, null);
         if (cached != null && !cached.trim().isEmpty()) {
             return parseSourceResult(title, cached);
@@ -958,7 +958,7 @@ final class AiPreparationClient {
                 repairPayload.put("message",
                         "أصلح النص التالي إلى JSON صحيح فقط دون أي شرح، مع الحفاظ على المعنى وجميع الحقول "
                         + "o,l,periods,start,end,st,rs,c,i,p,f,s,w. "
-                        + "الحقل p يمكن أن يكون مصفوفة مراحل تدريسية بعناصر t,teacher,student,source,check,pg. "
+                        + "الحقل p يمكن أن يكون مصفوفة مراحل تدريسية بعناصر t,teacher,student,source,check,q,qend,qpg. "
                         + "لا تضف مفاتيح أخرى. الدرس: " + limit(title, 180)
                         + "\nالنص غير الصالح:\n" + limitRaw(answer, 7000));
                 String repaired = cleanJson(postForAnswer(repairPayload));
@@ -1000,10 +1000,11 @@ final class AiPreparationClient {
         b.append("لكل مرحلة اذكر: عنواناً قصيراً، دور المعلم، دور الطالب، ما يستخدم من المادة العلمية، وطريقة تحقق سريعة من التعلم. ");
         b.append("اجعل التعليمات قابلة للتنفيذ داخل الحصة وليست عبارات عامة. ");
         b.append("لا تضع إجابات مباشرة لأسئلة الكتاب أو التمارين، ويمكنك وصف طريقة التوجيه دون كشف الحل. ");
-        b.append("إذا كانت صفحة معينة تحتوي عنصراً بصرياً مفيداً للمرحلة مثل شكل أو جدول أو خريطة أو تجربة أو مثال يستحق العرض، ");
-        b.append("ضع رقم صفحة PDF الحقيقي في pg كما يظهر فقط في علامة [MATERIAL PDF N]. ");
-        b.append("لا تضع رقم صفحة بالتخمين، ولا تستخدم pg لمجرد أن الصفحة تحتوي نصاً. ");
-        b.append("استخدم بحد أقصى 3 صفحات بصرية فريدة في الدرس كله، ويمكن أن تكون pg فارغة تماماً.");
+        b.append("لكل مرحلة، إذا كان في المادة سؤال أو نشاط أو مثال بصري مناسب لها ويستحق عرضه للطلبة، اختر عنصراً واحداً فقط من المصدر. ");
+        b.append("في q انسخ بداية السؤال/النشاط من النص كما ظهرت في المادة دون إعادة صياغة، وفي qend انسخ آخر عبارة قصيرة من نفس الكتلة، ");
+        b.append("وفي qpg ضع رقم صفحة PDF الحقيقي كما يظهر في علامة [MATERIAL PDF N]. ");
+        b.append("إذا لا يوجد عنصر مناسب أو لا تستطيع تحديده بثقة، اجعل q وqend فارغين وqpg=0. ");
+        b.append("لا تخترع سؤالاً ولا رقم صفحة، ولا تضع حلولاً. استخدم بحد أقصى 3 عناصر مصورة في الدرس كله.");
 
         b.append("\n\nاختر الاستراتيجيات فقط من هذه القائمة وبالأسماء نفسها: ");
         b.append("الفصل المقلوب، التعلم التعاوني، التعلم التشاركي، التعلم الذاتي، التعلم بالاكتشاف، ");
@@ -1091,13 +1092,18 @@ final class AiPreparationClient {
             appendProcedureRow(out, "من المادة العلمية", source);
             appendProcedureRow(out, "تحقق سريع", check);
 
-            JSONArray pages = stage.optJSONArray("pg");
-            if (pages != null) {
-                for (int p = 0; p < pages.length() && usedPages.size() < 3; p++) {
-                    int page = pages.optInt(p, 0);
-                    if (page <= 0 || usedPages.contains(page)) continue;
-                    usedPages.add(page);
-                    out.append("<div data-khutwa-page=\"").append(page)
+            int qPage = stage.optInt("qpg", 0);
+            String q = stage.optString("q", "").trim();
+            String qEnd = stage.optString("qend", "").trim();
+            if (qPage > 0 && !q.isEmpty() && usedPages.size() < 3) {
+                String uniqueKey = qPage + "|" + q;
+                int stable = uniqueKey.hashCode();
+                if (!usedPages.contains(stable)) {
+                    usedPages.add(stable);
+                    out.append("<div data-khutwa-question=\"1\" data-khutwa-page=\"")
+                            .append(qPage)
+                            .append("\" data-khutwa-q=\"").append(html(q))
+                            .append("\" data-khutwa-qend=\"").append(html(qEnd))
                             .append("\" style=\"margin:8px 0;\"></div>");
                 }
             }
