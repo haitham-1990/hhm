@@ -18,16 +18,14 @@ final class LessonImageCache {
     private LessonImageCache() {}
 
     static int build(Context context, Uri materialUri, String lessonCode,
-                     String lessonTitle, List<Integer> pages) throws Exception {
-        PdfExerciseExtractor.ExtractResult result;
-        try {
-            // For the known exercise file this uses the exact lesson map, including
-            // half-page crops such as the shared page between two lessons.
-            result = PdfExerciseExtractor.extract(context, materialUri, lessonTitle);
-        } catch (Exception exactError) {
-            // Generic fallback for future files.
-            result = PdfExerciseExtractor.renderPages(context, materialUri, pages);
-        }
+                     String lessonTitle, String nextLessonTitle,
+                     int startPage, int endPage, int nextStartPage) throws Exception {
+        PdfExerciseExtractor.ExtractResult result =
+                PdfExerciseExtractor.extractBetween(
+                        context, materialUri,
+                        lessonTitle, nextLessonTitle,
+                        startPage, endPage, nextStartPage
+                );
 
         File lessonDir = lessonDir(context, lessonCode);
         deleteRecursively(lessonDir);
@@ -62,6 +60,7 @@ final class LessonImageCache {
         }
         return saved;
     }
+
 
     static List<Bitmap> load(Context context, String lessonCode) {
         List<Bitmap> out = new ArrayList<>();
