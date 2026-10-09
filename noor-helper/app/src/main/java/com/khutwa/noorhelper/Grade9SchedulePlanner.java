@@ -15,7 +15,11 @@ final class Grade9SchedulePlanner {
     private Grade9SchedulePlanner() {}
 
     static List<String> datesFor(Grade9Curriculum.Lesson target) {
-        List<Grade9Curriculum.Lesson> all = Grade9Curriculum.allLessons();
+        return datesFor(target, Grade9Curriculum.allLessons());
+    }
+
+    static List<String> datesFor(Grade9Curriculum.Lesson target, List<Grade9Curriculum.Lesson> all) {
+        if (all == null) all = new ArrayList<>();
         List<Grade9Curriculum.Lesson> unit = new ArrayList<>();
         int offset = 0;
         int total = 0;
