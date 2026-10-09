@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - محرك نور العام 1.0.8");
+        title.setText("نور الذكي - محرك عام آمن 1.0.9");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -607,6 +607,17 @@ public class MainActivity extends Activity {
         worker.execute(() -> {
             List<String> failed = new ArrayList<>();
             try {
+                try {
+                    Runtime rt = Runtime.getRuntime();
+                    JSONObject meta = new JSONObject();
+                    meta.put("max_heap_mb", Math.round(rt.maxMemory() / 1048576.0));
+                    meta.put("used_heap_mb", Math.round((rt.totalMemory() - rt.freeMemory()) / 1048576.0));
+                    meta.put("free_heap_mb", Math.round((rt.maxMemory() - (rt.totalMemory() - rt.freeMemory())) / 1048576.0));
+                    meta.put("plan_file", pdfName(studyPlanPdfUri));
+                    meta.put("material_file", pdfName(subjectMaterialPdfUri));
+                    diagnostics.log("pdf_index_begin", meta);
+                } catch (Exception ignored) {}
+
                 PdfCorpusIndex corpus = PdfCorpusIndex.build(this, studyPlanPdfUri, subjectMaterialPdfUri);
                 try {
                     JSONObject meta = new JSONObject();
@@ -715,6 +726,19 @@ public class MainActivity extends Activity {
                             status.setText("تم " + lesson.displayName() + " — القاعدة " + ready + " / " + total);
                             updateDatabaseStatus();
                         });
+                    } catch (OutOfMemoryError memoryError) {
+                        try {
+                            JSONObject meta = new JSONObject();
+                            meta.put("code", lesson.code);
+                            meta.put("title", lesson.title);
+                            meta.put("material_start_page", entry.materialStartPage);
+                            meta.put("material_end_page", entry.materialEndPage);
+                            meta.put("error", "OutOfMemoryError");
+                            diagnostics.log("lesson_build_memory_error", meta);
+                        } catch (Exception ignored) {}
+                        failed.add(lesson.displayName() + ": الذاكرة غير كافية لمعالجة صور الدرس.");
+                        System.gc();
+                        runOnUiThread(() -> status.setText("أوقفت تجهيز هذا الدرس لحماية التطبيق من ضغط الذاكرة."));
                     } catch (Exception lessonError) {
                         try {
                             JSONObject meta = new JSONObject();
@@ -732,6 +756,10 @@ public class MainActivity extends Activity {
                                 + " — سأكمل البقية. " + shortError));
                     }
                 }
+            } catch (OutOfMemoryError e) {
+                diagnostics.logMessage("database_build_memory_error", "OutOfMemoryError أثناء فهرسة/تحليل ملفات PDF");
+                failed.add("ذاكرة الجهاز لم تكفِ لمعالجة ملف PDF. تم إيقاف التجهيز بأمان بدل إغلاق التطبيق.");
+                System.gc();
             } catch (Exception e) {
                 diagnostics.logMessage("database_build_fatal_error", e.getMessage());
                 failed.add("اكتشاف/فهرسة المنهج: " + e.getMessage());
@@ -831,7 +859,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.8.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.9.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
