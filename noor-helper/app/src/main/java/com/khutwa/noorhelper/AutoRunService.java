@@ -32,8 +32,8 @@ public class AutoRunService extends Service {
                 : new Notification.Builder(this);
 
         Notification notification = builder
-                .setContentTitle("مساعد نور يعمل")
-                .setContentText("جاري تحضير الدروس. افتح التطبيق لمتابعة التقدم.")
+                .setContentTitle("نور الذكي يعمل")
+                .setContentText("جاري تجهيز قاعدة التحضير أو نشر الدروس تلقائيًا.")
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
                 .setOngoing(true)
                 .setContentIntent(pending)
@@ -46,10 +46,10 @@ public class AutoRunService extends Service {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "تشغيل مساعد نور",
+                "تشغيل نور الذكي",
                 NotificationManager.IMPORTANCE_LOW
         );
-        channel.setDescription("يبقي عملية التحضير نشطة أثناء التشغيل التلقائي.");
+        channel.setDescription("يبقي تجهيز القاعدة والتشغيل التلقائي نشطين.");
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.createNotificationChannel(channel);
     }
