@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - محرك عام آمن 1.0.9");
+        title.setText("نور الذكي - مسار الشجرة التلقائي 1.0.10");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -859,7 +859,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.9.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.10.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1322,11 +1322,10 @@ public class MainActivity extends Activity {
         if (!autoActive || lesson == null || autoCurrentIndex < 0) return;
 
         if (retry == 0) {
-            status.setText("أقرأ شجرة نور بأسلوب مساعد نور 0.6.9 وأبحث عن «"
-                    + lesson.displayName() + "»...");
+            status.setText("أفتح مسار الدرس تلقائيًا: الفصل ← الوحدة ← الدرس...");
         }
 
-        webView.evaluateJavascript(treeDriver069GenericScript(lesson), raw -> {
+        webView.evaluateJavascript(treeDriver069PathScript(lesson), raw -> {
             String result;
             try {
                 result = decodeJsString(raw).trim();
@@ -1336,10 +1335,13 @@ public class MainActivity extends Activity {
 
             try {
                 JSONObject meta = new JSONObject();
-                meta.put("driver", "0.6.9-generic");
+                meta.put("driver", "0.6.9-path");
                 meta.put("stage", stage);
                 meta.put("retry", retry);
                 meta.put("result", result);
+                meta.put("semester", lesson.semester);
+                meta.put("unit", lesson.unit);
+                meta.put("code", lesson.noorCode());
                 logAutoStage("tree_path_result", lesson, meta);
             } catch (Exception ignored) {}
 
@@ -1350,50 +1352,87 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            if (retry == 0 || retry % 10 == 0) {
-                captureNoorDiagnosticSnapshot("tree_069_generic_retry_" + retry + "_" + result, lesson);
+            if ("semester_opened".equals(result)) {
+                status.setText("تم فتح الفصل الدراسي — أفتح الوحدة...");
+            } else if ("unit_opened".equals(result)) {
+                status.setText("تم فتح الوحدة «" + lesson.unit + "» — أبحث عن الدرس...");
+            } else if ("semester_waiting".equals(result)) {
+                status.setText("أنتظر نور ليحمّل وحدات الفصل الدراسي...");
+            } else if ("unit_waiting".equals(result)) {
+                status.setText("أنتظر نور ليحمّل دروس الوحدة...");
+            } else if ("unit_not_found".equals(result)) {
+                status.setText("أبحث عن الوحدة الصحيحة في شجرة نور...");
             }
 
-            if (retry < 80) {
-                long delay = "waiting".equals(result) || "not_found".equals(result) ? 750L : 550L;
+            if (retry == 0 || retry % 10 == 0 || "unit_not_found".equals(result)) {
+                captureNoorDiagnosticSnapshot("tree_path_" + result + "_retry_" + retry, lesson);
+            }
+
+            if (retry < 90) {
+                long delay = ("semester_waiting".equals(result)
+                        || "unit_waiting".equals(result)
+                        || "unit_not_found".equals(result)
+                        || "no_tree".equals(result)) ? 800L : 550L;
                 webView.postDelayed(() -> autoTreeStage(lesson, stage, retry + 1), delay);
                 return;
             }
 
-            captureNoorDiagnosticSnapshot("tree_069_generic_failed", lesson);
-            stopAutoWithError("لم أجد درس «" + lesson.displayName()
-                    + "» بعد قراءة شجرة نور كاملة.");
+            captureNoorDiagnosticSnapshot("tree_path_failed", lesson);
+            stopAutoWithError("لم أتمكن من فتح المسار «"
+                    + lesson.semester + " ← " + lesson.unit + " ← " + lesson.displayName()
+                    + "» في شجرة نور.");
         });
     }
 
 
-    private String treeDriver069GenericScript(CurriculumLesson lesson) {
+    private String treeDriver069PathScript(CurriculumLesson lesson) {
         return "(function(){"
                 + "function digits(s){var ar='٠١٢٣٤٥٦٧٨٩',o='';s=s||'';for(var i=0;i<s.length;i++){var k=ar.indexOf(s[i]);o+=k>=0?String(k):s[i];}return o;}"
                 + "function norm(s){return digits((s||'').replace(/[\\u064B-\\u065F\\u0670\\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim());}"
-                + "function semesterKey(s){return norm(s).replace(/الفصل/g,'').replace(/الدراسي/g,'').replace(/semester/ig,'').replace(/term/ig,'').replace(/\\s+/g,' ').trim();}"
-                + "function compact(s){return norm(s).replace(/[^\\p{L}\\p{N}]+/gu,'');}"
-                + "function codeOf(s){var m=norm(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
-                + "function vis(e){try{var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(x){return false;}}"
-                + "function openLi(li){if(!li)return false;var cls=String(li.className||'');if(cls.indexOf('jstree-open')>=0)return false;"
+                + "var ord={'الاول':'1','الاولى':'1','الثاني':'2','الثانية':'2','الثالث':'3','الثالثة':'3','الرابع':'4','الرابعة':'4','الخامس':'5','الخامسة':'5','السادس':'6','السادسة':'6','السابع':'7','السابعة':'7','الثامن':'8','الثامنة':'8','التاسع':'9','التاسعة':'9','العاشر':'10','العاشرة':'10','الحادي عشر':'11','الحادية عشر':'11','الثاني عشر':'12','الثانية عشر':'12'};"
+                + "function canonWords(s){var n=norm(s),ks=Object.keys(ord).sort(function(a,b){return b.length-a.length;});for(var i=0;i<ks.length;i++){n=n.split(ks[i]).join(ord[ks[i]]);}return n;}"
+                + "function semesterKey(s){return canonWords(s).replace(/الفصل/g,'').replace(/الدراسي/g,'').replace(/semester/ig,'').replace(/term/ig,'').replace(/[^\\p{L}\\p{N}]+/gu,' ').replace(/\\s+/g,' ').trim();}"
+                + "function unitKey(s){return canonWords(s).replace(/الوحدة/g,'').replace(/unit/ig,'').replace(/[^\\p{L}\\p{N}]+/gu,' ').replace(/\\s+/g,' ').trim();}"
+                + "function compact(s){return canonWords(s).replace(/[^\\p{L}\\p{N}]+/gu,'');}"
+                + "function codeOf(s){var m=canonWords(s).match(/([0-9]+)\\s*[-–]\\s*([0-9]+)/);return m?m[1]+'-'+m[2]:'';}"
+                + "function unitNoFromCode(s){var c=codeOf(s);return c?c.split('-')[0]:'';}"
+                + "function vis(e){try{var r=e.getBoundingClientRect(),st=window.getComputedStyle?getComputedStyle(e):null;return r.width>0&&r.height>0&&(!st||st.display!=='none');}catch(x){return false;}}"
+                + "function liOpen(li){return li&&String(li.className||'').indexOf('jstree-open')>=0;}"
+                + "function liLoading(li){return li&&String(li.className||'').indexOf('jstree-loading')>=0;}"
+                + "function openLi(li){if(!li||liOpen(li))return false;"
                 + "try{if(window.jQuery){var tr=jQuery(li).closest('.jstree');if(tr.length&&tr.jstree){tr.jstree('open_node',li);return true;}}}catch(e){}"
-                + "var oc=null;for(var i=0;i<li.children.length;i++){var ch=li.children[i];if((ch.className||'').indexOf('jstree-ocl')>=0){oc=ch;break;}}"
-                + "if(oc&&oc.click){oc.click();return true;}var a=li.querySelector(':scope > a');if(a&&a.click){a.click();return true;}return false;}"
+                + "var kids=li.children||[],oc=null,an=null;for(var i=0;i<kids.length;i++){var ch=kids[i];if((ch.className||'').indexOf('jstree-ocl')>=0)oc=ch;if(ch.tagName==='A')an=ch;}"
+                + "if(oc&&oc.click){oc.click();return true;}if(an&&an.click){an.click();return true;}return false;}"
+                + "function directAnchor(li){if(!li)return null;var kids=li.children||[];for(var i=0;i<kids.length;i++){if(kids[i].tagName==='A')return kids[i];}return null;}"
+                + "function wordScore(raw,target){var a=unitKey(raw).split(/\\s+/),b=unitKey(target).split(/\\s+/),hit=0;for(var i=0;i<b.length;i++){if(b[i].length<2)continue;if(a.indexOf(b[i])>=0)hit++;}return b.length?Math.round(hit*500/b.length):0;}"
                 + "var root=document.getElementById('jstree_node_tree')||document.querySelector('.jstree');if(!root)return 'no_tree';"
                 + "var semester=" + JSONObject.quote(lesson.semester) + ",sk=semesterKey(semester);"
-                + "var code=" + JSONObject.quote(lesson.noorCode()) + ",tc=codeOf(code),title=" + JSONObject.quote(lesson.title) + ",ct=compact(title);"
+                + "var unit=" + JSONObject.quote(lesson.unit) + ",uk=unitKey(unit);"
+                + "var code=" + JSONObject.quote(lesson.noorCode()) + ",tc=codeOf(code),uno=unitNoFromCode(code);"
+                + "var title=" + JSONObject.quote(lesson.title) + ",ct=compact(title);"
                 + "var anchors=[].slice.call(root.querySelectorAll('a[id$=_anchor],a')),sem=null;"
-                + "if(sk){for(var i=0;i<anchors.length;i++){if(!vis(anchors[i]))continue;var tx=semesterKey(anchors[i].innerText||anchors[i].textContent||'');if(tx&&(tx===sk||tx.indexOf(sk)>=0||sk.indexOf(tx)>=0)){sem=anchors[i];break;}}}"
-                + "if(!sem){var rootLi=root.querySelector('li.jstree-closed');if(rootLi&&openLi(rootLi))return 'opened';}"
-                + "var scope=root;if(sem&&sem.closest){var sli=sem.closest('li');if(sli){if((String(sli.className||'')).indexOf('jstree-closed')>=0&&openLi(sli))return 'opened';scope=sli;}}"
-                + "var a=[].slice.call(scope.querySelectorAll('a[id$=_anchor],a')),best=null,bestLen=1e9;"
-                + "for(var j=0;j<a.length;j++){if(!vis(a[j]))continue;var raw=a[j].innerText||a[j].textContent||'';var cc=codeOf(raw);"
-                + "if(tc&&cc===tc){var ln=norm(raw).length;if(ln<bestLen){best=a[j];bestLen=ln;}}}"
-                + "if(!best&&ct){for(var k=0;k<a.length;k++){if(!vis(a[k]))continue;var cr=compact(a[k].innerText||a[k].textContent||'');if(cr&&cr.indexOf(ct)>=0&&cr.length<bestLen){best=a[k];bestLen=cr.length;}}}"
-                + "if(best){best.click();return 'clicked';}"
-                + "var closed=[].slice.call(scope.querySelectorAll('li.jstree-closed'));for(var z=0;z<closed.length;z++){if(openLi(closed[z]))return 'opened';}"
-                + "if(scope.querySelector('li.jstree-loading'))return 'waiting';"
-                + "return 'not_found';"
+                + "for(var i=0;i<anchors.length;i++){if(!vis(anchors[i]))continue;var tx=semesterKey(anchors[i].innerText||anchors[i].textContent||'');if(sk&&tx&&(tx===sk||tx.indexOf(sk)>=0||sk.indexOf(tx)>=0)){sem=anchors[i];break;}}"
+                + "if(!sem){var top=root.querySelector('li.jstree-closed');if(top&&openLi(top))return 'semester_opened';if(root.querySelector('li.jstree-loading'))return 'semester_waiting';return 'semester_waiting';}"
+                + "var semLi=sem.closest?sem.closest('li'):null;if(!semLi)return 'semester_waiting';"
+                + "if(!liOpen(semLi)){if(openLi(semLi))return 'semester_opened';return liLoading(semLi)?'semester_waiting':'semester_waiting';}"
+                + "if(liLoading(semLi))return 'semester_waiting';"
+                + "var unitAnchors=[].slice.call(semLi.querySelectorAll('a[id$=_anchor],a')),bestUnit=null,bestScore=-1,bestLen=1e9;"
+                + "for(var u=0;u<unitAnchors.length;u++){var ua=unitAnchors[u];if(ua===sem||!vis(ua))continue;var raw=ua.innerText||ua.textContent||'',cc=codeOf(raw);if(cc)continue;"
+                + "var score=wordScore(raw,unit),rk=unitKey(raw),rc=compact(raw);"
+                + "if(uk&&rk&&(rk===uk||rk.indexOf(uk)>=0||uk.indexOf(rk)>=0))score+=900;"
+                + "if(uno){var m=rk.match(/(^|\\s)"+uno+"($|\\s)/);if(m)score+=800;}"
+                + "var ln=rk.length||9999;if(score>bestScore||(score===bestScore&&ln<bestLen)){bestScore=score;bestLen=ln;bestUnit=ua;}}"
+                + "if(!bestUnit||bestScore<240){if(semLi.querySelector('li.jstree-loading'))return 'unit_waiting';return 'unit_not_found';}"
+                + "var unitLi=bestUnit.closest?bestUnit.closest('li'):null;if(!unitLi)return 'unit_not_found';"
+                + "if(!liOpen(unitLi)){if(openLi(unitLi))return 'unit_opened';return liLoading(unitLi)?'unit_waiting':'unit_waiting';}"
+                + "if(liLoading(unitLi))return 'unit_waiting';"
+                + "var lessonAnchors=[].slice.call(unitLi.querySelectorAll('a[id$=_anchor],a')),best=null,bestScore2=-1,bestLen2=1e9;"
+                + "for(var j=0;j<lessonAnchors.length;j++){var la=lessonAnchors[j];if(la===bestUnit||!vis(la))continue;var raw2=la.innerText||la.textContent||'',cc2=codeOf(raw2),score2=0;"
+                + "if(tc&&cc2===tc)score2+=1600;var cr=compact(raw2);if(ct&&cr.indexOf(ct)>=0)score2+=700;"
+                + "if(score2===0&&ct){var nt=canonWords(title).split(/\\s+/),nr=canonWords(raw2),hits=0;for(var w=0;w<nt.length;w++){if(nt[w].length>=2&&nr.indexOf(nt[w])>=0)hits++;}score2+=nt.length?Math.round(hits*400/nt.length):0;}"
+                + "var ln2=canonWords(raw2).length||9999;if(score2>bestScore2||(score2===bestScore2&&ln2<bestLen2)){bestScore2=score2;bestLen2=ln2;best=la;}}"
+                + "if(best&&bestScore2>=500){best.click();return 'clicked';}"
+                + "if(unitLi.querySelector('li.jstree-loading'))return 'unit_waiting';return 'lesson_not_found';"
                 + "})()";
     }
 
