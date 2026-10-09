@@ -130,7 +130,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - اكتشاف المنهج 0.9.1");
+        title.setText("نور الذكي - اكتشاف المنهج 0.9.2");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -426,6 +426,7 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < total; i++) {
                     DiscoveredCurriculumStore.Entry entry = catalog.get(i);
                     Grade9Curriculum.Lesson lesson = entry.lesson;
+                    DiscoveredCurriculumStore.Entry previous = i > 0 ? catalog.get(i - 1) : null;
                     DiscoveredCurriculumStore.Entry next = i + 1 < total ? catalog.get(i + 1) : null;
 
                     if (generatedStore.has(lesson.code) && LessonImageCache.has(this, lesson.code)) {
@@ -462,6 +463,7 @@ public class MainActivity extends Activity {
                                 title, lesson.objectives, planContext.toString(), materialContext);
 
                         String nextTitle = next == null ? "" : next.lesson.noorCode() + " " + next.lesson.title;
+                        int previousEnd = previous == null ? 0 : previous.materialEndPage;
                         int nextStart = next == null ? 0 : next.materialStartPage;
                         LessonImageCache.build(
                                 this,
@@ -471,6 +473,7 @@ public class MainActivity extends Activity {
                                 nextTitle,
                                 entry.materialStartPage,
                                 entry.materialEndPage,
+                                previousEnd,
                                 nextStart
                         );
 
