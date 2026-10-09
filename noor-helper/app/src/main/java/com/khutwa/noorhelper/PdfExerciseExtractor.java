@@ -221,7 +221,7 @@ final class PdfExerciseExtractor {
                     finalBitmap = downscale(trimOuterBackground(out), MAX_WIDTH);
                     File outFile = new File(outputDir, String.format(Locale.US, "%03d.jpg", saved + 1));
                     try (FileOutputStream outStream = new FileOutputStream(outFile)) {
-                        if (!finalBitmap.compress(Bitmap.CompressFormat.JPEG, 72, outStream)) {
+                        if (!finalBitmap.compress(Bitmap.CompressFormat.JPEG, 82, outStream)) {
                             throw new IllegalStateException("تعذر ضغط صورة الدرس.");
                         }
                         outStream.flush();
