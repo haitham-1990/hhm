@@ -531,7 +531,7 @@ public class MainActivity extends Activity {
     private int generatedReadyCount() {
         int n = 0;
         for (CurriculumLesson lesson : autoLessons) {
-            if (generatedStore.has(lesson.code) && LessonImageCache.has(this, lesson.code)) n++;
+            if (generatedStore.has(lesson.code)) n++;
         }
         return n;
     }
@@ -673,13 +673,8 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < total; i++) {
                     DiscoveredCurriculumStore.Entry entry = catalog.get(i);
                     CurriculumLesson lesson = entry.lesson;
-                    DiscoveredCurriculumStore.Entry previous = i > 0 ? catalog.get(i - 1) : null;
-                    DiscoveredCurriculumStore.Entry next = i + 1 < total ? catalog.get(i + 1) : null;
 
-                    boolean hasPreparation = generatedStore.has(lesson.code);
-                    boolean hasImages = LessonImageCache.has(this, lesson.code);
-
-                    if (hasPreparation && hasImages) {
+                    if (generatedStore.has(lesson.code)) {
                         final int ready = generatedReadyCount();
                         runOnUiThread(() -> {
                             status.setText("قاعدة البيانات " + ready + " / " + total + " — أتجاوز الدرس الجاهز...");
@@ -689,9 +684,7 @@ public class MainActivity extends Activity {
                     }
 
                     final int index = i;
-                    final boolean prepWasCached = hasPreparation;
-                    final boolean imagesWereCached = hasImages;
-                    runOnUiThread(() -> status.setText("أستكمل الدرس " + (index + 1) + " من " + total
+                    runOnUiThread(() -> status.setText("أفهم وأُنظم الدرس " + (index + 1) + " من " + total
                             + ": " + lesson.displayName()));
 
                     try {
@@ -701,71 +694,35 @@ public class MainActivity extends Activity {
                         for (int pg = entry.materialStartPage;
                              pg > 0 && pg <= entry.materialEndPage; pg++) materialPages.add(pg);
 
-                        if (!hasPreparation) {
-                            String materialContext = PdfCorpusIndex.readRangeText(
-                                    this,
-                                    subjectMaterialPdfUri,
-                                    entry.materialStartPage,
-                                    entry.materialEndPage
-                            );
-                            if (materialContext.trim().isEmpty()) {
-                                throw new IllegalStateException("لم أجد محتوى صفحات الدرس التي اكتشفها الذكاء.");
-                            }
-
-                            StringBuilder planContext = new StringBuilder();
-                            planContext.append(lesson.unit).append("\n")
-                                    .append("الدرس: ").append(title).append("\n")
-                                    .append("عدد الحصص: ").append(lesson.periods).append("\n")
-                                    .append("الفترة: ").append(lesson.periodStart).append(" إلى ").append(lesson.periodEnd);
-                            for (String objective : lesson.objectives) {
-                                planContext.append("\nمخرج: ").append(objective);
-                            }
-
-                            AiPreparationClient.SourceResult generated = generateFromSourcesWithRetry(
-                                    title, lesson.objectives, planContext.toString(), materialContext, lesson.code);
-
-                            // Save the AI preparation immediately. If image rendering fails
-                            // later, the next press resumes from images only and never pays
-                            // for the AI request again.
-                            generatedStore.save(
-                                    lesson.code,
-                                    title,
-                                    generated,
-                                    materialPages,
-                                    "تقسيم تلقائي: ص" + entry.materialStartPage + "–" + entry.materialEndPage
-                            );
-                            hasPreparation = true;
-
-                            try {
-                                JSONObject meta = new JSONObject();
-                                meta.put("code", lesson.code);
-                                meta.put("material_start_page", entry.materialStartPage);
-                                meta.put("material_end_page", entry.materialEndPage);
-                                diagnostics.log("lesson_preparation_cached", meta);
-                            } catch (Exception ignored) {}
-
-                            System.gc();
+                        String materialContext = PdfCorpusIndex.readRangeText(
+                                this,
+                                subjectMaterialPdfUri,
+                                entry.materialStartPage,
+                                entry.materialEndPage
+                        );
+                        if (materialContext.trim().isEmpty()) {
+                            throw new IllegalStateException("لم أجد محتوى صفحات الدرس التي اكتشفها الذكاء.");
                         }
 
-                        int savedImages = LessonImageCache.imageCount(this, lesson.code);
-                        if (!hasImages) {
-                            String nextTitle = next == null ? "" : next.lesson.noorCode() + " " + next.lesson.title;
-                            int previousEnd = previous == null ? 0 : previous.materialEndPage;
-                            int nextStart = next == null ? 0 : next.materialStartPage;
-                            savedImages = LessonImageCache.build(
-                                    this,
-                                    subjectMaterialPdfUri,
-                                    lesson.code,
-                                    title,
-                                    nextTitle,
-                                    entry.materialStartPage,
-                                    entry.materialEndPage,
-                                    previousEnd,
-                                    nextStart
-                            );
-                            hasImages = savedImages > 0;
-                            System.gc();
+                        StringBuilder planContext = new StringBuilder();
+                        planContext.append(lesson.unit).append("\n")
+                                .append("الدرس: ").append(title).append("\n")
+                                .append("عدد الحصص: ").append(lesson.periods).append("\n")
+                                .append("الفترة: ").append(lesson.periodStart).append(" إلى ").append(lesson.periodEnd);
+                        for (String objective : lesson.objectives) {
+                            planContext.append("\nمخرج: ").append(objective);
                         }
+
+                        AiPreparationClient.SourceResult generated = generateFromSourcesWithRetry(
+                                title, lesson.objectives, planContext.toString(), materialContext, lesson.code);
+
+                        generatedStore.save(
+                                lesson.code,
+                                title,
+                                generated,
+                                materialPages,
+                                "فهم وتنظيم تلقائي من المادة: ص" + entry.materialStartPage + "–" + entry.materialEndPage
+                        );
 
                         try {
                             JSONObject meta = new JSONObject();
@@ -774,15 +731,15 @@ public class MainActivity extends Activity {
                             meta.put("material_start_page", entry.materialStartPage);
                             meta.put("material_end_page", entry.materialEndPage);
                             meta.put("objectives_count", lesson.objectives.size());
-                            meta.put("images_saved", savedImages);
-                            meta.put("preparation_reused", prepWasCached);
-                            meta.put("images_reused", imagesWereCached);
+                            meta.put("question_crops", "on_demand_in_noor");
                             diagnostics.log("lesson_build_success", meta);
                         } catch (Exception ignored) {}
 
+                        System.gc();
                         final int ready = generatedReadyCount();
                         runOnUiThread(() -> {
-                            status.setText("تم " + lesson.displayName() + " — القاعدة " + ready + " / " + total);
+                            status.setText("تم فهم وتنظيم " + lesson.displayName()
+                                    + " — القاعدة " + ready + " / " + total);
                             updateDatabaseStatus();
                         });
                     } catch (OutOfMemoryError memoryError) {
@@ -793,14 +750,13 @@ public class MainActivity extends Activity {
                             meta.put("material_start_page", entry.materialStartPage);
                             meta.put("material_end_page", entry.materialEndPage);
                             meta.put("preparation_cached", generatedStore.has(lesson.code));
-                            meta.put("images_cached", LessonImageCache.has(this, lesson.code));
                             meta.put("error", "OutOfMemoryError");
                             diagnostics.log("lesson_build_memory_error", meta);
                         } catch (Exception ignored) {}
-                        failed.add(lesson.displayName() + ": الذاكرة غير كافية لمعالجة صور الدرس.");
+                        failed.add(lesson.displayName() + ": الذاكرة غير كافية لقراءة محتوى الدرس.");
                         System.gc();
-                        runOnUiThread(() -> status.setText("حفظت ما اكتمل من " + lesson.displayName()
-                                + " وسأتجاوز الجزء الذي ضغط الذاكرة."));
+                        runOnUiThread(() -> status.setText("تجاوزت " + lesson.displayName()
+                                + " بسبب ضغط الذاكرة وسأكمل بقية الدروس."));
                     } catch (Exception lessonError) {
                         try {
                             JSONObject meta = new JSONObject();
@@ -809,7 +765,6 @@ public class MainActivity extends Activity {
                             meta.put("material_start_page", entry.materialStartPage);
                             meta.put("material_end_page", entry.materialEndPage);
                             meta.put("preparation_cached", generatedStore.has(lesson.code));
-                            meta.put("images_cached", LessonImageCache.has(this, lesson.code));
                             meta.put("error", lessonError.getMessage() == null ? "" : lessonError.getMessage());
                             diagnostics.log("lesson_build_error", meta);
                         } catch (Exception ignored) {}
@@ -853,7 +808,7 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this)
                             .setTitle("اكتمل اكتشاف المنهج")
                             .setMessage("نور الذكي اكتشف " + autoLessons.size()
-                                    + " درسًا من الملفين، قسم المادة، وجهز التحاضير والصور وخزنها محليًا.\n\nإذا لاحظت أن العدد أو التقسيم غير صحيح، احفظ تقرير التشخيص وارفعه لي.")
+                                    + " درسًا من الملفين، فهم محتواها وجهز سير الدروس. قص الأسئلة يتم عند إدخال الدرس إلى نور فقط لتقليل الوقت والذاكرة.\n\nإذا لاحظت أن العدد أو التقسيم غير صحيح، احفظ تقرير التشخيص وارفعه لي.")
                             .setPositiveButton("ممتاز", null)
                             .setNeutralButton("حفظ تقرير التشخيص", (d, w) -> exportDiagnosticReport())
                             .show();
