@@ -297,6 +297,36 @@ final class PdfCorpusIndex {
         return best;
     }
 
+    static int findLessonStartPage(Context context, Uri uri, String code, String title,
+                                   int fromPage, int toPage) throws Exception {
+        if (uri == null) return 0;
+        LessonKey key = LessonKey.from((code == null ? "" : code + " ") + (title == null ? "" : title));
+        try (InputStream in = context.getContentResolver().openInputStream(uri);
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
+            if (doc.getNumberOfPages() <= 0) return 0;
+            int from = Math.max(1, fromPage);
+            int to = toPage > 0
+                    ? Math.min(doc.getNumberOfPages(), Math.max(from, toPage))
+                    : Math.min(doc.getNumberOfPages(), from + 18);
+
+            PDFTextStripper stripper = new PDFTextStripper();
+            stripper.setSortByPosition(true);
+            int bestPage = 0;
+            int bestScore = Integer.MIN_VALUE;
+            for (int p = from; p <= to; p++) {
+                stripper.setStartPage(p);
+                stripper.setEndPage(p);
+                String text = clean(stripper.getText(doc));
+                int score = headingScore(text, key);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPage = p;
+                }
+            }
+            return bestScore >= 180 ? bestPage : 0;
+        }
+    }
+
     static String readRangeText(Context context, Uri uri, int startPage, int endPage) throws Exception {
         if (uri == null || startPage <= 0 || endPage < startPage) return "";
         try (InputStream in = context.getContentResolver().openInputStream(uri);
