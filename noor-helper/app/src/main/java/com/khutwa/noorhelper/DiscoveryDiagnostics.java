@@ -26,13 +26,19 @@ final class DiscoveryDiagnostics {
     }
 
     void startSession(String planName, String materialName) {
+        startSession(planName, materialName, true);
+    }
+
+    void startSession(String planName, String materialName, boolean reset) {
         synchronized (LOCK) {
+            int mode = reset ? Context.MODE_PRIVATE : Context.MODE_APPEND;
             try (BufferedWriter out = new BufferedWriter(new OutputStreamWriter(
-                    context.openFileOutput(FILE, Context.MODE_PRIVATE), StandardCharsets.UTF_8))) {
-                JSONObject event = base("session_start");
+                    context.openFileOutput(FILE, mode), StandardCharsets.UTF_8))) {
+                JSONObject event = base(reset ? "session_start" : "session_continue");
                 event.put("app_version", appVersion());
                 event.put("plan_file", safeName(planName));
                 event.put("material_file", safeName(materialName));
+                event.put("reset", reset);
                 out.write(event.toString());
                 out.newLine();
             } catch (Exception ignored) {}
