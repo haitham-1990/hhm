@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("مساعد نور - التاسع 0.6.3");
+        title.setText("مساعد نور - التاسع 0.6.4");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -570,25 +570,66 @@ public class MainActivity extends Activity {
     }
 
     private void navigateToAddPreparation() {
+        navigateToAddPreparation(0);
+    }
+
+    private void navigateToAddPreparation(int attempt) {
         if (!autoActive) return;
-        status.setText("أفتح صفحة إضافة التحضير...");
+
+        String current = webView.getUrl() == null ? "" : webView.getUrl();
+        if (current.contains("/teacher/courses/add_preparation")) {
+            if (autoPreparingIndex != autoCurrentIndex) prepareAutoLesson(autoCurrentIndex);
+            return;
+        }
+
+        // After a successful save Noor opens browse_content using the same opaque cid
+        // as add_preparation. Reusing it is more reliable than hunting the side menu.
+        if (current.contains("/teacher/courses/browse_content/")) {
+            String next = current.replace("/teacher/courses/browse_content/", "/teacher/courses/add_preparation/");
+            int hash = next.indexOf('#');
+            if (hash >= 0) next = next.substring(0, hash);
+            status.setText("تم حفظ الدرس — أفتح إضافة تحضير للدرس التالي...");
+            webView.loadUrl(next);
+            return;
+        }
+
+        status.setText(attempt == 0
+                ? "أفتح قسم التحاضير ثم «إضافة تحضير»..."
+                : "أنتظر قائمة التحاضير... محاولة " + (attempt + 1));
+
         String js = "(function(){"
-                + "var els=[].slice.call(document.querySelectorAll('a,button'));"
                 + "function n(s){return (s||'').replace(/\\s+/g,' ').trim();}"
-                + "for(var i=0;i<els.length;i++){var t=n(els[i].innerText||els[i].textContent);"
-                + "if(t==='إضافة تحضير'||t.indexOf('إضافة تحضير')>=0){els[i].click();return 'add';}}"
-                + "for(var j=0;j<els.length;j++){var t2=n(els[j].innerText||els[j].textContent);"
-                + "if(t2==='تحضير الدروس'||t2.indexOf('تحضير الدروس')>=0){els[j].click();return 'prep';}}"
+                + "function vis(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}"
+                + "var links=[].slice.call(document.querySelectorAll('a'));"
+                + "for(var i=0;i<links.length;i++){var h=links[i].getAttribute('href')||'';"
+                + "if(h.indexOf('/teacher/courses/add_preparation')>=0){links[i].click();return 'add_href';}}"
+                + "var els=[].slice.call(document.querySelectorAll('a,button,[role=button],div,span,li'));"
+                + "var add=null;for(var j=0;j<els.length;j++){if(!vis(els[j]))continue;var t=n(els[j].innerText||els[j].textContent);"
+                + "if(t==='إضافة تحضير'){add=els[j];break;}}"
+                + "if(add){add.click();return 'add_text';}"
+                + "var prep=null;for(var k=0;k<els.length;k++){if(!vis(els[k]))continue;var p=n(els[k].innerText||els[k].textContent);"
+                + "if(p==='التحاضير'){prep=els[k];break;}}"
+                + "if(!prep){for(var z=0;z<els.length;z++){if(!vis(els[z]))continue;var p2=n(els[z].innerText||els[z].textContent);"
+                + "if(p2==='تحضير الدروس'||p2.indexOf('تحضير الدروس')>=0){prep=els[z];break;}}}"
+                + "if(prep){prep.click();return 'opened';}"
                 + "return 'none';})()";
+
         webView.evaluateJavascript(js, raw -> {
-            String v = raw == null ? "" : raw.replace("\"", "");
-            if (v.contains("none")) {
-                webView.postDelayed(() -> {
-                    if (autoActive && !webView.getUrl().contains("/add_preparation")) {
-                        stopAutoWithError("لم أجد رابط «إضافة تحضير» في الصفحة الحالية. افتح صفحة التحاضير ثم اضغط «متابعة».");
-                    }
-                }, 1200);
+            String v = raw == null ? "" : raw.replace("\"", "").trim();
+            if (v.contains("add_")) return;
+
+            if ((v.contains("opened") || v.contains("none")) && attempt < 8) {
+                webView.postDelayed(() -> navigateToAddPreparation(attempt + 1), 650);
+                return;
             }
+
+            webView.postDelayed(() -> {
+                if (!autoActive) return;
+                String now = webView.getUrl() == null ? "" : webView.getUrl();
+                if (!now.contains("/add_preparation")) {
+                    stopAutoWithError("تعذر الوصول إلى «إضافة تحضير» بعد فتح قسم التحاضير عدة مرات.");
+                }
+            }, 900);
         });
     }
 
