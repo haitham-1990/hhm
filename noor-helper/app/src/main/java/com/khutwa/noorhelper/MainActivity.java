@@ -354,7 +354,7 @@ public class MainActivity extends Activity {
                 + "var bs=[].slice.call(document.querySelectorAll('button,input[type=submit],a.btn')),buttons=[];"
                 + "for(var b=0;b<bs.length&&buttons.length<80;b++){if(vis(bs[b]))buttons.push(node(bs[b]));}"
                 + "var title=document.getElementById('PreparationTitle');"
-                + "var criteria=document.querySelectorAll('input[name^=\\"Preparation[criteria]\\"]');"
+                + "var criteria=document.querySelectorAll('input[name^=\"Preparation[criteria]\"]');"
                 + "return JSON.stringify({path:location.pathname||'',hash:location.hash||'',ready_state:document.readyState||'',page_title:document.title||'',tree_anchor_count:ta.length,tree_root_count:roots.length,tree_nodes:tree,tree_roots:rootInfo,field_count:fs.length,fields:fields,visible_buttons:buttons,validation_messages:validation,preparation_title_present:!!title,criteria_count:criteria.length,form_count:document.forms?document.forms.length:0});"
                 + "})()";
     }
