@@ -40,6 +40,20 @@ final class PdfCorpusIndex {
         LessonKey key = LessonKey.from(lessonTitle);
         Selection plan = select(planPages, key, true);
         Selection material = select(materialPages, key, false);
+
+        if (material.text.trim().isEmpty()) {
+            ExerciseMap.Lesson mapped = ExerciseMap.find(lessonTitle);
+            if (mapped != null && mapped.segments != null) {
+                List<Integer> exactPages = new ArrayList<>();
+                for (ExerciseMap.Segment segment : mapped.segments) {
+                    if (segment != null && segment.pdfPage > 0 && !exactPages.contains(segment.pdfPage)) {
+                        exactPages.add(segment.pdfPage);
+                    }
+                }
+                material = selectExact(materialPages, exactPages, MATERIAL_MAX_CHARS);
+            }
+        }
+
         return new PdfLessonContext.Result(
                 plan.text, material.text, plan.pages, material.pages
         );
@@ -58,6 +72,28 @@ final class PdfCorpusIndex {
             }
             return out;
         }
+    }
+
+    private static Selection selectExact(List<String> pages, List<Integer> humanPages, int maxChars) {
+        StringBuilder text = new StringBuilder();
+        List<Integer> kept = new ArrayList<>();
+        if (pages == null || humanPages == null) return new Selection("", kept);
+        for (Integer humanPage : humanPages) {
+            if (humanPage == null) continue;
+            int index = humanPage - 1;
+            if (index < 0 || index >= pages.size()) continue;
+            String page = clean(pages.get(index));
+            if (page.isEmpty()) continue;
+            String block = "\n--- صفحة PDF " + humanPage + " ---\n" + page;
+            if (text.length() + block.length() > maxChars) {
+                int remain = maxChars - text.length();
+                if (remain > 250) text.append(block, 0, Math.min(remain, block.length()));
+                break;
+            }
+            text.append(block);
+            kept.add(humanPage);
+        }
+        return new Selection(text.toString().trim(), kept);
     }
 
     private static Selection select(List<String> pages, LessonKey key, boolean plan) {
