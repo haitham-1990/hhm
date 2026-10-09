@@ -19,12 +19,13 @@ final class LessonImageCache {
 
     static int build(Context context, Uri materialUri, String lessonCode,
                      String lessonTitle, String nextLessonTitle,
-                     int startPage, int endPage, int nextStartPage) throws Exception {
+                     int startPage, int endPage,
+                     int previousEndPage, int nextStartPage) throws Exception {
         PdfExerciseExtractor.ExtractResult result =
                 PdfExerciseExtractor.extractBetween(
                         context, materialUri,
                         lessonTitle, nextLessonTitle,
-                        startPage, endPage, nextStartPage
+                        startPage, endPage, previousEndPage, nextStartPage
                 );
 
         File lessonDir = lessonDir(context, lessonCode);
