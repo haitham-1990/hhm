@@ -607,40 +607,59 @@ public class MainActivity extends Activity {
         worker.execute(() -> {
             List<String> failed = new ArrayList<>();
             try {
-                try {
-                    Runtime rt = Runtime.getRuntime();
-                    JSONObject meta = new JSONObject();
-                    meta.put("max_heap_mb", Math.round(rt.maxMemory() / 1048576.0));
-                    meta.put("used_heap_mb", Math.round((rt.totalMemory() - rt.freeMemory()) / 1048576.0));
-                    meta.put("free_heap_mb", Math.round((rt.maxMemory() - (rt.totalMemory() - rt.freeMemory())) / 1048576.0));
-                    meta.put("plan_file", pdfName(studyPlanPdfUri));
-                    meta.put("material_file", pdfName(subjectMaterialPdfUri));
-                    diagnostics.log("pdf_index_begin", meta);
-                } catch (Exception ignored) {}
-
-                PdfCorpusIndex corpus = PdfCorpusIndex.build(this, studyPlanPdfUri, subjectMaterialPdfUri);
-                try {
-                    JSONObject meta = new JSONObject();
-                    meta.put("plan_pages", corpus.planPageCount());
-                    meta.put("material_pages", corpus.materialPageCount());
-                    diagnostics.log("pdf_index_ready", meta);
-                } catch (Exception ignored) {}
-
                 List<DiscoveredCurriculumStore.Entry> catalog = curriculumStore.load();
-                if (catalog.isEmpty()) {
+                boolean fastResume = !catalog.isEmpty();
+
+                if (fastResume) {
+                    try {
+                        Runtime rt = Runtime.getRuntime();
+                        JSONObject meta = new JSONObject();
+                        meta.put("cached_catalog_count", catalog.size());
+                        meta.put("ready_lessons", generatedReadyCount());
+                        meta.put("max_heap_mb", Math.round(rt.maxMemory() / 1048576.0));
+                        meta.put("used_heap_mb_before_gc", Math.round((rt.totalMemory() - rt.freeMemory()) / 1048576.0));
+                        diagnostics.log("database_fast_resume", meta);
+                    } catch (Exception ignored) {}
+                    System.gc();
+                    runOnUiThread(() -> status.setText("استكمال سريع: أتجاوز فهرسة الملف الكامل وأجهز الدروس الناقصة فقط..."));
+                    diagnostics.logLessons("catalog_loaded_from_store", catalog);
+                } else {
+                    try {
+                        Runtime rt = Runtime.getRuntime();
+                        JSONObject meta = new JSONObject();
+                        meta.put("max_heap_mb", Math.round(rt.maxMemory() / 1048576.0));
+                        meta.put("used_heap_mb", Math.round((rt.totalMemory() - rt.freeMemory()) / 1048576.0));
+                        meta.put("free_heap_mb", Math.round((rt.maxMemory() - (rt.totalMemory() - rt.freeMemory())) / 1048576.0));
+                        meta.put("plan_file", pdfName(studyPlanPdfUri));
+                        meta.put("material_file", pdfName(subjectMaterialPdfUri));
+                        diagnostics.log("pdf_index_begin", meta);
+                    } catch (Exception ignored) {}
+
+                    PdfCorpusIndex corpus = PdfCorpusIndex.build(this, studyPlanPdfUri, subjectMaterialPdfUri);
+                    try {
+                        JSONObject meta = new JSONObject();
+                        meta.put("plan_pages", corpus.planPageCount());
+                        meta.put("material_pages", corpus.materialPageCount());
+                        diagnostics.log("pdf_index_ready", meta);
+                    } catch (Exception ignored) {}
+
                     runOnUiThread(() -> status.setText("الذكاء يحدد الصف والوحدات والدروس وترتيبها من الملفين..."));
                     catalog = aiClient.discoverCurriculum(corpus);
                     curriculumStore.save(catalog);
                     diagnostics.logLessons("catalog_saved", catalog);
-                } else {
-                    diagnostics.logLessons("catalog_loaded_from_store", catalog);
+
+                    // The full corpus can be large. It is no longer needed after the
+                    // page ranges are saved, so release it before generating lessons.
+                    corpus = null;
+                    System.gc();
                 }
 
                 autoLessons.clear();
                 for (DiscoveredCurriculumStore.Entry e : catalog) autoLessons.add(e.lesson);
                 runOnUiThread(() -> {
                     refreshLessonSpinners();
-                    status.setText("تم اكتشاف " + autoLessons.size() + " درسًا. أبدأ تقسيم المادة وبناء التحاضير...");
+                    status.setText((fastResume ? "استكمال سريع: " : "تم اكتشاف " + autoLessons.size() + " درسًا. ")
+                            + "أجهز الناقص فقط...");
                 });
 
                 int total = catalog.size();
