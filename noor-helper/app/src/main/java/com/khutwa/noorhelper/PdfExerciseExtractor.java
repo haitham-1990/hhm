@@ -101,9 +101,9 @@ final class PdfExerciseExtractor {
                     int approx = Math.max(0,
                             Math.round((currentHeadingY - 10f) / pageHeightPt * page.getHeight()));
                     int safe = findSafeWhitespaceBefore(page, approx, 140);
-                    // If no clear blank band exists, preserve extra content above the
-                    // heading rather than risking cutting the first question.
-                    top = safe >= 0 ? safe : Math.max(0, approx - 55);
+                    // Never guess a crop boundary. If no reliable blank band exists,
+                    // keep the whole top of the page so no question/content is cut.
+                    top = safe >= 0 ? safe : 0;
                 }
 
                 if (p == nextPage && cropBottomShared && nextHeadingY > 0) {
@@ -129,7 +129,7 @@ final class PdfExerciseExtractor {
                     out = Bitmap.createBitmap(page, 0, top, page.getWidth(), bottom - top);
                     page.recycle();
                 }
-                images.add(downscale(out, MAX_WIDTH));
+                images.add(downscale(trimOuterBackground(out), MAX_WIDTH));
             }
 
             if (images.isEmpty()) throw new IllegalStateException("تعذر إنشاء صور الدرس");
@@ -218,7 +218,7 @@ final class PdfExerciseExtractor {
                         page = null;
                     }
 
-                    finalBitmap = downscale(out, MAX_WIDTH);
+                    finalBitmap = downscale(trimOuterBackground(out), MAX_WIDTH);
                     File outFile = new File(outputDir, String.format(Locale.US, "%03d.jpg", saved + 1));
                     try (FileOutputStream outStream = new FileOutputStream(outFile)) {
                         if (!finalBitmap.compress(Bitmap.CompressFormat.JPEG, 72, outStream)) {
@@ -254,7 +254,7 @@ final class PdfExerciseExtractor {
         int runStart = -1;
 
         for (int y = minY; y <= maxY; y++) {
-            boolean blank = isMostlyBlankRow(bitmap, y, x0, x1, xStep);
+            boolean blank = isLowInformationRow(bitmap, y, x0, x1, xStep);
             if (blank && runStart < 0) runStart = y;
 
             boolean closes = !blank || y == maxY;
@@ -263,7 +263,6 @@ final class PdfExerciseExtractor {
                 int length = runEnd - runStart + 1;
                 if (length >= minBand) {
                     int center = (runStart + runEnd) / 2;
-                    // Prefer whitespace before the heading, then the closest band.
                     int penalty = center > approxY ? 10000 : 0;
                     int distance = penalty + Math.abs(approxY - center);
                     if (distance < bestDistance) {
@@ -277,19 +276,65 @@ final class PdfExerciseExtractor {
         return bestCenter;
     }
 
-    private static boolean isMostlyBlankRow(Bitmap bitmap, int y, int x0, int x1, int step) {
-        int samples = 0;
-        int light = 0;
+    private static boolean isLowInformationRow(Bitmap bitmap, int y, int x0, int x1, int step) {
+        int count = 0;
+        long sr = 0, sg = 0, sb = 0;
         for (int x = x0; x < x1; x += step) {
-            int pixel = bitmap.getPixel(x, y);
-            int r = (pixel >> 16) & 0xff;
-            int g = (pixel >> 8) & 0xff;
-            int b = pixel & 0xff;
-            samples++;
-            if (r >= 238 && g >= 238 && b >= 238) light++;
+            int px = bitmap.getPixel(x, y);
+            sr += (px >> 16) & 0xff;
+            sg += (px >> 8) & 0xff;
+            sb += px & 0xff;
+            count++;
         }
-        return samples > 0 && light >= Math.ceil(samples * 0.965);
+        if (count < 4) return false;
+
+        int ar = (int) (sr / count);
+        int ag = (int) (sg / count);
+        int ab = (int) (sb / count);
+        int close = 0;
+
+        for (int x = x0; x < x1; x += step) {
+            int px = bitmap.getPixel(x, y);
+            int r = (px >> 16) & 0xff;
+            int g = (px >> 8) & 0xff;
+            int b = px & 0xff;
+            int delta = Math.abs(r - ar) + Math.abs(g - ag) + Math.abs(b - ab);
+            if (delta <= 42) close++;
+        }
+
+        return close >= Math.ceil(count * 0.965);
     }
+
+    private static Bitmap trimOuterBackground(Bitmap source) {
+        if (source == null || source.getWidth() < 40 || source.getHeight() < 40) return source;
+
+        int w = source.getWidth();
+        int h = source.getHeight();
+        int x0 = Math.max(0, w / 30);
+        int x1 = Math.min(w, w - w / 30);
+        int xStep = Math.max(4, w / 180);
+
+        int top = 0;
+        int bottom = h - 1;
+
+        int topLimit = Math.min(h / 3, Math.max(40, h / 5));
+        while (top < topLimit && isLowInformationRow(source, top, x0, x1, xStep)) top++;
+
+        int bottomLimit = Math.max((h * 2) / 3, h - Math.max(40, h / 5));
+        while (bottom > bottomLimit && isLowInformationRow(source, bottom, x0, x1, xStep)) bottom--;
+
+        int pad = Math.max(10, h / 120);
+        top = Math.max(0, top - pad);
+        bottom = Math.min(h - 1, bottom + pad);
+
+        if (bottom <= top + h / 4) return source;
+        if (top <= 2 && bottom >= h - 3) return source;
+
+        Bitmap cropped = Bitmap.createBitmap(source, 0, top, w, bottom - top + 1);
+        if (cropped != source && !source.isRecycled()) source.recycle();
+        return cropped;
+    }
+
 
 
     static ExtractResult renderPages(Context context, Uri uri, List<Integer> pdfPages) throws Exception {
@@ -309,7 +354,7 @@ final class PdfExerciseExtractor {
                 int pageIndex = pageNo - 1;
                 if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) continue;
                 Bitmap page = renderer.renderImageWithDPI(pageIndex, 135, ImageType.RGB);
-                page = downscale(page, MAX_WIDTH);
+                page = downscale(trimOuterBackground(page), MAX_WIDTH);
                 images.add(page);
                 first = Math.min(first, pageNo);
                 last = Math.max(last, pageNo);
@@ -383,7 +428,7 @@ final class PdfExerciseExtractor {
 
             Bitmap crop = Bitmap.createBitmap(page, 0, top, page.getWidth(), Math.max(1, bottom - top));
             if (crop != page) page.recycle();
-            crop = downscale(crop, MAX_WIDTH);
+            crop = downscale(trimOuterBackground(crop), MAX_WIDTH);
             images.add(crop);
         }
 
@@ -402,7 +447,7 @@ final class PdfExerciseExtractor {
             List<Bitmap> images = new ArrayList<>();
             for (int p = start; p <= end && images.size() < 8; p++) {
                 Bitmap page = renderer.renderImageWithDPI(p, 130, ImageType.RGB);
-                images.add(downscale(page, MAX_WIDTH));
+                images.add(downscale(trimOuterBackground(page), MAX_WIDTH));
             }
             return new ExtractResult(images, start + 1, Math.min(end + 1, start + 8), "تحديد يدوي", false);
         }
