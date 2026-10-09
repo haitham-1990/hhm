@@ -274,6 +274,91 @@ public class MainActivity extends Activity {
         return p;
     }
 
+    private String safeNoorLocation(String url) {
+        try {
+            Uri uri = Uri.parse(url == null ? "" : url);
+            String path = uri.getPath() == null ? "" : uri.getPath();
+            String fragment = uri.getFragment() == null ? "" : uri.getFragment();
+            return path + (fragment.isEmpty() ? "" : "#" + fragment);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private void logAutoStage(String stage, CurriculumLesson lesson, JSONObject extra) {
+        if (diagnostics == null) return;
+        try {
+            JSONObject o = extra == null ? new JSONObject() : extra;
+            o.put("auto_active", autoActive);
+            o.put("awaiting_save", autoAwaitingSave);
+            o.put("current_index", autoCurrentIndex);
+            o.put("target_index", autoTargetIndex);
+            o.put("preparing_index", autoPreparingIndex);
+            o.put("location", safeNoorLocation(webView == null ? "" : webView.getUrl()));
+            if (lesson != null) {
+                o.put("lesson_code", lesson.code);
+                o.put("lesson_title", lesson.title);
+                o.put("lesson_unit", lesson.unit);
+            }
+            diagnostics.log(stage, o);
+        } catch (Exception ignored) {}
+    }
+
+    private void captureNoorDiagnosticSnapshot(String reason, CurriculumLesson lesson) {
+        captureNoorDiagnosticSnapshot(reason, lesson, null);
+    }
+
+    private void captureNoorDiagnosticSnapshot(String reason, CurriculumLesson lesson, Runnable after) {
+        if (diagnostics == null || webView == null || !isNoorPage()) {
+            try {
+                JSONObject o = new JSONObject();
+                o.put("reason", reason == null ? "" : reason);
+                o.put("noor_page", false);
+                logAutoStage("noor_page_snapshot", lesson, o);
+            } catch (Exception ignored) {}
+            if (after != null) after.run();
+            return;
+        }
+
+        webView.evaluateJavascript(noorDiagnosticSnapshotScript(), raw -> {
+            try {
+                JSONObject o = new JSONObject(decodeJsString(raw));
+                o.put("reason", reason == null ? "" : reason);
+                if (lesson != null) {
+                    o.put("target_code", lesson.code);
+                    o.put("target_title", lesson.title);
+                    o.put("target_unit", lesson.unit);
+                }
+                logAutoStage("noor_page_snapshot", lesson, o);
+            } catch (Exception e) {
+                diagnostics.logException("noor_page_snapshot_parse_error", e);
+            }
+            if (after != null) after.run();
+        });
+    }
+
+    private String noorDiagnosticSnapshotScript() {
+        return "(function(){"
+                + "function vis(e){try{var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(x){return false;}}"
+                + "function lim(s,n){s=(s||'').replace(/\\s+/g,' ').trim();return s.length>n?s.substring(0,n):s;}"
+                + "function node(e){return {tag:(e.tagName||'').toLowerCase(),id:e.id||'',cls:lim(String(e.className||''),180),text:lim(e.innerText||e.textContent||'',180),visible:vis(e),expanded:e.getAttribute?e.getAttribute('aria-expanded')||'':'',selected:e.getAttribute?e.getAttribute('aria-selected')||'':''};}"
+                + "var treeSelectors='.jstree-anchor,a[id$=_anchor],[role=treeitem],.tree-node,.treeview a';"
+                + "var ta=[].slice.call(document.querySelectorAll(treeSelectors)),tree=[];"
+                + "for(var i=0;i<ta.length&&tree.length<140;i++){tree.push(node(ta[i]));}"
+                + "var roots=[].slice.call(document.querySelectorAll('.jstree,[role=tree],[class*=treeview],[class*=tree-view]')),rootInfo=[];"
+                + "for(var r=0;r<roots.length&&r<20;r++){rootInfo.push(node(roots[r]));}"
+                + "var fs=[].slice.call(document.querySelectorAll('input,select,textarea,iframe,[contenteditable=true]')),fields=[];"
+                + "for(var f=0;f<fs.length&&fields.length<180;f++){var e=fs[f];fields.push({tag:(e.tagName||'').toLowerCase(),id:e.id||'',name:e.name||'',type:e.type||'',visible:vis(e),disabled:!!e.disabled,checked:!!e.checked,options:e.options?e.options.length:0});}"
+                + "var vs=[].slice.call(document.querySelectorAll('.alert-danger,.alert-warning,.error,.help-block,.invalid-feedback,.field-validation-error,.validation-summary-errors,.has-error')),validation=[];"
+                + "for(var v=0;v<vs.length&&validation.length<40;v++){var tx=lim(vs[v].innerText||vs[v].textContent||'',260);if(tx&&validation.indexOf(tx)<0)validation.push(tx);}"
+                + "var bs=[].slice.call(document.querySelectorAll('button,input[type=submit],a.btn')),buttons=[];"
+                + "for(var b=0;b<bs.length&&buttons.length<80;b++){if(vis(bs[b]))buttons.push(node(bs[b]));}"
+                + "var title=document.getElementById('PreparationTitle');"
+                + "var criteria=document.querySelectorAll('input[name^=\\"Preparation[criteria]\\"]');"
+                + "return JSON.stringify({path:location.pathname||'',hash:location.hash||'',ready_state:document.readyState||'',page_title:document.title||'',tree_anchor_count:ta.length,tree_root_count:roots.length,tree_nodes:tree,tree_roots:rootInfo,field_count:fs.length,fields:fields,visible_buttons:buttons,validation_messages:validation,preparation_title_present:!!title,criteria_count:criteria.length,form_count:document.forms?document.forms.length:0});"
+                + "})()";
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private void configureWebView() {
         WebSettings s = webView.getSettings();
@@ -292,7 +377,24 @@ public class MainActivity extends Activity {
         cm.setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage consoleMessage) {
+                try {
+                    if (consoleMessage != null && autoActive
+                            && (consoleMessage.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR
+                            || consoleMessage.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.WARNING)) {
+                        JSONObject o = new JSONObject();
+                        o.put("level", String.valueOf(consoleMessage.messageLevel()));
+                        o.put("message", consoleMessage.message() == null ? "" : consoleMessage.message());
+                        o.put("source", consoleMessage.sourceId() == null ? "" : consoleMessage.sourceId());
+                        o.put("line", consoleMessage.lineNumber());
+                        logAutoStage("webview_console", currentLesson, o);
+                    }
+                } catch (Exception ignored) {}
+                return super.onConsoleMessage(consoleMessage);
+            }
+        });
         webView.addJavascriptInterface(new LearningBridge(), "KhutwaNoorBridge");
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -304,9 +406,58 @@ public class MainActivity extends Activity {
             }
 
             @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                if (autoActive && isNoorUrl(url)) {
+                    try {
+                        JSONObject o = new JSONObject();
+                        o.put("location", safeNoorLocation(url));
+                        logAutoStage("webview_page_started", currentLesson, o);
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request,
+                                        android.webkit.WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                if (autoActive && request != null && request.isForMainFrame()) {
+                    try {
+                        JSONObject o = new JSONObject();
+                        o.put("location", safeNoorLocation(request.getUrl() == null ? "" : request.getUrl().toString()));
+                        o.put("error_code", error == null ? 0 : error.getErrorCode());
+                        o.put("description", error == null || error.getDescription() == null ? "" : error.getDescription().toString());
+                        logAutoStage("webview_navigation_error", currentLesson, o);
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                            android.webkit.WebResourceResponse errorResponse) {
+                super.onReceivedHttpError(view, request, errorResponse);
+                if (autoActive && request != null && request.isForMainFrame()) {
+                    try {
+                        JSONObject o = new JSONObject();
+                        o.put("location", safeNoorLocation(request.getUrl() == null ? "" : request.getUrl().toString()));
+                        o.put("status_code", errorResponse == null ? 0 : errorResponse.getStatusCode());
+                        o.put("reason", errorResponse == null ? "" : errorResponse.getReasonPhrase());
+                        logAutoStage("webview_http_error", currentLesson, o);
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 lastLoadedUrl = url == null ? "" : url;
+                if (autoActive && isNoorUrl(url)) {
+                    try {
+                        JSONObject o = new JSONObject();
+                        o.put("location", safeNoorLocation(url));
+                        logAutoStage("webview_page_finished", currentLesson, o);
+                    } catch (Exception ignored) {}
+                }
                 if (!autoActive) {
                     int ready = generatedStore == null ? 0 : generatedReadyCount();
                     status.setText("نور مفتوح. قاعدة التحضير: " + ready + " / " + autoLessons.size()
