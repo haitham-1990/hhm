@@ -34,11 +34,12 @@ final class CurriculumLesson {
     }
 
     String noorCode() {
-        return code;
+        return code.startsWith("AUTO-") ? "" : code;
     }
 
     String displayName() {
-        return code.isEmpty() ? title : code + " — " + title;
+        String visibleCode = noorCode();
+        return visibleCode.isEmpty() ? title : visibleCode + " — " + title;
     }
 
     String planSummary() {
