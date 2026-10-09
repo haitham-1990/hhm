@@ -135,10 +135,10 @@ final class GeneratedPreparationStore {
         }
     }
 
-    int count(List<Grade9Curriculum.Lesson> lessons) {
+    int count(List<CurriculumLesson> lessons) {
         int n = 0;
         if (lessons == null) return 0;
-        for (Grade9Curriculum.Lesson lesson : lessons) if (has(lesson.code)) n++;
+        for (CurriculumLesson lesson : lessons) if (has(lesson.code)) n++;
         return n;
     }
 
