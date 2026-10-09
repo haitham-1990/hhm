@@ -376,8 +376,10 @@ final class PdfExerciseExtractor {
                 if (endY >= startY) {
                     int approxBottom = Math.min(h,
                             Math.round((endY + 34f) / pageHeightPt * h));
-                    int safeBottom = findSafeWhitespaceAfter(page, approxBottom, Math.max(120, h / 10));
-                    bottom = safeBottom >= 0 ? safeBottom : approxBottom;
+                    int minVisualBottom = Math.min(h - 2, top + Math.max(150, h / 8));
+                    int searchFrom = Math.max(approxBottom, minVisualBottom);
+                    int safeBottom = findSafeWhitespaceAfter(page, searchFrom, Math.max(140, h / 9));
+                    bottom = safeBottom >= 0 ? safeBottom : Math.max(approxBottom, minVisualBottom);
                 } else {
                     int minSearch = Math.min(h - 2, top + Math.max(140, h / 8));
                     int safeBottom = findSafeWhitespaceAfter(page, minSearch, Math.max(260, h / 3));
@@ -439,7 +441,12 @@ final class PdfExerciseExtractor {
             if (cc.isEmpty()) continue;
 
             int score = 0;
-            if (cc.contains(target) || target.contains(cc)) score += 240;
+            if (cc.contains(target)) {
+                score += 240;
+            } else if (target.contains(cc)
+                    && cc.length() >= Math.max(14, Math.min(32, target.length() / 2))) {
+                score += 150;
+            }
             int hits = 0;
             for (String token : targetTokens) if (cc.contains(token)) hits++;
             if (!targetTokens.isEmpty()) score += Math.round((hits * 120f) / targetTokens.size());
