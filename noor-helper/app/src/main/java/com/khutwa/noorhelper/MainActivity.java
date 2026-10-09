@@ -332,6 +332,37 @@ public class MainActivity extends Activity {
         return entry == null ? null : entry.preparation;
     }
 
+    private CurriculumLesson findDiscoveredLesson(String noorTitle) {
+        if (noorTitle == null) return null;
+        String normalized = normalizeArabicTitle(noorTitle);
+        String digits = latinDigits(noorTitle);
+        Matcher matcher = Pattern.compile("([0-9]+)\\s*[-–]\\s*([0-9]+)").matcher(digits);
+        String code = matcher.find() ? matcher.group(1) + "-" + matcher.group(2) : "";
+
+        CurriculumLesson best = null;
+        int bestScore = 0;
+        for (CurriculumLesson lesson : autoLessons) {
+            int score = 0;
+            if (!code.isEmpty() && code.equals(lesson.code)) score += 1000;
+            String title = normalizeArabicTitle(lesson.title);
+            if (!title.isEmpty()) {
+                if (normalized.contains(title)) score += 500 + title.length();
+                else if (title.contains(normalized) && normalized.length() > 4) score += 200;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = lesson;
+            }
+        }
+        return best;
+    }
+
+    private LessonPreparation generatedPreparationFor(CurriculumLesson lesson) {
+        if (lesson == null || generatedStore == null) return null;
+        GeneratedPreparationStore.Entry e = generatedStore.get(lesson.code);
+        return e == null ? null : e.preparation;
+    }
+
     private void loadDiscoveredLessons() {
         autoLessons.clear();
         if (curriculumStore == null) return;
