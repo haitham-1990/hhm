@@ -3,6 +3,7 @@ package com.khutwa.noorhelper;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.util.Base64;
 
 import com.tom_roush.pdfbox.io.MemoryUsageSetting;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
@@ -14,6 +15,7 @@ import com.tom_roush.pdfbox.text.TextPosition;
 import java.io.InputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashSet;
@@ -335,6 +337,144 @@ final class PdfExerciseExtractor {
         return cropped;
     }
 
+
+
+    static String questionCropBase64(Context context, Uri uri, int pageOneBased,
+                                     String questionStart, String questionEnd) throws Exception {
+        if (uri == null || pageOneBased <= 0 || questionStart == null || questionStart.trim().isEmpty()) {
+            return "";
+        }
+
+        try (InputStream in = context.getContentResolver().openInputStream(uri);
+             PDDocument doc = PDDocument.load(in, MemoryUsageSetting.setupTempFileOnly())) {
+            int pageIndex = pageOneBased - 1;
+            if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) return "";
+
+            float startY = locatePhraseY(doc, pageIndex, questionStart, 0f);
+            if (startY < 0) return "";
+
+            float endY = -1f;
+            if (questionEnd != null && !questionEnd.trim().isEmpty()) {
+                endY = locatePhraseY(doc, pageIndex, questionEnd, Math.max(0f, startY - 3f));
+            }
+
+            PDFRenderer renderer = new PDFRenderer(doc);
+            Bitmap page = null;
+            Bitmap crop = null;
+            Bitmap finalBitmap = null;
+            try {
+                page = renderer.renderImageWithDPI(pageIndex, 145, ImageType.RGB);
+                float pageHeightPt = doc.getPage(pageIndex).getCropBox().getHeight();
+                int h = page.getHeight();
+
+                int approxTop = Math.max(0,
+                        Math.round((startY - 12f) / pageHeightPt * h));
+                int safeTop = findSafeWhitespaceBefore(page, approxTop, Math.max(90, h / 12));
+                int top = safeTop >= 0 ? safeTop : Math.max(0, approxTop - Math.max(18, h / 100));
+
+                int bottom;
+                if (endY >= startY) {
+                    int approxBottom = Math.min(h,
+                            Math.round((endY + 34f) / pageHeightPt * h));
+                    int safeBottom = findSafeWhitespaceAfter(page, approxBottom, Math.max(120, h / 10));
+                    bottom = safeBottom >= 0 ? safeBottom : approxBottom;
+                } else {
+                    int minSearch = Math.min(h - 2, top + Math.max(140, h / 8));
+                    int safeBottom = findSafeWhitespaceAfter(page, minSearch, Math.max(260, h / 3));
+                    if (safeBottom < 0) {
+                        // Do not guess a crop that could slice through another question.
+                        return "";
+                    }
+                    bottom = safeBottom;
+                }
+
+                if (bottom <= top + Math.max(90, h / 18)) return "";
+                if (bottom - top > Math.round(h * 0.70f)) return "";
+
+                crop = Bitmap.createBitmap(page, 0, top, page.getWidth(), bottom - top);
+                if (!page.isRecycled()) page.recycle();
+                page = null;
+
+                finalBitmap = downscale(trimOuterBackground(crop), MAX_WIDTH);
+                crop = null;
+
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                if (!finalBitmap.compress(Bitmap.CompressFormat.JPEG, 86, out)) return "";
+                return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+            } finally {
+                if (finalBitmap != null && !finalBitmap.isRecycled()) finalBitmap.recycle();
+                if (crop != null && !crop.isRecycled()) crop.recycle();
+                if (page != null && !page.isRecycled()) page.recycle();
+            }
+        }
+    }
+
+    private static float locatePhraseY(PDDocument doc, int pageIndex, String phrase, float minY) throws Exception {
+        String target = compact(phrase);
+        if (target.isEmpty()) return -1f;
+
+        List<String> targetTokens = new ArrayList<>();
+        for (String word : phrase.split("\\s+")) {
+            String token = compact(word);
+            if (token.length() >= 2 && !targetTokens.contains(token)) targetTokens.add(token);
+        }
+
+        PageLocator locator = new PageLocator();
+        locator.setStartPage(pageIndex + 1);
+        locator.setEndPage(pageIndex + 1);
+        locator.getText(doc);
+
+        int bestScore = 0;
+        float bestY = -1f;
+        for (int i = 0; i < locator.chunks.size(); i++) {
+            TextChunk first = locator.chunks.get(i);
+            if (first.y + 2f < minY) continue;
+
+            StringBuilder joined = new StringBuilder();
+            for (int j = i; j < locator.chunks.size() && j < i + 4; j++) {
+                if (joined.length() > 0) joined.append(' ');
+                joined.append(locator.chunks.get(j).text);
+            }
+            String cc = compact(joined.toString());
+            if (cc.isEmpty()) continue;
+
+            int score = 0;
+            if (cc.contains(target) || target.contains(cc)) score += 240;
+            int hits = 0;
+            for (String token : targetTokens) if (cc.contains(token)) hits++;
+            if (!targetTokens.isEmpty()) score += Math.round((hits * 120f) / targetTokens.size());
+            if (hits >= Math.min(3, targetTokens.size())) score += 30;
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestY = first.y;
+            }
+        }
+        return bestScore >= 85 ? bestY : -1f;
+    }
+
+    private static int findSafeWhitespaceAfter(Bitmap bitmap, int approxY, int radius) {
+        if (bitmap == null || bitmap.getWidth() < 20 || bitmap.getHeight() < 20) return -1;
+
+        int minY = Math.max(2, approxY - 8);
+        int maxY = Math.min(bitmap.getHeight() - 2, approxY + Math.max(50, radius));
+        int minBand = Math.max(10, bitmap.getHeight() / 170);
+        int x0 = Math.max(0, bitmap.getWidth() / 20);
+        int x1 = Math.min(bitmap.getWidth(), bitmap.getWidth() - bitmap.getWidth() / 20);
+        int xStep = Math.max(4, bitmap.getWidth() / 180);
+
+        int runStart = -1;
+        for (int y = minY; y <= maxY; y++) {
+            boolean blank = isLowInformationRow(bitmap, y, x0, x1, xStep);
+            if (blank && runStart < 0) runStart = y;
+            if ((!blank || y == maxY) && runStart >= 0) {
+                int runEnd = blank && y == maxY ? y : y - 1;
+                if (runEnd - runStart + 1 >= minBand) return (runStart + runEnd) / 2;
+                runStart = -1;
+            }
+        }
+        return -1;
+    }
 
 
     static ExtractResult renderPages(Context context, Uri uri, List<Integer> pdfPages) throws Exception {
