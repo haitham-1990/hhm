@@ -1,0 +1,63 @@
+name: Noor Hybrid 1.0.25 Emulator Smoke Test
+on:
+  push:
+    branches: [noor-hybrid-1.0.25-general-qa]
+    paths:
+      - .github/workflows/noor-hybrid-125-emulator.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  emulator-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Enable KVM acceleration if available
+        run: |
+          if test -e /dev/kvm; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "KVM device unavailable, software emulation may be slow"
+          fi
+      - name: Extract app and install platform
+        run: |
+          base64 -d NoorHybrid-1.0.25-QA-project.b64 > project.zip
+          unzip -q project.zip
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+      - name: Build testable APK
+        run: gradle -p noor-helper --no-daemon assembleDebug
+      - name: Launch and capture first screen
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            mkdir -p qa-screen
+            adb install -r noor-helper/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.khutwa.noorhybrid.visualsource/com.khutwa.noorhelper.MainActivity > qa-screen/activity-start.txt 2>&1 || true
+            sleep 10
+            adb exec-out screencap -p > qa-screen/launch.png || true
+            adb shell dumpsys activity activities > qa-screen/activities.txt || true
+            adb logcat -d -t 1500 > qa-screen/logcat.txt || true
+            test -s qa-screen/launch.png
+      - name: Upload emulator screenshot and logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NoorHybrid-1.0.25-emulator-smoke
+          path: qa-screen/
