@@ -26,8 +26,9 @@ jobs:
           unzip -q noor-hybrid-src.zip
       - name: Install Android SDK 35
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build debug APK
         run: gradle -p NoorHybrid-1.0.0 --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
