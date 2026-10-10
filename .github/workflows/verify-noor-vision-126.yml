@@ -36,6 +36,23 @@ jobs:
             with urllib.request.urlopen(req,timeout=100) as res:
               body=res.read(20000).decode('utf-8','replace')
               print('STATUS',res.status,'RESPONSE',body[:6500])
+              answer=json.loads(body)
+              regions=answer.get('result',{}).get('questions',[])
+              overlay=im.copy(); marker=ImageDraw.Draw(overlay)
+              for ix,item in enumerate(regions):
+                box=item.get('bbox',[0,0,0,0])
+                l,t,r,b=[int(v*dim/1000) for v,dim in zip(box,[800,960,800,960])]
+                marker.rectangle((l,t,r,b),outline='red',width=5)
+                marker.text((l+6,t+6),'#'+str(ix+1),fill='red')
+              overlay_mem=io.BytesIO();overlay.save(overlay_mem,format='JPEG',quality=87)
+              check_payload={
+                "task":"question_regions",
+                "images":[payload["image"],"data:image/jpeg;base64,"+base64.b64encode(overlay_mem.getvalue()).decode()],
+                "message":"You have two images: original study page and exactly same with red rectangles labeled #1 and #2. Determine whether each red rectangle contains the ENTIRE question text, digits and punctuation, without clipping. Do not assume the rectangles are correct. If one rectangle misses text, return pass=false and rejected_ids. Answer JSON ONLY {\\\"pass\\\":false,\\\"rejected_ids\\\":[1],\\\"reason\\\":\\\"missing text\\\"}."
+              }
+              checkreq=urllib.request.Request(url,data=json.dumps(check_payload).encode(),headers={'Content-Type':'application/json','User-Agent':'NoorHybridVisionQA/1.0'},method='POST')
+              with urllib.request.urlopen(checkreq,timeout=110) as checkres:
+                print('REVIEW',checkres.status,checkres.read(8000).decode('utf-8','replace'))
           except urllib.error.HTTPError as e:
             print('HTTP_ERROR',e.code,e.read(3000).decode('utf-8','replace'))
             raise
