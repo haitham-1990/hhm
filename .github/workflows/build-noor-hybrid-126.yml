@@ -30,7 +30,7 @@ jobs:
           mkdir -p qa-results/classes
           javac -encoding UTF-8 -d qa-results/classes noor-helper/app/src/main/java/com/khutwa/noorhelper/VisionBox.java noor-helper/qa/VisionBoxTest.java
           java -cp qa-results/classes com.khutwa.noorhelper.VisionBoxTest | tee qa-results/vision-tests.txt
-          grep -q 'ALL 16 subject-independent vision region tests passed.' qa-results/vision-tests.txt
+          grep -q 'ALL 18 subject-independent vision region tests passed.' qa-results/vision-tests.txt
       - name: Android SDK 35
         run: |
           SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
