@@ -739,12 +739,44 @@ final class PdfExerciseExtractor {
 
     private static final class TextChunk {
         final String text;
+        final float x;
         final float y;
+        final float width;
+        final float height;
 
-        TextChunk(String text, float y) {
+        TextChunk(String text, float x, float y, float width, float height) {
             this.text = text;
+            this.x = x;
             this.y = y;
+            this.width = width;
+            this.height = height;
         }
+
+        float right() { return x + width; }
+        float bottom() { return y + height; }
+        float centerX() { return x + width / 2f; }
+    }
+
+    private static final class PhraseAnchor {
+        final float x;
+        final float y;
+        final float width;
+        final float height;
+        final int score;
+        final boolean exact;
+
+        PhraseAnchor(float x, float y, float width, float height, int score, boolean exact) {
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.height = height;
+            this.score = score;
+            this.exact = exact;
+        }
+
+        float right() { return x + width; }
+        float bottom() { return y + height; }
+        float centerX() { return x + width / 2f; }
     }
 
     private static final class PageLocator extends PDFTextStripper {
@@ -760,8 +792,32 @@ final class PdfExerciseExtractor {
         @Override
         protected void writeString(String text, List<TextPosition> positions) {
             if (positions == null || positions.isEmpty()) return;
-            float y = positions.get(0).getYDirAdj();
-            chunks.add(new TextChunk(text, y));
+
+            float minX = Float.MAX_VALUE;
+            float minY = Float.MAX_VALUE;
+            float maxX = -Float.MAX_VALUE;
+            float maxY = -Float.MAX_VALUE;
+
+            for (TextPosition p : positions) {
+                if (p == null) continue;
+                float x = p.getXDirAdj();
+                float y = p.getYDirAdj();
+                float w = Math.max(0f, p.getWidthDirAdj());
+                float h = Math.max(1f, p.getHeightDir());
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x + w);
+                maxY = Math.max(maxY, y + h);
+            }
+
+            if (minX == Float.MAX_VALUE || minY == Float.MAX_VALUE) return;
+            chunks.add(new TextChunk(
+                    text,
+                    minX,
+                    minY,
+                    Math.max(1f, maxX - minX),
+                    Math.max(1f, maxY - minY)
+            ));
         }
 
         static PageLocator locate(PDDocument doc, int pageIndex, LessonKey key) throws Exception {
