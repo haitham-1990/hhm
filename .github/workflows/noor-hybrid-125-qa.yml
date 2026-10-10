@@ -1,0 +1,48 @@
+name: Noor Hybrid 1.0.25 Universal QA
+on:
+  push:
+    branches: [noor-hybrid-1.0.25-general-qa]
+    paths:
+      - 'NoorHybrid-1.0.25-QA-project.b64'
+      - '.github/workflows/noor-hybrid-125-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Unpack Android application
+        run: |
+          base64 -d NoorHybrid-1.0.25-QA-project.b64 > app-source.zip
+          unzip -q app-source.zip
+      - name: General subject-neutral image geometry tests
+        run: |
+          mkdir -p noor-helper/qa/classes qa-results
+          javac -encoding UTF-8 -d noor-helper/qa/classes noor-helper/app/src/main/java/com/khutwa/noorhelper/RasterPageSplitter.java noor-helper/qa/LayoutGeometryTest.java
+          java -cp noor-helper/qa/classes com.khutwa.noorhelper.LayoutGeometryTest | tee qa-results/layout-tests.log
+          grep -q 'ALL 108 layout geometry cases passed.' qa-results/layout-tests.log
+      - name: Android SDK install
+        run: |
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build APK (QA only)
+        run: gradle -p noor-helper --no-daemon assembleDebug
+      - name: Publish compiled QA APK and test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoorHybrid-1.0.25-QA
+          path: |
+            noor-helper/app/build/outputs/apk/debug/app-debug.apk
+            qa-results/layout-tests.log
