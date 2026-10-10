@@ -7,11 +7,11 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.khutwa.noorsmartfree117'
+        applicationId 'com.khutwa.noorsmartfree118'
         minSdk 23
         targetSdk 34
-        versionCode 44
-        versionName '1.0.17'
+        versionCode 45
+        versionName '1.0.18'
     }
 
     signingConfigs {
