@@ -1,0 +1,58 @@
+name: Noor Hybrid 1.0.26 Emulator Screen Test
+on:
+  push:
+    branches: [noor-hybrid-1.0.26-vision]
+    paths:
+      - '.github/workflows/noor-hybrid-126-emulator.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Enable KVM if available
+        run: |
+          if test -e /dev/kvm; then sudo chmod 666 /dev/kvm; fi
+      - name: Prepare source and SDK
+        run: |
+          base64 -d NoorHybrid-1.0.26-Vision-Project.b64 > source.zip
+          unzip -q source.zip
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Compile
+        run: gradle -p noor-helper --no-daemon assembleDebug
+      - name: Install and open the actual app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            mkdir -p qa-screen
+            adb install -r noor-helper/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.khutwa.noorhybrid.vision126/com.khutwa.noorhelper.MainActivity > qa-screen/start.txt 2>&1
+            sleep 12
+            adb exec-out screencap -p > qa-screen/launch.png
+            adb shell dumpsys activity activities > qa-screen/activity.txt
+            adb logcat -d -t 2500 > qa-screen/logcat.txt
+            test -s qa-screen/launch.png
+      - name: Archive screenshot and logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NoorHybrid-126-Emulator-QA
+          path: qa-screen/
