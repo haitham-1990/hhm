@@ -204,6 +204,9 @@ final class AiPreparationClient {
         try {
             validated = enrichPlanningMetadata(validated, planContext, scope);
             diagnostics.logLessons("catalog_after_planning_metadata", validated);
+
+            validated = repairMissingPlanningMetadata(validated, planContext, scope);
+            diagnostics.logLessons("catalog_after_planning_metadata_repair", validated);
         } catch (Exception e) {
             diagnostics.logMessage("planning_metadata_enrichment_error", e.getMessage());
         }
@@ -344,6 +347,118 @@ final class AiPreparationClient {
                     enriched, old.materialStartPage, old.materialEndPage));
         }
         return out;
+    }
+
+
+    private List<DiscoveredCurriculumStore.Entry> repairMissingPlanningMetadata(
+            List<DiscoveredCurriculumStore.Entry> source,
+            String planContext,
+            JSONObject scope) throws Exception {
+        if (source == null || source.isEmpty()) return source;
+
+        JSONArray missing = new JSONArray();
+        for (int i = 0; i < source.size(); i++) {
+            CurriculumLesson l = source.get(i).lesson;
+            boolean missingDates = l.periodStart == null || l.periodStart.trim().isEmpty()
+                    || l.periodEnd == null || l.periodEnd.trim().isEmpty();
+            boolean weakUnit = l.unit == null || l.unit.trim().isEmpty()
+                    || l.unit.trim().matches("^[0-9٠-٩]+$");
+            if (!missingDates && !weakUnit) continue;
+
+            JSONObject o = new JSONObject();
+            o.put("i", i);
+            o.put("code", l.code);
+            o.put("title", l.title);
+            o.put("unit", l.unit);
+            o.put("periods", l.periods);
+            o.put("start", l.periodStart);
+            o.put("end", l.periodEnd);
+            missing.put(o);
+        }
+
+        if (missing.length() == 0) return source;
+
+        StringBuilder prompt = new StringBuilder(56000);
+        prompt.append("أصلح فقط بيانات التخطيط الناقصة للدروس التالية بالاعتماد حصراً على نص الخطة المرفق. ");
+        prompt.append("قد تكون تواريخ كل وحدة مكتوبة مرة واحدة في أسفل الصفحة أو رأسها في صف أفقي، ");
+        prompt.append("ولذلك اربط كل درس بالوحدة الصحيحة ثم انقل تاريخ بداية ونهاية تلك الوحدة لجميع دروسها. ");
+        prompt.append("لا تستخدم معرفة مسبقة عن مادة أو صف، ولا تخمن تاريخاً غير ظاهر في الخطة. ");
+        prompt.append("لا تغيّر code أو title ولا ترتيب الدروس. ");
+        prompt.append("إذا كان اسم الوحدة الحالي ناقصاً أو مجرد رقم، استخرج اسم الوحدة من الخطة إن كان واضحاً. ");
+        prompt.append("أعد فقط الصفوف التي استطعت إصلاحها بدليل واضح. ");
+        prompt.append("أرجع JSON فقط: {\"lessons\":[{\"i\":0,\"unit\":\"\",\"periods\":0,");
+        prompt.append("\"start\":\"YYYY-MM-DD\",\"end\":\"YYYY-MM-DD\"}]}.\n");
+        prompt.append("\nهوية الوثيقة: ").append(limitRaw(scope == null ? "" : scope.toString(), 1500));
+        prompt.append("\n\n=== الدروس الناقصة ===\n").append(missing.toString());
+        prompt.append("\n\n=== نص الخطة الكامل ===\n").append(limitRaw(planContext, 36000));
+
+        JSONObject payload = new JSONObject();
+        payload.put("message", prompt.toString());
+        JSONObject answer = new JSONObject(cleanJson(postForAnswer(payload)));
+        JSONArray rows = answer.optJSONArray("lessons");
+        if (rows == null || rows.length() == 0) return source;
+
+        List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>(source);
+        for (int r = 0; r < rows.length(); r++) {
+            JSONObject row = rows.optJSONObject(r);
+            if (row == null) continue;
+
+            int i = row.optInt("i", -1);
+            if (i < 0 || i >= source.size()) continue;
+
+            DiscoveredCurriculumStore.Entry old = out.get(i);
+            CurriculumLesson l = old.lesson;
+
+            String unit = row.optString("unit", "").trim();
+            int periods = row.optInt("periods", 0);
+            String start = normalizeIsoDate(row.optString("start", "").trim());
+            String end = normalizeIsoDate(row.optString("end", "").trim());
+
+            String finalStart = (l.periodStart == null || l.periodStart.trim().isEmpty()) && !start.isEmpty()
+                    ? start : l.periodStart;
+            String finalEnd = (l.periodEnd == null || l.periodEnd.trim().isEmpty()) && !end.isEmpty()
+                    ? end : l.periodEnd;
+            String finalUnit = (l.unit == null || l.unit.trim().isEmpty()
+                    || l.unit.trim().matches("^[0-9٠-٩]+$"))
+                    && !unit.isEmpty() ? unit : l.unit;
+
+            CurriculumLesson repaired = new CurriculumLesson(
+                    l.code,
+                    l.title,
+                    finalUnit,
+                    l.semester,
+                    periods > 0 ? periods : l.periods,
+                    finalStart,
+                    finalEnd,
+                    l.level,
+                    l.objectives,
+                    l.strategies,
+                    l.resources
+            );
+            out.set(i, new DiscoveredCurriculumStore.Entry(
+                    repaired, old.materialStartPage, old.materialEndPage));
+        }
+        return out;
+    }
+
+    private static String normalizeIsoDate(String raw) {
+        if (raw == null) return "";
+        String v = raw.trim()
+                .replace('/', '-')
+                .replace('.', '-')
+                .replace('–', '-');
+        if (v.matches("^\\d{4}-\\d{2}-\\d{2}$")) return v;
+
+        Matcher dmy = Pattern.compile("^(\\d{1,2})-(\\d{1,2})-(\\d{4})$").matcher(v);
+        if (dmy.matches()) {
+            try {
+                int d = Integer.parseInt(dmy.group(1));
+                int m = Integer.parseInt(dmy.group(2));
+                int y = Integer.parseInt(dmy.group(3));
+                return String.format(java.util.Locale.ROOT, "%04d-%02d-%02d", y, m, d);
+            } catch (Exception ignored) {}
+        }
+        return "";
     }
 
 
