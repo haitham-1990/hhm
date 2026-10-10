@@ -384,14 +384,20 @@ final class PdfExerciseExtractor {
                     int minSearch = Math.min(h - 2, top + Math.max(140, h / 8));
                     int safeBottom = findSafeWhitespaceAfter(page, minSearch, Math.max(260, h / 3));
                     if (safeBottom < 0) {
-                        // Do not guess a crop that could slice through another question.
-                        return "";
+                        safeBottom = findSafeWhitespaceAfter(page, minSearch, h);
                     }
-                    bottom = safeBottom;
+                    // If the page has no clean separator at all, preserve the remainder
+                    // of the page instead of dropping the question completely.
+                    bottom = safeBottom >= 0 ? safeBottom : h;
                 }
 
                 if (bottom <= top + Math.max(90, h / 18)) return "";
-                if (bottom - top > Math.round(h * 0.70f)) return "";
+                // A large crop is acceptable as a last resort; showing a little extra
+                // source content is safer than silently omitting the selected question.
+                if (bottom - top > Math.round(h * 0.94f)) {
+                    top = Math.max(0, Math.min(top, Math.round(h * 0.08f)));
+                    bottom = h;
+                }
 
                 crop = Bitmap.createBitmap(page, 0, top, page.getWidth(), bottom - top);
                 if (!page.isRecycled()) page.recycle();
@@ -428,36 +434,72 @@ final class PdfExerciseExtractor {
 
         int bestScore = 0;
         float bestY = -1f;
+
+        // PDFs frequently split Arabic/math questions into many tiny text chunks.
+        // Evaluate a wider rolling window instead of assuming the phrase lives in
+        // four chunks only.
         for (int i = 0; i < locator.chunks.size(); i++) {
             TextChunk first = locator.chunks.get(i);
             if (first.y + 2f < minY) continue;
 
             StringBuilder joined = new StringBuilder();
-            for (int j = i; j < locator.chunks.size() && j < i + 4; j++) {
+            int tokenHitsBest = 0;
+
+            for (int j = i; j < locator.chunks.size() && j < i + 14; j++) {
+                TextChunk part = locator.chunks.get(j);
+
+                // Stop if we have clearly moved to a distant block on the page.
+                if (j > i && Math.abs(part.y - first.y) > 120f) break;
+
                 if (joined.length() > 0) joined.append(' ');
-                joined.append(locator.chunks.get(j).text);
-            }
-            String cc = compact(joined.toString());
-            if (cc.isEmpty()) continue;
+                joined.append(part.text);
 
-            int score = 0;
-            if (cc.contains(target)) {
-                score += 240;
-            } else if (target.contains(cc)
-                    && cc.length() >= Math.max(14, Math.min(32, target.length() / 2))) {
-                score += 150;
-            }
-            int hits = 0;
-            for (String token : targetTokens) if (cc.contains(token)) hits++;
-            if (!targetTokens.isEmpty()) score += Math.round((hits * 120f) / targetTokens.size());
-            if (hits >= Math.min(3, targetTokens.size())) score += 30;
+                String cc = compact(joined.toString());
+                if (cc.isEmpty()) continue;
 
-            if (score > bestScore) {
-                bestScore = score;
+                int score = 0;
+                if (cc.contains(target)) {
+                    score += 320;
+                } else if (target.contains(cc)
+                        && cc.length() >= Math.max(14, Math.min(36, target.length() / 2))) {
+                    score += 175;
+                }
+
+                int hits = 0;
+                int longHits = 0;
+                for (String token : targetTokens) {
+                    if (cc.contains(token)) {
+                        hits++;
+                        if (token.length() >= 5) longHits++;
+                    }
+                }
+                tokenHitsBest = Math.max(tokenHitsBest, hits);
+
+                if (!targetTokens.isEmpty()) {
+                    score += Math.round((hits * 155f) / targetTokens.size());
+                }
+                score += Math.min(4, longHits) * 16;
+
+                // Prefer windows that contain the beginning of the source phrase.
+                String firstToken = targetTokens.isEmpty() ? "" : targetTokens.get(0);
+                if (!firstToken.isEmpty() && cc.contains(firstToken)) score += 24;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestY = first.y;
+                }
+            }
+
+            // Strong token coverage alone is enough when symbols or PDF extraction
+            // reorder parts of the mathematical expression.
+            if (tokenHitsBest >= Math.min(4, Math.max(2, targetTokens.size() - 1))
+                    && bestScore < 110) {
+                bestScore = 110;
                 bestY = first.y;
             }
         }
-        return bestScore >= 85 ? bestY : -1f;
+
+        return bestScore >= 78 ? bestY : -1f;
     }
 
     private static int findSafeWhitespaceAfter(Bitmap bitmap, int approxY, int radius) {
