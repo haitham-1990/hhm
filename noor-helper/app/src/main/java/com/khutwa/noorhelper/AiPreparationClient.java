@@ -1391,11 +1391,12 @@ final class AiPreparationClient {
         if (stages == null || stages.length() == 0) {
             String fallback = root.optString("p", "").trim();
             if (fallback.isEmpty()) throw new IllegalArgumentException("حقل ناقص من الذكاء: p");
-            return "<div dir=\"rtl\"><p>" + html(fallback).replace("\n", "<br>") + "</p></div>";
+            return "<div dir=\"rtl\" style=\"width:100%;box-sizing:border-box;line-height:1.9;white-space:normal;overflow-wrap:anywhere;\"><p style=\"margin:8px 0;line-height:1.9;\">"
+                    + html(fallback).replace("\n", "<br>") + "</p></div>";
         }
 
         StringBuilder out = new StringBuilder(5000);
-        out.append("<div dir=\"rtl\">");
+        out.append("<div dir=\"rtl\" style=\"width:100%;box-sizing:border-box;line-height:1.9;white-space:normal;overflow-wrap:anywhere;\">");
         int written = 0;
         Set<Integer> usedPages = new LinkedHashSet<>();
 
@@ -1411,8 +1412,8 @@ final class AiPreparationClient {
             if (t.isEmpty() && teacher.isEmpty() && student.isEmpty() && source.isEmpty() && check.isEmpty()) continue;
 
             written++;
-            out.append("<div style=\"margin:0 0 18px 0;\">");
-            out.append("<p><strong>").append(written).append(". ")
+            out.append("<div style=\"display:block;width:100%;box-sizing:border-box;clear:both;margin:0 0 22px 0;line-height:1.9;\">");
+            out.append("<p style=\"display:block;clear:both;margin:0 0 10px 0;line-height:1.9;\"><strong>").append(written).append(". ")
                     .append(html(t.isEmpty() ? "مرحلة التعلم" : t)).append("</strong></p>");
             appendProcedureRow(out, "دور المعلم", teacher);
             appendProcedureRow(out, "دور الطالب", student);
@@ -1432,11 +1433,11 @@ final class AiPreparationClient {
                             .append("\" data-khutwa-page=\"").append(qPage)
                             .append("\" data-khutwa-q=\"").append(html(q))
                             .append("\" data-khutwa-qend=\"").append(html(qEnd))
-                            .append("\" style=\"margin:8px 0;\"></div>");
+                            .append("\" style=\"display:block;clear:both;width:100%;box-sizing:border-box;margin:12px 0 16px 0;\"></div>");
                 }
             }
             out.append("</div>");
-            if (written < 6) out.append("<hr>");
+            if (written < 6) out.append("<hr style=\"clear:both;margin:18px 0;border:0;border-top:1px solid #666;\">");
         }
 
         if (written == 0) throw new IllegalArgumentException("سير الدرس فارغ");
@@ -1446,7 +1447,8 @@ final class AiPreparationClient {
 
     private static void appendProcedureRow(StringBuilder out, String label, String value) {
         if (value == null || value.trim().isEmpty()) return;
-        out.append("<p><strong>").append(html(label)).append(":</strong> ")
+        out.append("<p style=\"display:block;clear:both;margin:8px 0;line-height:1.9;white-space:normal;overflow-wrap:anywhere;\"><strong>")
+                .append(html(label)).append(":</strong> ")
                 .append(html(value.trim()).replace("\n", "<br>")).append("</p>");
     }
 
