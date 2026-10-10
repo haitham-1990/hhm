@@ -116,8 +116,9 @@ final class AiPreparationClient {
 
     List<DiscoveredCurriculumStore.Entry> discoverCurriculum(PdfCorpusIndex corpus) throws Exception {
         String planOutline = corpus.planDiscoveryOutline();
+        String planContext = corpus.planDiscoveryContext();
         String materialOutline = corpus.materialDiscoveryOutline();
-        String key = "catalog_fullscan_v5_longmaterial_" + hashShort(planOutline + "\n" + materialOutline);
+        String key = "catalog_fullscan_v6_stable_" + hashShort(planOutline + "\n" + materialOutline);
 
         String cached = prefs().getString(key, null);
         if (cached != null && !cached.trim().isEmpty()) {
@@ -188,7 +189,7 @@ final class AiPreparationClient {
         }
 
         List<DiscoveredCurriculumStore.Entry> validated =
-                validateLessonHierarchy(candidates, planOutline);
+                validateLessonHierarchy(candidates, planContext);
 
         diagnostics.logLessons("catalog_after_hierarchy", validated);
 
@@ -201,7 +202,7 @@ final class AiPreparationClient {
         // those unit-level facts to each discovered lesson. This is generic and
         // source-driven; it does not contain any subject/grade-specific schedule.
         try {
-            validated = enrichPlanningMetadata(validated, planOutline, scope);
+            validated = enrichPlanningMetadata(validated, planContext, scope);
             diagnostics.logLessons("catalog_after_planning_metadata", validated);
         } catch (Exception e) {
             diagnostics.logMessage("planning_metadata_enrichment_error", e.getMessage());
@@ -385,6 +386,7 @@ final class AiPreparationClient {
             diagnostics.log("hierarchy_decision", decision);
             List<DiscoveredCurriculumStore.Entry> decided = applyHierarchyDecision(candidates, decision);
             List<DiscoveredCurriculumStore.Entry> normalized = normalizeLetteredLessonCodes(decided);
+            normalized = mergeNearDuplicateLessonCodes(normalized);
             diagnostics.logLessons("catalog_after_code_structure_normalization", normalized);
             return normalized;
         } catch (Exception e) {
@@ -393,6 +395,7 @@ final class AiPreparationClient {
             // candidates while applying only the generic code hierarchy visible in
             // the source itself (for example N-M-أ / N-M-ب under N-M).
             List<DiscoveredCurriculumStore.Entry> normalized = normalizeLetteredLessonCodes(candidates);
+            normalized = mergeNearDuplicateLessonCodes(normalized);
             diagnostics.logLessons("catalog_after_code_structure_fallback", normalized);
             return normalized;
         }
@@ -495,6 +498,127 @@ final class AiPreparationClient {
         }
         return out;
     }
+
+    private List<DiscoveredCurriculumStore.Entry> mergeNearDuplicateLessonCodes(
+            List<DiscoveredCurriculumStore.Entry> source) {
+        if (source == null || source.isEmpty()) return source;
+
+        List<DiscoveredCurriculumStore.Entry> out = new ArrayList<>();
+        Map<String, Integer> byCode = new LinkedHashMap<>();
+
+        for (DiscoveredCurriculumStore.Entry item : source) {
+            String key = comparableLessonCode(item.lesson.code);
+            Integer existingIndex = key.isEmpty() ? null : byCode.get(key);
+
+            if (existingIndex == null) {
+                if (!key.isEmpty()) byCode.put(key, out.size());
+                out.add(item);
+                continue;
+            }
+
+            DiscoveredCurriculumStore.Entry existing = out.get(existingIndex);
+            if (!nearDuplicateTitle(existing.lesson.title, item.lesson.title)) {
+                // Same-looking numeric code can be legitimate in unusual documents.
+                // Keep both unless their titles are clearly the same lesson.
+                out.add(item);
+                continue;
+            }
+
+            List<String> objectives = new ArrayList<>(existing.lesson.objectives);
+            for (String objective : item.lesson.objectives) {
+                if (!objectives.contains(objective)) objectives.add(objective);
+            }
+            List<String> strategies = new ArrayList<>(existing.lesson.strategies);
+            for (String x : item.lesson.strategies) if (!strategies.contains(x)) strategies.add(x);
+            List<String> resources = new ArrayList<>(existing.lesson.resources);
+            for (String x : item.lesson.resources) if (!resources.contains(x)) resources.add(x);
+
+            int startPage = existing.materialStartPage;
+            if (item.materialStartPage > 0 && (startPage <= 0 || item.materialStartPage < startPage)) {
+                startPage = item.materialStartPage;
+            }
+            int endPage = Math.max(existing.materialEndPage, item.materialEndPage);
+
+            CurriculumLesson a = existing.lesson;
+            CurriculumLesson b = item.lesson;
+            String title = a.title.length() >= b.title.length() ? a.title : b.title;
+            String unit = !a.unit.trim().isEmpty() ? a.unit : b.unit;
+            String semester = !a.semester.trim().isEmpty() ? a.semester : b.semester;
+            String periodStart = !a.periodStart.trim().isEmpty() ? a.periodStart : b.periodStart;
+            String periodEnd = !a.periodEnd.trim().isEmpty() ? a.periodEnd : b.periodEnd;
+
+            CurriculumLesson merged = new CurriculumLesson(
+                    a.code,
+                    title,
+                    unit,
+                    semester,
+                    Math.max(a.periods, b.periods),
+                    periodStart,
+                    periodEnd,
+                    a.level,
+                    objectives,
+                    strategies,
+                    resources
+            );
+            out.set(existingIndex, new DiscoveredCurriculumStore.Entry(merged, startPage, endPage));
+
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("code", a.code);
+                meta.put("kept_title", title);
+                meta.put("merged_title", b.title);
+                diagnostics.log("duplicate_lesson_code_merged", meta);
+            } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
+    private static String comparableLessonCode(String raw) {
+        String v = raw == null ? "" : raw.trim()
+                .replace('–', '-')
+                .replaceAll("\\s+", "");
+        String ar = "٠١٢٣٤٥٦٧٨٩";
+        StringBuilder out = new StringBuilder(v.length());
+        for (int i = 0; i < v.length(); i++) {
+            char ch = v.charAt(i);
+            int p = ar.indexOf(ch);
+            out.append(p >= 0 ? (char) ('0' + p) : ch);
+        }
+        return out.toString();
+    }
+
+    private static boolean nearDuplicateTitle(String a, String b) {
+        String x = comparableTitle(a);
+        String y = comparableTitle(b);
+        if (x.isEmpty() || y.isEmpty()) return false;
+        if (x.equals(y)) return true;
+        if ((x.contains(y) || y.contains(x))
+                && Math.min(x.length(), y.length()) >= Math.max(8, (int) (Math.max(x.length(), y.length()) * 0.65f))) {
+            return true;
+        }
+
+        java.util.Set<String> xs = new java.util.LinkedHashSet<>();
+        java.util.Set<String> ys = new java.util.LinkedHashSet<>();
+        for (String w : x.split(" ")) if (w.length() >= 2) xs.add(w);
+        for (String w : y.split(" ")) if (w.length() >= 2) ys.add(w);
+        if (xs.isEmpty() || ys.isEmpty()) return false;
+
+        int common = 0;
+        for (String w : xs) if (ys.contains(w)) common++;
+        int denom = Math.max(xs.size(), ys.size());
+        return common >= 2 && common * 1.0 / denom >= 0.72;
+    }
+
+    private static String comparableTitle(String raw) {
+        String v = raw == null ? "" : raw;
+        return v.replaceAll("[\\u064B-\\u065F\\u0670\\u0640]", "")
+                .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ى', 'ي')
+                .toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^\\p{L}\\p{N}]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
 
     private List<DiscoveredCurriculumStore.Entry> applyHierarchyDecision(
             List<DiscoveredCurriculumStore.Entry> source, JSONObject decision) {
@@ -748,23 +872,39 @@ final class AiPreparationClient {
 
         List<DiscoveredCurriculumStore.Entry> lexical = corpus.resolveMaterialRanges(catalog);
         for (int i = 0; i < starts.length; i++) {
-            if (starts[i] <= 0 && i < lexical.size()) {
-                int lexicalStart = lexical.get(i).materialStartPage;
-                if (lexicalStart > 0) {
-                    starts[i] = lexicalStart;
-                    ranks[i] = 1;
-                    evidences[i] = "مطابقة نصية احتياطية داخل كامل ملف المادة";
+            if (starts[i] > 0 || i >= lexical.size()) continue;
+            int lexicalStart = lexical.get(i).materialStartPage;
+            if (lexicalStart <= 0) continue;
+
+            int previousKnown = 0;
+            for (int p = i - 1; p >= 0; p--) {
+                if (starts[p] > 0) {
+                    previousKnown = starts[p];
+                    break;
                 }
+            }
+            int nextKnown = 0;
+            for (int n = i + 1; n < starts.length; n++) {
+                if (starts[n] > 0) {
+                    nextKnown = starts[n];
+                    break;
+                }
+            }
+
+            // A lexical fallback is accepted only if it fits between stronger
+            // neighbouring evidence. This prevents one false match from pushing
+            // every later lesson to the same page.
+            if ((previousKnown <= 0 || lexicalStart >= previousKnown)
+                    && (nextKnown <= 0 || lexicalStart <= nextKnown)) {
+                starts[i] = lexicalStart;
+                ranks[i] = 1;
+                evidences[i] = "مطابقة نصية احتياطية داخل كامل ملف المادة";
+            } else {
+                evidences[i] = "رُفضت مطابقة نصية احتياطية لأنها تخالف ترتيب الدروس";
             }
         }
 
-        // Keep source order monotonic while preserving same-page lesson starts.
-        int floor = 1;
-        for (int i = 0; i < starts.length; i++) {
-            if (starts[i] <= 0) continue;
-            if (starts[i] < floor) starts[i] = floor;
-            floor = starts[i];
-        }
+        rejectNonMonotonicMaterialStarts(starts, ranks, evidences);
 
         try {
             JSONObject merged = new JSONObject();
@@ -818,6 +958,75 @@ final class AiPreparationClient {
         }
         return out;
     }
+
+    private static void rejectNonMonotonicMaterialStarts(
+            int[] starts, int[] ranks, String[] evidences) {
+        if (starts == null || ranks == null) return;
+
+        boolean changed;
+        int guard = 0;
+        do {
+            changed = false;
+            int previous = -1;
+
+            for (int i = 0; i < starts.length; i++) {
+                if (starts[i] <= 0) continue;
+                if (previous >= 0 && starts[previous] > starts[i]) {
+                    int drop;
+                    if (ranks[previous] < ranks[i]) {
+                        drop = previous;
+                    } else if (ranks[i] < ranks[previous]) {
+                        drop = i;
+                    } else {
+                        int before = -1;
+                        for (int p = previous - 1; p >= 0; p--) {
+                            if (starts[p] > 0) {
+                                before = p;
+                                break;
+                            }
+                        }
+                        int after = -1;
+                        for (int n = i + 1; n < starts.length; n++) {
+                            if (starts[n] > 0) {
+                                after = n;
+                                break;
+                            }
+                        }
+
+                        boolean droppingPreviousRestores =
+                                (before < 0 || starts[before] <= starts[i])
+                                        && (after < 0 || starts[i] <= starts[after]);
+                        boolean droppingCurrentRestores =
+                                (before < 0 || starts[before] <= starts[previous])
+                                        && (after < 0 || starts[previous] <= starts[after]);
+
+                        if (droppingPreviousRestores && !droppingCurrentRestores) {
+                            drop = previous;
+                        } else if (droppingCurrentRestores && !droppingPreviousRestores) {
+                            drop = i;
+                        } else {
+                            // Ambiguous high-confidence inversion: reject the later
+                            // conflicting point instead of mutating dozens of following
+                            // pages. The remaining unresolved lesson can be repaired
+                            // locally later.
+                            drop = i;
+                        }
+                    }
+
+                    starts[drop] = 0;
+                    ranks[drop] = 0;
+                    String oldEvidence = evidences[drop] == null ? "" : evidences[drop];
+                    evidences[drop] = oldEvidence
+                            + (oldEvidence.isEmpty() ? "" : " | ")
+                            + "رُفضت لأنها تخالف ترتيب صفحات الدروس";
+                    changed = true;
+                    break;
+                }
+                previous = i;
+            }
+        } while (changed && ++guard < starts.length * 2);
+    }
+
 
     private String serializeCatalog(List<DiscoveredCurriculumStore.Entry> entries) throws Exception {
         JSONArray lessons = new JSONArray();
