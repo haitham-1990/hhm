@@ -1,0 +1,58 @@
+name: Noor Hybrid Android emulator QA
+on:
+  push:
+    branches: [noor-hybrid-emulator-qa]
+    paths: [".github/workflows/noor-emulator-qa.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+      - name: Unpack source and install Android SDK 35
+        run: |
+          base64 -d NoorHybrid-1.0.24-project.b64 > noor-project.zip
+          unzip -q noor-project.zip
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+      - name: Build APK
+        run: gradle -p noor-helper --no-daemon assembleDebug
+      - name: Launch app and capture screenshots as a user
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            mkdir -p qa-results
+            adb install -r noor-helper/app/build/outputs/apk/debug/app-debug.apk
+            adb shell settings put system font_scale 1.0
+            adb shell am start -W -n com.khutwa.noorhybrid.visualsource/com.khutwa.noorhelper.MainActivity | tee qa-results/launch.txt
+            sleep 12
+            adb shell screencap -p /sdcard/launch.png
+            adb pull /sdcard/launch.png qa-results/launch.png
+            adb shell uiautomator dump /sdcard/hierarchy.xml || true
+            adb pull /sdcard/hierarchy.xml qa-results/hierarchy.xml || true
+            adb shell dumpsys activity activities > qa-results/activities.txt
+            adb shell pidof com.khutwa.noorhybrid.visualsource > qa-results/app-pid.txt || true
+            adb logcat -d -v time | tail -n 6000 > qa-results/logcat.txt
+      - name: Upload screenshots and run data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoorHybrid-emulator-QA
+          path: qa-results/
