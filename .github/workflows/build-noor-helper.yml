@@ -46,3 +46,17 @@ jobs:
           name: NoorSmart-1.0.21-PreciseCrops
           path: NoorSmart-1.0.21-PreciseCrops.apk
           if-no-files-found: error
+      - name: Package Android Studio project
+        run: |
+          rm -rf noor-helper/app/build noor-helper/.gradle
+          zip -r NoorSmart-1.0.21-Project.zip noor-helper \
+            -x "noor-helper/**/build/**" \
+               "noor-helper/.gradle/**" \
+               "noor-helper/**/.idea/**" \
+               "noor-helper/**/local.properties"
+      - name: Upload Android Studio project
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoorSmart-1.0.21-Project
+          path: NoorSmart-1.0.21-Project.zip
+          if-no-files-found: error
