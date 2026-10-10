@@ -418,8 +418,13 @@ final class PdfExerciseExtractor {
     }
 
     private static float locatePhraseY(PDDocument doc, int pageIndex, String phrase, float minY) throws Exception {
+        PhraseBox box = locatePhraseBox(doc, pageIndex, phrase, minY);
+        return box == null ? -1f : box.y;
+    }
+
+    private static PhraseBox locatePhraseBox(PDDocument doc, int pageIndex, String phrase, float minY) throws Exception {
         String target = compact(phrase);
-        if (target.isEmpty()) return -1f;
+        if (target.isEmpty()) return null;
 
         List<String> targetTokens = new ArrayList<>();
         for (String word : phrase.split("\\s+")) {
@@ -433,26 +438,30 @@ final class PdfExerciseExtractor {
         locator.getText(doc);
 
         int bestScore = 0;
-        float bestY = -1f;
+        PhraseBox best = null;
 
-        // PDFs frequently split Arabic/math questions into many tiny text chunks.
-        // Evaluate a wider rolling window instead of assuming the phrase lives in
-        // four chunks only.
+        // PDFs frequently split Arabic/math questions into several chunks.
+        // Build rolling windows, but keep the X bounds of the exact winning window
+        // so the image crop can isolate the correct column/question region.
         for (int i = 0; i < locator.chunks.size(); i++) {
             TextChunk first = locator.chunks.get(i);
             if (first.y + 2f < minY) continue;
 
             StringBuilder joined = new StringBuilder();
+            float minX = first.x1;
+            float maxX = first.x2;
             int tokenHitsBest = 0;
 
             for (int j = i; j < locator.chunks.size() && j < i + 14; j++) {
                 TextChunk part = locator.chunks.get(j);
 
-                // Stop if we have clearly moved to a distant block on the page.
+                // Stop once we clearly moved to a distant vertical block.
                 if (j > i && Math.abs(part.y - first.y) > 120f) break;
 
                 if (joined.length() > 0) joined.append(' ');
                 joined.append(part.text);
+                if (part.x1 < minX) minX = part.x1;
+                if (part.x2 > maxX) maxX = part.x2;
 
                 String cc = compact(joined.toString());
                 if (cc.isEmpty()) continue;
@@ -480,26 +489,27 @@ final class PdfExerciseExtractor {
                 }
                 score += Math.min(4, longHits) * 16;
 
-                // Prefer windows that contain the beginning of the source phrase.
                 String firstToken = targetTokens.isEmpty() ? "" : targetTokens.get(0);
                 if (!firstToken.isEmpty() && cc.contains(firstToken)) score += 24;
 
+                // Penalize windows that sprawl across most of the page. Those usually
+                // combined neighboring columns/questions rather than one source item.
+                if (maxX - minX > 430f) score -= 45;
+
                 if (score > bestScore) {
                     bestScore = score;
-                    bestY = first.y;
+                    best = new PhraseBox(first.y, minX, maxX, score);
                 }
             }
 
-            // Strong token coverage alone is enough when symbols or PDF extraction
-            // reorder parts of the mathematical expression.
             if (tokenHitsBest >= Math.min(4, Math.max(2, targetTokens.size() - 1))
                     && bestScore < 110) {
                 bestScore = 110;
-                bestY = first.y;
+                best = new PhraseBox(first.y, first.x1, first.x2, bestScore);
             }
         }
 
-        return bestScore >= 78 ? bestY : -1f;
+        return bestScore >= 78 ? best : null;
     }
 
     private static int findSafeWhitespaceAfter(Bitmap bitmap, int approxY, int radius) {
@@ -740,10 +750,32 @@ final class PdfExerciseExtractor {
     private static final class TextChunk {
         final String text;
         final float y;
+        final float x1;
+        final float x2;
 
-        TextChunk(String text, float y) {
+        TextChunk(String text, float y, float x1, float x2) {
             this.text = text;
             this.y = y;
+            this.x1 = x1;
+            this.x2 = x2;
+        }
+    }
+
+    private static final class PhraseBox {
+        final float y;
+        final float x1;
+        final float x2;
+        final int score;
+
+        PhraseBox(float y, float x1, float x2, int score) {
+            this.y = y;
+            this.x1 = x1;
+            this.x2 = x2;
+            this.score = score;
+        }
+
+        float centerX() {
+            return (x1 + x2) / 2f;
         }
     }
 
@@ -761,7 +793,18 @@ final class PdfExerciseExtractor {
         protected void writeString(String text, List<TextPosition> positions) {
             if (positions == null || positions.isEmpty()) return;
             float y = positions.get(0).getYDirAdj();
-            chunks.add(new TextChunk(text, y));
+            float x1 = Float.MAX_VALUE;
+            float x2 = -1f;
+            for (TextPosition p : positions) {
+                if (p == null) continue;
+                float px1 = p.getXDirAdj();
+                float px2 = px1 + Math.max(0f, p.getWidthDirAdj());
+                if (px1 < x1) x1 = px1;
+                if (px2 > x2) x2 = px2;
+            }
+            if (x1 == Float.MAX_VALUE) x1 = 0f;
+            if (x2 < x1) x2 = x1;
+            chunks.add(new TextChunk(text, y, x1, x2));
         }
 
         static PageLocator locate(PDDocument doc, int pageIndex, LessonKey key) throws Exception {
