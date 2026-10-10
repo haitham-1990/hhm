@@ -1,0 +1,48 @@
+name: Build Noor Hybrid 1.0.26 Vision
+on:
+  push:
+    branches: [noor-hybrid-1.0.26-vision]
+    paths:
+      - 'NoorHybrid-1.0.26-Vision-Project.b64'
+      - '.github/workflows/build-noor-hybrid-126.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Extract source
+        run: |
+          base64 --decode NoorHybrid-1.0.26-Vision-Project.b64 > source.zip
+          unzip -q source.zip
+      - name: Run subject-independent vision geometry tests
+        run: |
+          mkdir -p qa-results/classes
+          javac -encoding UTF-8 -d qa-results/classes noor-helper/app/src/main/java/com/khutwa/noorhelper/VisionBox.java noor-helper/qa/VisionBoxTest.java
+          java -cp qa-results/classes com.khutwa.noorhelper.VisionBoxTest | tee qa-results/vision-tests.txt
+          grep -q 'ALL 16 subject-independent vision region tests passed.' qa-results/vision-tests.txt
+      - name: Android SDK 35
+        run: |
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Compile vision-enabled app
+        run: gradle -p noor-helper --no-daemon assembleDebug
+      - name: Publish APK and QA log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoorHybrid-1.0.26-Vision-APK
+          path: |
+            noor-helper/app/build/outputs/apk/debug/app-debug.apk
+            qa-results/vision-tests.txt
