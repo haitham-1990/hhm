@@ -48,7 +48,8 @@ jobs:
               check_payload={
                 "task":"question_regions",
                 "images":[payload["image"],"data:image/jpeg;base64,"+base64.b64encode(overlay_mem.getvalue()).decode()],
-                "message":"You have two images: original study page and exactly same with red rectangles labeled #1 and #2. Determine whether each red rectangle contains the ENTIRE question text, digits and punctuation, without clipping. Do not assume the rectangles are correct. If one rectangle misses text, return pass=false and rejected_ids. Answer JSON ONLY {\\\"pass\\\":false,\\\"rejected_ids\\\":[1],\\\"reason\\\":\\\"missing text\\\"}."
+                "message":"You have two images: original page, and same page with red rectangles. Independently re-identify the exact visible question text regions in the ORIGINAL image. The red rectangles are rough guesses that may be incorrect: fix their bounds. Return ONLY JSON using this mandatory schema: {\\\"page_relevant\\\":true,\\\"questions\\\":[{\\\"id\\\":\\\"q1\\\",\\\"bbox\\\":[left,top,right,bottom],\\\"complete\\\":true,\\\"uncertain\\\":false}],\\\"review_notes\\\":[]}. x/y 0..1000 normalized. Never invent coordinates if uncertain. Each question must include its entire line."
+
               }
               checkreq=urllib.request.Request(url,data=json.dumps(check_payload).encode(),headers={'Content-Type':'application/json','User-Agent':'NoorHybridVisionQA/1.0'},method='POST')
               with urllib.request.urlopen(checkreq,timeout=110) as checkres:
