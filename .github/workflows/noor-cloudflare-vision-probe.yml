@@ -13,6 +13,7 @@ jobs:
     steps:
       - name: Compare vision responses to two synthetic images
         run: |
+          python - <<'PY'
           import base64, json, struct, urllib.request, urllib.error, zlib
           URL="https://khutwa-ai.hhm1990hhm.workers.dev/"
           def png(color):
@@ -36,3 +37,4 @@ jobs:
               print(json.dumps({"expected":name,"status":e.code,"response":e.read(2000).decode("utf-8","replace")}))
             except Exception as e:
               print(json.dumps({"expected":name,"error":str(e)}))
+          PY
