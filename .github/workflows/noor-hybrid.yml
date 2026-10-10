@@ -1,0 +1,37 @@
+name: Noor Hybrid Android APK
+on:
+  push:
+    branches: [noor-hybrid-app-build]
+    paths:
+      - 'NoorHybrid-1.0.0-source.b64'
+      - '.github/workflows/noor-hybrid.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Unpack Noor Hybrid source
+        run: |
+          base64 -d NoorHybrid-1.0.0-source.b64 > noor-hybrid-src.zip
+          unzip -q noor-hybrid-src.zip
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build debug APK
+        run: gradle -p NoorHybrid-1.0.0 --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NoorHybrid-1.0.0-debug
+          path: NoorHybrid-1.0.0/app/build/outputs/apk/debug/app-debug.apk
