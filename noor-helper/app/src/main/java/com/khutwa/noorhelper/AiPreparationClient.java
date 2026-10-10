@@ -1236,7 +1236,7 @@ final class AiPreparationClient {
     SourceResult generateFromSources(String title, List<String> noorOutcomes,
                                      String planContext, String materialContext) throws Exception {
         String sourceKey = title + "\n" + planContext + "\n" + materialContext;
-        String key = "source_flow_v3_questioncrop_" + hashShort(sourceKey);
+        String key = "source_flow_v4_layoutcrop_" + hashShort(sourceKey);
         String cached = prefs().getString(key, null);
         if (cached != null && !cached.trim().isEmpty()) {
             return parseSourceResult(title, cached);
@@ -1326,7 +1326,9 @@ final class AiPreparationClient {
         b.append("لا تضع إجابات مباشرة لأسئلة الكتاب أو التمارين، ويمكنك وصف طريقة التوجيه دون كشف الحل. ");
         b.append("لكل مرحلة، إذا كان في المادة سؤال أو نشاط أو مثال بصري مناسب لها ويستحق عرضه للطلبة، اختر عنصراً واحداً فقط من المصدر. ");
         b.append("في q انسخ بداية السؤال/النشاط من النص كما ظهرت في المادة دون إعادة صياغة، وفي qend انسخ آخر عبارة قصيرة من نفس الكتلة، ");
+        b.append("ويجب أن تكون q عبارة فعلية من السؤال أو النشاط نفسه (يفضل 4 كلمات ذات معنى أو أكثر)، وليست عنوان الدرس أو عنوان قسم قصير مثل «إنشاء مثلث» وحده. ");
         b.append("وفي qpg ضع رقم صفحة PDF الحقيقي كما يظهر في علامة [MATERIAL PDF N]. ");
+        b.append("إذا كان النص المستخرج لا يعرض السؤال/النشاط نفسه بوضوح، أو لا يوجد إلا عنوان قصير، فلا تطلب صورة: اجعل q وqend فارغين وqpg=0. ");
         b.append("إذا لا يوجد عنصر مناسب أو لا تستطيع تحديده بثقة، اجعل q وqend فارغين وqpg=0. ");
         b.append("لا تخترع سؤالاً ولا رقم صفحة، ولا تضع حلولاً. استخدم بحد أقصى 3 عناصر مصورة في الدرس كله.");
 
