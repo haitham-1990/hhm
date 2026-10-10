@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - قص السؤال الذكي 1.0.17");
+        title.setText("نور الذكي - قص السؤال الذكي 1.0.18");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -949,7 +949,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.17.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.18.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1142,12 +1142,15 @@ public class MainActivity extends Activity {
         }
 
         for (int i = start; i <= target && i < autoLessons.size(); i++) {
-            if (!generatedStore.has(autoLessons.get(i).code)
-                    || !LessonImageCache.has(this, autoLessons.get(i).code)) {
+            // In 1.0.17+ full-page images are intentionally NOT pre-rendered.
+            // Only the generated preparation must exist before auto-run; exact
+            // question/activity crops are produced on demand when the lesson
+            // is inserted into Noor.
+            if (!generatedStore.has(autoLessons.get(i).code)) {
                 new AlertDialog.Builder(this)
                         .setTitle("قاعدة البيانات غير مكتملة")
                         .setMessage("الدرس «" + autoLessons.get(i).displayName()
-                                + "» غير مكتمل في قاعدة البيانات (التحضير/الصور). اضغط «تجهيز قاعدة البيانات» أولاً.")
+                                + "» لم يكتمل تحضيره بعد. اضغط «تجهيز قاعدة البيانات» لاستكمال الدروس الناقصة فقط.")
                         .setPositiveButton("حسنًا", null)
                         .show();
                 return;
