@@ -138,7 +138,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - فهرسة مستقرة وقص سريع 1.0.19");
+        title.setText("نور الذكي - قص ثابت وتواريخ مكتملة 1.0.20");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -953,7 +953,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.19.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.20.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1990,6 +1990,7 @@ public class MainActivity extends Activity {
                             meta.put("page", page);
                             meta.put("result", ok);
                             meta.put("source", "exact_question_crop");
+                            meta.put("editor_sync", "requested");
                             logAutoStage("question_crop_append_result", lesson, meta);
                         } catch (Exception ignored) {}
 
@@ -2284,14 +2285,27 @@ public class MainActivity extends Activity {
                     .putInt(KEY_AUTO_PENDING_INDEX, autoCurrentIndex)
                     .apply();
 
-            String js = "(function(){var t=document.getElementById('PreparationTitle');var f=t?t.form:null;"
-                    + "if(!f)return '0';var s=f.querySelector('input[type=submit],button[type=submit]');"
-                    + "if(!s)return '0';s.click();return '1';})()";
+            String js = "(function(){" + baseHelpers()
+                    + "var synced=syncRichEditors();"
+                    + "var t=document.getElementById('PreparationTitle');var f=t?t.form:null;"
+                    + "if(!f)return JSON.stringify({ok:0,synced:synced});"
+                    + "var s=f.querySelector('input[type=submit],button[type=submit]');"
+                    + "if(!s)return JSON.stringify({ok:0,synced:synced});"
+                    + "s.click();return JSON.stringify({ok:1,synced:synced});})()";
             webView.evaluateJavascript(js, saveRaw -> {
-                int ok = parseJsInt(saveRaw);
+                int ok = 0;
+                int syncedEditors = 0;
+                try {
+                    JSONObject saveResult = new JSONObject(decodeJsString(saveRaw));
+                    ok = saveResult.optInt("ok", 0);
+                    syncedEditors = saveResult.optInt("synced", 0);
+                } catch (Exception ignored) {
+                    ok = parseJsInt(saveRaw);
+                }
                 try {
                     JSONObject meta = new JSONObject();
                     meta.put("save_button_clicked", ok > 0);
+                    meta.put("synced_editors", syncedEditors);
                     meta.put("raw_result", saveRaw == null ? "" : saveRaw);
                     logAutoStage("save_submit_result", lesson, meta);
                 } catch (Exception ignored) {}
@@ -3187,7 +3201,7 @@ public class MainActivity extends Activity {
         return "function norm(s){return (s||'').replace(/[\\u064B-\\u065F\\u0670]/g,'').replace(/\\s+/g,' ').trim();}"
                 + "function findText(t){var q=norm(t),els=[].slice.call(document.querySelectorAll('label,legend,h1,h2,h3,h4,h5,strong,span,div,p'));var best=null,score=1e9;for(var i=0;i<els.length;i++){var x=norm(els[i].innerText||els[i].textContent);if(!x||x.indexOf(q)<0)continue;var r=els[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var sc=x.length-q.length;if(sc<score){score=sc;best=els[i];}}return best;}"
                 + "function nearestAfter(anchor,sel,max){if(!anchor)return null;var ar=anchor.getBoundingClientRect(),cs=[].slice.call(document.querySelectorAll(sel)),best=null,d=1e9;for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect();if(r.width===0&&r.height===0)continue;var dy=r.top-ar.bottom;if(dy>=-20&&dy<(max||700)&&dy<d){d=dy;best=cs[i];}}return best;}"
-                + "function fire(el){try{el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));if(window.jQuery){window.jQuery(el).trigger('chosen:updated').trigger('change');}}catch(e){}}"
+                + "function fire(el){try{el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));if(window.jQuery){window.jQuery(el).trigger('chosen:updated').trigger('change');}}catch(e){}}"                + "function syncRichEditors(){var n=0;try{if(window.CKEDITOR&&CKEDITOR.instances){for(var k in CKEDITOR.instances){try{var inst=CKEDITOR.instances[k];if(inst){if(inst.fire)inst.fire('change');if(inst.updateElement){inst.updateElement();n++;}}}catch(e){}}}if(window.tinymce&&tinymce.editors){for(var i=0;i<tinymce.editors.length;i++){try{var ed=tinymce.editors[i];if(ed&&ed.save){ed.save();n++;}}catch(e){}}}}catch(e){}return n;}"
                 + "function labelText(cb){if(!cb)return '';var t='';if(cb.id){var ls=[].slice.call(document.querySelectorAll('label'));for(var z=0;z<ls.length;z++){if(ls[z].htmlFor===cb.id){t=ls[z].innerText||ls[z].textContent||'';break;}}}if(!t&&cb.closest('label'))t=cb.closest('label').innerText||cb.closest('label').textContent||'';if(!t){var p=cb.parentElement;if(p)t=p.innerText||p.textContent||'';}return norm(t).replace(/^[-–•\\s]+/,'');}"
                 + "function pos(el){if(!el)return -1;var r=el.getBoundingClientRect();return r.top+window.scrollY;}"
                 + "function objectiveBoxes(){var a=findText('المخرجات التعليمية'),b=findText('الاستراتيجيات');var y1=pos(a),y2=pos(b);var all=[].slice.call(document.querySelectorAll('input[type=checkbox]'));var out=[];for(var i=0;i<all.length;i++){var r=all[i].getBoundingClientRect(),y=r.top+window.scrollY;if(y1>=0&&y2>y1&&y>y1-10&&y<y2-5){var tx=labelText(all[i]);if(tx&&tx.length>4)out.push(all[i]);}}if(out.length===0){for(var j=0;j<all.length;j++){var tx2=labelText(all[j]);if(/(يحدد|يحدّد|يجري|يطبق|يطبّق|يتعامل|الطلاب|الطالب)/.test(tx2))out.push(all[j]);}}return out;}"
