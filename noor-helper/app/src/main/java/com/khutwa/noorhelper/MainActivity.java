@@ -103,6 +103,10 @@ public class MainActivity extends Activity {
     private AiPreparationClient.SourceResult currentSourceResult;
     private final List<Bitmap> exerciseImages = new ArrayList<>();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    // Keep on-demand question cropping independent from the long database builder.
+    // A teacher can test a lesson that is already ready while later lessons continue
+    // preparing in the background without the crop waiting behind that queue.
+    private final ExecutorService cropWorker = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -134,7 +138,7 @@ public class MainActivity extends Activity {
         top.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("نور الذكي - قص السؤال الذكي 1.0.18");
+        title.setText("نور الذكي - فهرسة مستقرة وقص سريع 1.0.19");
         title.setTextSize(18);
         title.setTextColor(Color.rgb(25, 25, 25));
         title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -949,7 +953,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.18.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "NoorSmart-Full-Diagnostic-1.0.19.json");
         startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
     }
 
@@ -1936,7 +1940,7 @@ public class MainActivity extends Activity {
         }
 
         status.setText("أقص السؤال/النشاط من صفحة " + page + " وأضعه في موضعه...");
-        worker.execute(() -> {
+        cropWorker.execute(() -> {
             try {
                 String base64 = PdfExerciseExtractor.questionCropBase64(
                         this,
@@ -3232,6 +3236,7 @@ public class MainActivity extends Activity {
         try { stopService(new Intent(this, AutoRunService.class)); } catch (Exception ignored) {}
         recycleExerciseImages();
         worker.shutdownNow();
+        cropWorker.shutdownNow();
         super.onDestroy();
     }
 
