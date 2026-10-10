@@ -1,0 +1,38 @@
+name: Verify Cloudflare vision gateway
+on:
+  push:
+    branches: [noor-vision-gateway-probe]
+    paths: [.github/workflows/noor-cloudflare-vision-probe.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Compare vision responses to two synthetic images
+        run: |
+          import base64, json, struct, urllib.request, urllib.error, zlib
+          URL="https://khutwa-ai.hhm1990hhm.workers.dev/"
+          def png(color):
+            w,h=160,160
+            def chunk(t,s):
+              return struct.pack("!I",len(s))+t+s+struct.pack("!I",zlib.crc32(t+s)&0xffffffff)
+            raw=bytearray()
+            for y in range(h):
+              raw.append(0)
+              for x in range(w):
+                raw.extend(color if 25<x<135 and 25<y<135 else (255,255,255))
+            return b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack("!IIBBBBB",w,h,8,2,0,0,0))+chunk(b"IDAT",zlib.compress(bytes(raw),9))+chunk(b"IEND",b"")
+          prompt="Vision test. Read the ATTACHED picture, not this sentence. What is the color of the big square in the picture? Reply RED or BLUE. If the image was not received say NO_IMAGE. Never guess."
+          for name,rgb in [("red",(240,20,20)),("blue",(20,20,240))]:
+            body=json.dumps({"message":prompt,"image":"data:image/png;base64,"+base64.b64encode(png(rgb)).decode(),"task":"vision_probe"}).encode()
+            req=urllib.request.Request(URL,data=body,headers={"Content-Type":"application/json","Accept":"application/json"},method="POST")
+            try:
+              with urllib.request.urlopen(req,timeout=40) as res:
+                print(json.dumps({"expected":name,"status":res.status,"response":res.read(4000).decode("utf-8","replace")[:2000]}))
+            except urllib.error.HTTPError as e:
+              print(json.dumps({"expected":name,"status":e.code,"response":e.read(2000).decode("utf-8","replace")}))
+            except Exception as e:
+              print(json.dumps({"expected":name,"error":str(e)}))
