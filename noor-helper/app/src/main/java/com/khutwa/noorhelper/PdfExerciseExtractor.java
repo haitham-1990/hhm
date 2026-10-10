@@ -350,12 +350,15 @@ final class PdfExerciseExtractor {
             int pageIndex = pageOneBased - 1;
             if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) return "";
 
-            float startY = locatePhraseY(doc, pageIndex, questionStart, 0f);
-            if (startY < 0) return "";
+            PhraseBox startBox = locatePhraseBox(doc, pageIndex, questionStart, 0f);
+            if (startBox == null) return "";
+            float startY = startBox.y;
 
+            PhraseBox endBox = null;
             float endY = -1f;
             if (questionEnd != null && !questionEnd.trim().isEmpty()) {
-                endY = locatePhraseY(doc, pageIndex, questionEnd, Math.max(0f, startY - 3f));
+                endBox = locatePhraseBox(doc, pageIndex, questionEnd, Math.max(0f, startY - 3f));
+                if (endBox != null) endY = endBox.y;
             }
 
             PDFRenderer renderer = new PDFRenderer(doc);
@@ -365,7 +368,9 @@ final class PdfExerciseExtractor {
             try {
                 page = renderer.renderImageWithDPI(pageIndex, 145, ImageType.RGB);
                 float pageHeightPt = doc.getPage(pageIndex).getCropBox().getHeight();
+                float pageWidthPt = doc.getPage(pageIndex).getCropBox().getWidth();
                 int h = page.getHeight();
+                int w = page.getWidth();
 
                 int approxTop = Math.max(0,
                         Math.round((startY - 12f) / pageHeightPt * h));
@@ -399,7 +404,41 @@ final class PdfExerciseExtractor {
                     bottom = h;
                 }
 
-                crop = Bitmap.createBitmap(page, 0, top, page.getWidth(), bottom - top);
+                // Isolate the horizontal column/question region. The previous
+                // implementation cropped the full page width, which pulled neighboring
+                // questions/columns into the image and made text look overlapped.
+                float phraseX1 = startBox.x1;
+                float phraseX2 = startBox.x2;
+                if (endBox != null) {
+                    phraseX1 = Math.min(phraseX1, endBox.x1);
+                    phraseX2 = Math.max(phraseX2, endBox.x2);
+                }
+
+                int phraseLeft = Math.max(0,
+                        Math.round((phraseX1 / Math.max(1f, pageWidthPt)) * w));
+                int phraseRight = Math.min(w,
+                        Math.round((phraseX2 / Math.max(1f, pageWidthPt)) * w));
+                if (phraseRight <= phraseLeft) {
+                    phraseLeft = 0;
+                    phraseRight = w;
+                }
+
+                int centerX = Math.max(0, Math.min(w - 1, (phraseLeft + phraseRight) / 2));
+                int[] column = findQuestionColumn(page, centerX, top, bottom);
+                int left = column[0];
+                int right = column[1];
+
+                // Guarantee the matched phrase itself is included with comfortable padding.
+                int hPad = Math.max(18, w / 70);
+                left = Math.min(left, Math.max(0, phraseLeft - hPad));
+                right = Math.max(right, Math.min(w, phraseRight + hPad));
+
+                if (right <= left + Math.max(120, w / 7)) {
+                    left = 0;
+                    right = w;
+                }
+
+                crop = Bitmap.createBitmap(page, left, top, right - left, bottom - top);
                 if (!page.isRecycled()) page.recycle();
                 page = null;
 
@@ -511,6 +550,103 @@ final class PdfExerciseExtractor {
 
         return bestScore >= 78 ? best : null;
     }
+
+    private static int[] findQuestionColumn(Bitmap bitmap, int centerX, int top, int bottom) {
+        int w = bitmap.getWidth();
+        int h = bitmap.getHeight();
+        int y0 = Math.max(0, top);
+        int y1 = Math.min(h - 1, bottom);
+        if (w < 80 || y1 <= y0) return new int[]{0, w};
+
+        int minBand = Math.max(8, w / 140);
+        int yStep = Math.max(3, (y1 - y0) / 120);
+
+        List<int[]> blankBands = new ArrayList<>();
+        int runStart = -1;
+        for (int x = 0; x < w; x++) {
+            boolean blank = isLowInformationColumn(bitmap, x, y0, y1, yStep);
+            if (blank && runStart < 0) runStart = x;
+
+            boolean closes = !blank || x == w - 1;
+            if (closes && runStart >= 0) {
+                int runEnd = blank && x == w - 1 ? x : x - 1;
+                if (runEnd - runStart + 1 >= minBand) {
+                    blankBands.add(new int[]{runStart, runEnd});
+                }
+                runStart = -1;
+            }
+        }
+
+        int left = 0;
+        int right = w;
+        for (int[] band : blankBands) {
+            int mid = (band[0] + band[1]) / 2;
+            if (mid < centerX) left = Math.max(left, mid);
+            else if (mid > centerX) {
+                right = Math.min(right, mid);
+                break;
+            }
+        }
+
+        // Avoid selecting a tiny internal gap within one question. If the selected
+        // interval is implausibly narrow, merge outward to the next separator.
+        int minWidth = Math.max(180, Math.round(w * 0.28f));
+        if (right - left < minWidth) {
+            int bestLeft = left;
+            int bestRight = right;
+
+            for (int[] band : blankBands) {
+                int mid = (band[0] + band[1]) / 2;
+                if (mid < left && right - mid >= minWidth) {
+                    bestLeft = mid;
+                }
+            }
+            for (int[] band : blankBands) {
+                int mid = (band[0] + band[1]) / 2;
+                if (mid > right && mid - bestLeft >= minWidth) {
+                    bestRight = mid;
+                    break;
+                }
+            }
+            left = bestLeft;
+            right = bestRight;
+        }
+
+        int pad = Math.max(6, w / 180);
+        left = Math.max(0, left + pad);
+        right = Math.min(w, right - pad);
+        if (right <= left) return new int[]{0, w};
+        return new int[]{left, right};
+    }
+
+    private static boolean isLowInformationColumn(Bitmap bitmap, int x, int y0, int y1, int step) {
+        int count = 0;
+        long sr = 0, sg = 0, sb = 0;
+        for (int y = y0; y <= y1; y += step) {
+            int px = bitmap.getPixel(x, y);
+            sr += (px >> 16) & 0xff;
+            sg += (px >> 8) & 0xff;
+            sb += px & 0xff;
+            count++;
+        }
+        if (count < 4) return false;
+
+        int ar = (int) (sr / count);
+        int ag = (int) (sg / count);
+        int ab = (int) (sb / count);
+        int close = 0;
+
+        for (int y = y0; y <= y1; y += step) {
+            int px = bitmap.getPixel(x, y);
+            int r = (px >> 16) & 0xff;
+            int g = (px >> 8) & 0xff;
+            int b = px & 0xff;
+            int delta = Math.abs(r - ar) + Math.abs(g - ag) + Math.abs(b - ab);
+            if (delta <= 44) close++;
+        }
+        return close >= Math.ceil(count * 0.975);
+    }
+
 
     private static int findSafeWhitespaceAfter(Bitmap bitmap, int approxY, int radius) {
         if (bitmap == null || bitmap.getWidth() < 20 || bitmap.getHeight() < 20) return -1;
