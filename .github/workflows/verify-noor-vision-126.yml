@@ -1,0 +1,42 @@
+name: Noor vision gateway question-region compatibility
+on:
+  push:
+    branches: [noor-hybrid-1.0.26-vision]
+    paths: [.github/workflows/verify-noor-vision-126.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Render two neutral example questions and test Worker JSON contract
+        run: |
+          pip -q install Pillow
+          python - <<'PY'
+          import base64, io, json, urllib.request, urllib.error
+          from PIL import Image, ImageDraw
+          im=Image.new('RGB',(800,960),'white')
+          d=ImageDraw.Draw(im)
+          d.text((60,60),'Lesson: A sample calculation',fill='black')
+          d.text((60,190),'Question 1: Find 25 + 17.',fill='black')
+          d.line((60,270,730,270),fill='gray',width=2)
+          d.text((60,440),'Question 2: Find 42 - 13.',fill='black')
+          d.line((60,525,730,525),fill='gray',width=2)
+          out=io.BytesIO();im.save(out,format='JPEG',quality=87)
+          payload={
+            "task":"question_regions",
+            "image":"data:image/jpeg;base64,"+base64.b64encode(out.getvalue()).decode(),
+            "message":"Inspect this image visually. Output JSON ONLY: {\\\"page_relevant\\\":true,\\\"questions\\\":[{\\\"id\\\":\\\"q1\\\",\\\"bbox\\\":[left,top,right,bottom],\\\"complete\\\":true,\\\"uncertain\\\":false}],\\\"review_notes\\\":[]}. Coordinates normalized 0..1000. One rectangle per actual numbered question. The title is NOT a question. Do not invent text."
+          }
+          url="https://noor-hybrid-ai.hhm1990hhm.workers.dev/"
+          req=urllib.request.Request(url,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','User-Agent':'NoorHybridVisionQA/1.0'},method='POST')
+          try:
+            with urllib.request.urlopen(req,timeout=100) as res:
+              body=res.read(20000).decode('utf-8','replace')
+              print('STATUS',res.status,'RESPONSE',body[:6500])
+          except urllib.error.HTTPError as e:
+            print('HTTP_ERROR',e.code,e.read(3000).decode('utf-8','replace'))
+            raise
+          PY
