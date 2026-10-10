@@ -49,7 +49,7 @@ jobs:
           script: |
             mkdir -p qa-screen
             adb install -r noor-helper/app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -n com.khutwa.noorhybrid.visualsource/com.khutwa.noorhelper.MainActivity > qa-screen/activity-start.txt 2>&1 || true
+            adb shell am start -n com.khutwa.noorhybrid.qa125/com.khutwa.noorhelper.MainActivity > qa-screen/activity-start.txt 2>&1 || true
             sleep 10
             adb exec-out screencap -p > qa-screen/launch.png || true
             adb shell dumpsys activity activities > qa-screen/activities.txt || true
