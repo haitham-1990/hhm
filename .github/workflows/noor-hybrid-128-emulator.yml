@@ -1,0 +1,55 @@
+name: Noor Hybrid 1.0.28 Emulator Installation Smoke
+on:
+  push:
+    branches: [noor-hybrid-1.0.28-page-half-ai-check]
+    paths: ['.github/workflows/noor-hybrid-128-emulator.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 27
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Allow /dev/kvm
+        run: |
+          if test -e /dev/kvm; then sudo chmod 666 /dev/kvm; ls -l /dev/kvm; else echo 'No virtualization device'; fi
+      - name: Build test APK
+        run: |
+          base64 -d NoorHybrid-1.0.28-Page-Half-AI-project.b64 > source.zip
+          unzip -q source.zip
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+          gradle -p noor-helper --no-daemon assembleDebug
+      - name: Install launch and screenshot
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            mkdir -p qa-emulator
+            adb install -r noor-helper/app/build/outputs/apk/debug/app-debug.apk | tee qa-emulator/install.txt
+            adb shell am start -n com.khutwa.noorhybrid.page128/com.khutwa.noorhelper.MainActivity > qa-emulator/launch.txt 2>&1
+            sleep 12
+            adb exec-out screencap -p > qa-emulator/launch.png || true
+            adb logcat -d -t 1800 > qa-emulator/logcat.txt
+            test -s qa-emulator/launch.png
+            grep -qi success qa-emulator/install.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NoorHybrid-1.0.28-Emulator-Evidence
+          path: qa-emulator/
