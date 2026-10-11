@@ -1,0 +1,48 @@
+name: Noor Hybrid 1.0.26 Vision QA
+on:
+  push:
+    branches: [noor-hybrid-1.0.26-vision-qa]
+    paths:
+      - NoorHybrid-1.0.26-Vision-QA-project.b64
+      - .github/workflows/noor-hybrid-126-vision-qa.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Decode and unpack app source
+        run: |
+          base64 -d NoorHybrid-1.0.26-Vision-QA-project.b64 > source.zip
+          unzip -q source.zip
+      - name: Test subject-neutral pixel safety rules
+        run: |
+          mkdir -p qa-results/classes
+          javac -encoding UTF-8 -d qa-results/classes noor-helper/app/src/main/java/com/khutwa/noorhelper/SourcePixelGuard.java noor-helper/qa/PixelGuardTest.java
+          java -cp qa-results/classes com.khutwa.noorhelper.PixelGuardTest | tee qa-results/pixel-safety.log
+          grep -q 'PASS 9 pure-Java' qa-results/pixel-safety.log
+      - name: Android SDK 35
+        run: |
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Compile and sign side-by-side experimental APK
+        run: gradle -p noor-helper --no-daemon --stacktrace assembleDebug
+      - name: Publish QA build and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoorHybrid-1.0.26-Vision-QA-APK
+          path: |
+            noor-helper/app/build/outputs/apk/debug/app-debug.apk
+            qa-results/pixel-safety.log
