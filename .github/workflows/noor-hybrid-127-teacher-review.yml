@@ -1,0 +1,53 @@
+name: Noor Hybrid 1.0.27 Teacher Review Build
+on:
+  push:
+    branches: [noor-hybrid-1.0.27-teacher-review]
+    paths:
+      - NoorHybrid-1.0.27-Teacher-Review-project.b64
+      - .github/workflows/noor-hybrid-127-teacher-review.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Unpack project
+        run: |
+          base64 -d NoorHybrid-1.0.27-Teacher-Review-project.b64 > noor-project.zip
+          unzip -q noor-project.zip
+      - name: Run teacher authorization flow checks
+        run: |
+          mkdir -p qa-results
+          python noor-helper/qa/TeacherReviewFlowTest.py | tee qa-results/teacher-review-safety.log
+          grep -q 'PASS 10 workflow safety checks' qa-results/teacher-review-safety.log
+      - name: Run pixel-source guard tests
+        run: |
+          javac -encoding UTF-8 -d qa-results noor-helper/app/src/main/java/com/khutwa/noorhelper/SourcePixelGuard.java noor-helper/qa/PixelGuardTest.java
+          java -cp qa-results com.khutwa.noorhelper.PixelGuardTest | tee qa-results/pixel-guard.log
+          grep -q 'PASS 9 pure-Java' qa-results/pixel-guard.log
+      - name: Android SDK install
+        run: |
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build and sign isolated QA APK
+        run: gradle -p noor-helper --no-daemon --stacktrace assembleDebug
+      - name: Publish APK source build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoorHybrid-1.0.27-Teacher-Review
+          path: |
+            noor-helper/app/build/outputs/apk/debug/app-debug.apk
+            qa-results/teacher-review-safety.log
+            qa-results/pixel-guard.log
