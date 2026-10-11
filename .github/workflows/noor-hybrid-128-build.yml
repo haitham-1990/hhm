@@ -1,0 +1,57 @@
+name: Noor Hybrid 1.0.28 Page Half AI Teacher Approval
+on:
+  push:
+    branches: [noor-hybrid-1.0.28-page-half-ai-check]
+    paths: ['NoorHybrid-1.0.28-Page-Half-AI-project.b64','.github/workflows/noor-hybrid-128-build.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Unpack exact source
+        run: |
+          base64 -d NoorHybrid-1.0.28-Page-Half-AI-project.b64 > noor-project.zip
+          unzip -q noor-project.zip
+      - name: Verify per-lesson manual approval and actual AI audit
+        run: |
+          mkdir -p qa-results/classes
+          python noor-helper/qa/PageHalfTeacherReviewFlowTest.py | tee qa-results/teacher-review.log
+          grep -q 'PASS 14 source-review integration checks' qa-results/teacher-review.log
+      - name: Test AI guided half-page pixel seam in arbitrary page layouts
+        run: |
+          javac -encoding UTF-8 -d qa-results/classes noor-helper/app/src/main/java/com/khutwa/noorhelper/PixelPageHalfSelector.java noor-helper/qa/PixelPageHalfSelectorTest.java
+          java -cp qa-results/classes com.khutwa.noorhelper.PixelPageHalfSelectorTest | tee qa-results/half-page-layout.log
+          grep -q 'PASS 6 half-page pixel safety tests' qa-results/half-page-layout.log
+      - name: Regress pixel source safety
+        run: |
+          javac -encoding UTF-8 -d qa-results/classes noor-helper/app/src/main/java/com/khutwa/noorhelper/SourcePixelGuard.java noor-helper/qa/PixelGuardTest.java
+          java -cp qa-results/classes com.khutwa.noorhelper.PixelGuardTest | tee qa-results/pixel-guard.log
+          grep -q 'PASS 9 pure-Java' qa-results/pixel-guard.log
+      - name: Install Android 35 SDK
+        run: |
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Compile and sign isolated QA APK
+        run: gradle -p noor-helper --no-daemon --stacktrace assembleDebug
+      - name: Upload build and test outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoorHybrid-1.0.28-Page-Half-AI-APK
+          path: |
+            noor-helper/app/build/outputs/apk/debug/app-debug.apk
+            qa-results/teacher-review.log
+            qa-results/half-page-layout.log
+            qa-results/pixel-guard.log
