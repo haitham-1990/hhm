@@ -38,7 +38,7 @@ jobs:
           d.rectangle((770,445,845,623),fill="#466cc6")
           d.rectangle((900,375,975,623),fill="#b34343")
           rect("q2",(718,335,1062,628))
-          put("q3",(530,925),"٣) احسب: ٤ × ٥ = ؟",rtl=True)
+          put("q3",(100,925),"٣) احسب: ٤ × ٥ = ؟",rtl=True)
           put("q4",(655,925),"Q4. Read the table:")
           for x in [695,830,965,1100]:d.line((x,1040,x,1280),fill="black",width=4)
           for y in [1040,1120,1200,1280]:d.line((695,y,1100,y),fill="black",width=4)
