@@ -1,0 +1,67 @@
+name: Noor Vision Real Request Verification
+on:
+  push:
+    branches: [noor-vision-gateway-probe]
+    paths: ['.github/workflows/noor-vision-live-verify.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Install pillow
+        run: python -m pip install --quiet pillow
+      - name: Send synthetic worksheet picture to Noor Cloudflare Worker
+        run: |
+          python - <<'PY'
+          import os,io,json,urllib.request,urllib.error,base64
+          from PIL import Image,ImageDraw,ImageFont
+          img=Image.new("RGB",(800,1000),"white")
+          d=ImageDraw.Draw(img)
+          font=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",34)
+          d.text((80,100),"Worksheet: different subjects",font=font,fill="black")
+          d.text((80,210),"Q1. What is 7 + 5?",font=font,fill="black")
+          d.line([(60,385),(740,385)],fill="#aaaaaa",width=2)
+          d.text((80,500),"Q2. Name this shape:",font=font,fill="black")
+          d.ellipse((420,585,580,745),outline="blue",width=9)
+          d.text((80,850),"Page 1",font=font,fill="gray")
+          out=io.BytesIO();img.save(out,format="PNG")
+          encoded=base64.b64encode(out.getvalue()).decode()
+          prompt=("Analyze the ACTUAL attached worksheet image. Find all printed questions. "
+                  "Reply with question region coordinates normalized to 0..1000 inclusive (x1,y1,x2,y2). "
+                  "Preserve the exact question text; keep figures with their questions. "
+                  "Do not count the page header or footer as questions. "
+                  "Return structured JSON only. If uncertain, say so. No solutions.")
+          payload={"message":prompt,"image":"data:image/png;base64,"+encoded,"task":"extract_questions"}
+          url="https://noor-hybrid-ai.hhm1990hhm.workers.dev/"
+          req=urllib.request.Request(url,data=json.dumps(payload).encode(),method="POST",headers={"Content-Type":"application/json","Accept":"application/json","User-Agent":"NoorHybrid-QA/1.0"})
+          try:
+            with urllib.request.urlopen(req,timeout=110) as res:
+              raw=res.read().decode("utf-8","replace")
+              print("HTTP",res.status)
+              try:
+                data=json.loads(raw)
+                print("response_keys",list(data.keys()))
+                print("vision_metadata",{k:data.get(k) for k in ["ok","vision_used","vision","service","error","detail","usage"] if k in data})
+                questions=(data.get("result") or {}).get("questions") or data.get("questions")
+                if questions is None and isinstance(data.get("answer"),str):
+                  ans=data["answer"].strip()
+                  if ans.startswith("```"):ans=ans.strip("`").replace("json\n","",1)
+                  try:questions=json.loads(ans).get("questions")
+                  except:pass
+                print("questions",json.dumps(questions,ensure_ascii=False)[:6500])
+                print("response_body",raw[:8000] if questions is None else "[parsed questions above]")
+                if not data.get("ok",True):raise ValueError("Gateway returned error")
+                if not questions or not isinstance(questions,list): raise ValueError("No structured questions")
+                print("STRUCTURED_QUESTIONS",len(questions))
+              except Exception as e:
+                print("parse_or_validation_error",str(e))
+                print("raw_response",raw[:5500])
+                raise
+          except urllib.error.HTTPError as e:
+            print("HTTP",e.code)
+            print("body",e.read(2500).decode("utf-8","replace"))
+            raise
+          PY
