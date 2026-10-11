@@ -1,0 +1,79 @@
+name: Noor vision multi-format visual accuracy test
+on:
+  push:
+    branches: [noor-vision-gateway-probe]
+    paths: ['.github/workflows/noor-vision-multiformat-qa.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - run: python -m pip install --quiet pillow
+      - name: Mixed Arabic maths tables and charts
+        run: |
+          python - <<'PY'
+          import io,json,re,base64,urllib.request
+          from PIL import Image,ImageDraw,ImageFont
+          W,H=1200,1600
+          im=Image.new("RGB",(W,H),"white")
+          d=ImageDraw.Draw(im)
+          font=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",34)
+          small=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",28)
+          targets={}
+          def put(key,at,txt,rtl=False):
+              opts={"direction":"rtl"} if rtl else {}
+              d.text(at,txt,font=font,fill="black",**opts)
+              targets[key]=[tuple(d.textbbox(at,txt,font=font,**opts))]
+          def rect(key,rect):
+              targets[key].append(tuple(rect))
+          d.text((80,45),"Multiformat worksheet — mixed subjects",font=font,fill="black")
+          d.line((600,160,600,1440),fill="#dedede",width=3)
+          put("q1",(80,215),"Q1. Calculate: 12 - 8 = ?")
+          put("q2",(665,215),"Q2. Read the chart:")
+          d.line((720,625,1060,625),fill="black",width=4)
+          d.line((720,340,720,625),fill="black",width=4)
+          d.rectangle((770,445,845,623),fill="#466cc6")
+          d.rectangle((900,375,975,623),fill="#b34343")
+          rect("q2",(718,335,1062,628))
+          put("q3",(530,925),"٣) احسب: ٤ × ٥ = ؟",rtl=True)
+          put("q4",(655,925),"Q4. Read the table:")
+          for x in [695,830,965,1100]:d.line((x,1040,x,1280),fill="black",width=4)
+          for y in [1040,1120,1200,1280]:d.line((695,y,1100,y),fill="black",width=4)
+          d.text((725,1060),"A",font=small,fill="black")
+          d.text((855,1060),"B",font=small,fill="black")
+          d.text((725,1150),"10",font=small,fill="black")
+          d.text((855,1150),"20",font=small,fill="black")
+          rect("q4",(690,1035,1105,1285))
+          d.text((80,1510),"End of page",font=small,fill="gray")
+          out=io.BytesIO();im.save(out,format="PNG")
+          img="data:image/png;base64,"+base64.b64encode(out.getvalue()).decode()
+          prompt=("Inspect this actual worksheet image. Extract each QUESTION as printed, including Arabic. "
+           "There are distinct content blocks with texts, chart and table. Determine question regions "
+           "in normalized integer coordinates 0-1000: x1,y1,x2,y2, where all question text AND attached chart/table "
+           "must be inside region. Do not include headers, footers, or content from another question. "
+           "Return original_text, number, region, has_table, has_figure, needs_review. No solutions.")
+          body=json.dumps({"message":prompt,"image":img,"task":"extract_questions"}).encode()
+          req=urllib.request.Request("https://noor-hybrid-ai.hhm1990hhm.workers.dev/",data=body,method="POST",headers={"Content-Type":"application/json","Accept":"application/json","User-Agent":"NoorHybrid-QA/1.1"})
+          with urllib.request.urlopen(req,timeout=115) as rsp:response=json.load(rsp);print("HTTP",rsp.status)
+          print("keys",list(response.keys()),"vision",response.get("vision"),"usage",response.get("usage",{}).get("total_tokens"))
+          qs=response.get("result",{}).get("questions",[])
+          print("COUNT",len(qs))
+          for q in qs:
+           n=str(q.get("number","")).lower().replace(" ","")
+           raw=str(q.get("original_text",""))
+           match=re.search(r"[1-4]",n) or re.search(r"[1-4]",raw)
+           key="q"+match.group(0) if match else "?"
+           region=q.get("region")
+           print("QUESTION",json.dumps({"key":key,"text":raw[:220],"has_figure":q.get("has_figure"),"has_table":q.get("has_table"),"region":region},ensure_ascii=False))
+           if key in targets and isinstance(region,dict):
+            l,t,r,b=[round(float(region[v])*scale/1000) for v,scale in [("x1",W),("y1",H),("x2",W),("y2",H)]]
+            for box in targets[key]:
+             pads={str(pad):all([l-pad<=box[0],t-pad<=box[1],r+pad>=box[2],b+pad>=box[3]]) for pad in [0,30,60]}
+             print("COVERAGE",key,"source_bbox",box,"model_bbox",(l,t,r,b),"covers_with_padding",pads)
+          print("WARNINGS",response.get("result",{}).get("warnings"))
+          if not response.get("ok") or len(qs)<3:raise RuntimeError("insufficient result")
+          
+          PY
