@@ -7,6 +7,7 @@
     <AlgoPublish>False</AlgoPublish>
     <IncludeSource>True</IncludeSource>
     <AssemblyName>GoldTrendRSIATR</AssemblyName>
+    <AlgoName>GoldTrendRSIATR</AlgoName>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="cTrader.Automate" Version="1.0.21" />
