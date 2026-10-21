@@ -1,0 +1,42 @@
+name: Build MATH EDGE AI Cloud v1.1
+on:
+  push:
+    branches: [math-edge-ai-cloud-v1-1-build]
+    paths:
+      - 'MATH_EDGE_AI_Cloud_v1.1/**'
+      - '.github/workflows/build-math-edge-ai-cloud.yml'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore original source archive
+        shell: bash
+        run: |
+          base64 -d MATH_EDGE_AI_Cloud_v1.1/source.tar.gz.b64 > /tmp/math-edge-src.tar.gz
+          echo "c54ca0c934461699f217a3a3c10b309a737390957a17e9c921b7b7037cc3d7a1  /tmp/math-edge-src.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/math-edge-src.tar.gz -C MATH_EDGE_AI_Cloud_v1.1
+      - name: Build official .algo with cTrader.Automate
+        shell: bash
+        run: dotnet build MATH_EDGE_AI_Cloud_v1.1/src/MathEdgeAICloud.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify and stage the compiled .algo file
+        shell: bash
+        run: |
+          mkdir -p ready
+          algo=$(find MATH_EDGE_AI_Cloud_v1.1/src/bin/Release -type f -name '*.algo' -print -quit)
+          test -n "$algo"
+          cp "$algo" ready/MATH_EDGE_AI_Cloud_v1.1.algo
+          file ready/MATH_EDGE_AI_Cloud_v1.1.algo || true
+          test -s ready/MATH_EDGE_AI_Cloud_v1.1.algo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MATH_EDGE_AI_Cloud_v1.1_algo
+          path: ready/MATH_EDGE_AI_Cloud_v1.1.algo
+          if-no-files-found: error
