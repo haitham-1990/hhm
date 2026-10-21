@@ -25,6 +25,8 @@ jobs:
           tar -xzf /tmp/math-edge-src.tar.gz -C MATH_EDGE_AI_Cloud_v1.1
       - name: Resolve HttpMethod name collision
         run: sed -i 's/Method = HttpMethod.Post/Method = cAlgo.API.HttpMethod.Post/' MATH_EDGE_AI_Cloud_v1.1/src/MathEdgeAICloud.cs
+      - name: Target cTrader-supported .NET 6
+        run: sed -i 's#<TargetFramework>net8.0</TargetFramework>#<TargetFramework>net6.0</TargetFramework>#' MATH_EDGE_AI_Cloud_v1.1/src/MathEdgeAICloud.csproj
       - name: Build official .algo with cTrader.Automate
         shell: bash
         run: dotnet build MATH_EDGE_AI_Cloud_v1.1/src/MathEdgeAICloud.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
