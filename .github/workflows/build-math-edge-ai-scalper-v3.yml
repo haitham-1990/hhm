@@ -1,0 +1,41 @@
+name: Build MATH EDGE AI Scalper V3
+on:
+  push:
+    branches: [math-edge-ai-scalper-v3]
+    paths:
+      - 'MATH_EDGE_AI_SCALPER_V3/**'
+      - '.github/workflows/build-math-edge-ai-scalper-v3.yml'
+  workflow_dispatch:
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Confirm standalone local inference
+        shell: bash
+        run: |
+          if grep -En 'HttpClient|Http\.Send|workers\.dev|api\.openai\.com' MATH_EDGE_AI_SCALPER_V3/MathEdgeAIScalperV3.cs; then
+            echo "External AI calls are not allowed"; exit 1
+          fi
+      - name: Compile cTrader algo
+        run: dotnet build MATH_EDGE_AI_SCALPER_V3/MathEdgeAIScalperV3.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify compiled .algo
+        shell: bash
+        run: |
+          mkdir -p ready
+          algo=$(find MATH_EDGE_AI_SCALPER_V3/bin/Release -type f -name '*.algo' -print -quit)
+          test -n "$algo"
+          cp "$algo" ready/MATH_EDGE_AI_SCALPER_V3.algo
+          test -s ready/MATH_EDGE_AI_SCALPER_V3.algo
+          sha256sum ready/MATH_EDGE_AI_SCALPER_V3.algo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MATH_EDGE_AI_SCALPER_V3_algo
+          path: ready/MATH_EDGE_AI_SCALPER_V3.algo
+          if-no-files-found: error
