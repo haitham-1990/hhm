@@ -548,6 +548,7 @@ namespace cAlgo.Robots
             public double[] X;
             public int Y;
             public double Atr, Delta, Cost;
+            public int SourceIndex;
         }
 
         // Compact nonlinear neural network trained from scratch within the cBot.
