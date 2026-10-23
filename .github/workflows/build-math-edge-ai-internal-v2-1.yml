@@ -1,0 +1,41 @@
+name: Build MATH EDGE AI Internal V2.1
+on:
+  push:
+    branches: [math-edge-ai-internal-v2-1]
+    paths:
+      - 'MATH_EDGE_AI_Internal_V2_1/**'
+      - '.github/workflows/build-math-edge-ai-internal-v2-1.yml'
+  workflow_dispatch:
+jobs:
+  algo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify no external AI requests
+        shell: bash
+        run: |
+          if grep -E -n 'Http\\.|HttpClient|workers\\.dev|api\\.openai\\.com' MATH_EDGE_AI_Internal_V2_1/MathEdgeAIInternalV21.cs; then
+            echo 'External API usage detected'; exit 1
+          fi
+      - name: Build cTrader algo
+        run: dotnet build MATH_EDGE_AI_Internal_V2_1/MathEdgeAIInternalV21.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify artifact
+        shell: bash
+        run: |
+          mkdir -p ready
+          algo=$(find MATH_EDGE_AI_Internal_V2_1/bin/Release -type f -name '*.algo' -print -quit)
+          test -n "$algo"
+          cp "$algo" ready/MATH_EDGE_AI_INTERNAL_V2_1.algo
+          test -s ready/MATH_EDGE_AI_INTERNAL_V2_1.algo
+          sha256sum ready/MATH_EDGE_AI_INTERNAL_V2_1.algo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MATH_EDGE_AI_INTERNAL_V2_1_algo
+          path: ready/MATH_EDGE_AI_INTERNAL_V2_1.algo
+          if-no-files-found: error
