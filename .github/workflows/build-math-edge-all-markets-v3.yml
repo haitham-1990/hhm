@@ -1,0 +1,43 @@
+name: Build MATH EDGE ALL MARKETS V3
+on:
+  push:
+    branches: [math-edge-all-markets-v3-20261026]
+    paths:
+      - 'MATH_EDGE_ALL_V3/**'
+      - '.github/workflows/build-math-edge-all-markets-v3.yml'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify conservative defaults
+        shell: bash
+        run: |
+          grep -q 'Enable real orders", DefaultValue = false' MATH_EDGE_ALL_V3/MathEdgeAllMarketsV3.cs
+          grep -q 'Near-cross entry (experimental)", DefaultValue = false' MATH_EDGE_ALL_V3/MathEdgeAllMarketsV3.cs
+          grep -q 'Optional fixed take profit", DefaultValue = false' MATH_EDGE_ALL_V3/MathEdgeAllMarketsV3.cs
+          grep -q 'Math.Min(MaxRiskPercent, _assetRisk)' MATH_EDGE_ALL_V3/MathEdgeAllMarketsV3.cs
+      - name: Compile cTrader .algo
+        run: dotnet build MATH_EDGE_ALL_V3/MATH_EDGE_ALL_V3.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Validate executable output
+        shell: bash
+        run: |
+          mkdir -p ready
+          algo=$(find MATH_EDGE_ALL_V3/bin/Release -type f -name '*.algo' -print -quit)
+          test -n "$algo"
+          cp "$algo" ready/MATH_EDGE_ALL_MARKETS_V3.algo
+          test -s ready/MATH_EDGE_ALL_MARKETS_V3.algo
+          ls -lh ready/MATH_EDGE_ALL_MARKETS_V3.algo
+          sha256sum ready/MATH_EDGE_ALL_MARKETS_V3.algo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MATH_EDGE_ALL_MARKETS_V3_algo
+          path: ready/MATH_EDGE_ALL_MARKETS_V3.algo
+          if-no-files-found: error
