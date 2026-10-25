@@ -6,8 +6,8 @@ using cAlgo.API.Internals;
 
 namespace cAlgo.Robots
 {
-    // Original EMA9 / session VWAP implementation inspired by the public reel description.
-    // Not the proprietary ROBOQUANT strategy. VWAP is tick-volume-weighted from 00:00 UTC.
+    // Video-informed version (M3, EMA9/VWAP cross, candle-close EMA9 exit).
+    // Not the proprietary ROBOQUANT implementation. VWAP uses available tick volume.
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
     public class MathEdgeEmaVwap : Robot
     {
@@ -25,6 +25,15 @@ namespace cAlgo.Robots
 
         [Parameter("H1 trend EMA period", DefaultValue = 50, MinValue = 2, Group = "02 - Signal")]
         public int H1TrendPeriod { get; set; }
+
+        [Parameter("VWAP reset UTC hour", DefaultValue = 0, MinValue = 0, MaxValue = 23, Group = "02 - Signal")]
+        public int VwapResetUtcHour { get; set; }
+
+        [Parameter("Allow near-cross entry (experimental)", DefaultValue = false, Group = "02 - Signal")]
+        public bool EnableEarlyApproachEntry { get; set; }
+
+        [Parameter("Pre-cross max distance (ATR x)", DefaultValue = 0.10, MinValue = 0.01, MaxValue = 1.0, Group = "02 - Signal")]
+        public double EarlyCrossMaxAtrFraction { get; set; }
 
         [Parameter("Exit on reverse signal", DefaultValue = true, Group = "02 - Signal")]
         public bool ExitOnReverse { get; set; }
@@ -50,7 +59,10 @@ namespace cAlgo.Robots
         [Parameter("Minimum stop (pips)", DefaultValue = 8.0, MinValue = 0.1, Group = "04 - Exits")]
         public double MinStopPips { get; set; }
 
-        [Parameter("Reward / risk", DefaultValue = 1.5, MinValue = 0.5, MaxValue = 10, Group = "04 - Exits")]
+        [Parameter("Enable fixed take profit", DefaultValue = false, Group = "04 - Exits")]
+        public bool UseFixedTakeProfit { get; set; }
+
+        [Parameter("Fixed TP reward / risk", DefaultValue = 1.5, MinValue = 0.5, MaxValue = 10, Group = "04 - Exits")]
         public double RewardRiskRatio { get; set; }
 
         [Parameter("Minimum bars between entries", DefaultValue = 2, MinValue = 0, MaxValue = 100, Group = "04 - Exits")]
@@ -86,7 +98,10 @@ namespace cAlgo.Robots
             Positions.Closed += OnBotPositionClosed;
             ResetDayIfNeeded();
             Print("MATH EDGE EMA/VWAP: {0}, timeframe={1}, enabled={2}", SymbolName, TimeFrame, EnableTrading);
-            Print("VWAP uses tick volume and is reset at midnight UTC.");
+            Print("VWAP uses tick volume and resets at {0}:00 UTC.", VwapResetUtcHour);
+            Print("Exit: confirmed candle close across EMA {0}; ATR stop always protects trades.", EmaPeriod);
+            if (TimeFrame != TimeFrame.Minute3)
+                Print("NOTICE: video uses M3; current chart timeframe is {0}.", TimeFrame);
             if (!EnableTrading)
                 Print("SAFETY MODE: automatic orders are disabled.");
         }
@@ -113,12 +128,51 @@ namespace cAlgo.Robots
         protected override void OnBarClosed()
         {
             ResetDayIfNeeded();
-            int current = Bars.Count - 1; // OnBarClosed excludes the forming candle.
+            int current = Bars.Count - 1;
             int previous = current - 1;
             if (previous < Math.Max(EmaPeriod, AtrPeriod) + 2)
                 return;
 
-            if (Bars.OpenTimes[current].Date != Bars.OpenTimes[previous].Date)
+            double emaCurrent = _ema.Result.Last(0);
+            double emaPrevious = _ema.Result.Last(1);
+            double close = Bars.ClosePrices.Last(0);
+
+            if (double.IsNaN(emaCurrent) || double.IsNaN(emaPrevious))
+                return;
+
+            // The video calls for exiting when a FULL candle closes through EMA9,
+            // even if EMA and VWAP have not crossed in the opposite direction.
+            // OnBarClosed does not use any incomplete / future candle.
+            bool closedOnEma = false;
+            if (EnableTrading)
+            {
+                foreach (var position in Positions.FindAll(BotLabel, SymbolName))
+                {
+                    bool exitByEma = position.TradeType == TradeType.Buy
+                        ? close < emaCurrent
+                        : close > emaCurrent;
+                    if (!exitByEma)
+                        continue;
+
+                    var result = ClosePosition(position);
+                    if (!result.IsSuccessful)
+                    {
+                        Print("EMA candle-close exit failed: {0}", result.Error);
+                        return;
+                    }
+                    closedOnEma = true;
+                    Print("Exited on closed candle across EMA {0}: {1}", EmaPeriod, position.TradeType);
+                }
+            }
+
+            // Never enter again on the very candle that forced the EMA exit.
+            if (closedOnEma)
+                return;
+
+            // Only compare two VWAP values from the same anchored session.
+            DateTime currentSession = Bars.OpenTimes[current].AddHours(-VwapResetUtcHour).Date;
+            DateTime previousSession = Bars.OpenTimes[previous].AddHours(-VwapResetUtcHour).Date;
+            if (currentSession != previousSession)
                 return;
 
             double vwapCurrent = CalculateSessionVwap(current);
@@ -126,17 +180,34 @@ namespace cAlgo.Robots
             if (double.IsNaN(vwapCurrent) || double.IsNaN(vwapPrevious))
                 return;
 
-            double emaCurrent = _ema.Result.Last(0);
-            double emaPrevious = _ema.Result.Last(1);
-            double close = Bars.ClosePrices.Last(0);
+            double atrPrice = _atr.Result.Last(0);
+            if (double.IsNaN(atrPrice) || double.IsInfinity(atrPrice) || atrPrice <= 0)
+                return;
 
-            bool buy = emaPrevious <= vwapPrevious && emaCurrent > vwapCurrent && close > vwapCurrent;
-            bool sell = emaPrevious >= vwapPrevious && emaCurrent < vwapCurrent && close < vwapCurrent;
-            if (!buy && !sell)
+            // Video-confirmed signal: the EMA9 and VWAP cross.
+            bool buyCross = emaPrevious <= vwapPrevious && emaCurrent > vwapCurrent && close > emaCurrent;
+            bool sellCross = emaPrevious >= vwapPrevious && emaCurrent < vwapCurrent && close < emaCurrent;
+
+            // "Right before the cross" is not defined precisely in the reel.
+            // This optional approach is an EXPLICIT original approximation, OFF by default.
+            double previousGap = emaPrevious - vwapPrevious;
+            double currentGap = emaCurrent - vwapCurrent;
+            bool approachingBuy = EnableEarlyApproachEntry &&
+                previousGap < 0 && currentGap < 0 && currentGap > previousGap &&
+                Math.Abs(currentGap) <= EarlyCrossMaxAtrFraction * atrPrice &&
+                close > emaCurrent && close > Bars.ClosePrices.Last(1);
+            bool approachingSell = EnableEarlyApproachEntry &&
+                previousGap > 0 && currentGap > 0 && currentGap < previousGap &&
+                Math.Abs(currentGap) <= EarlyCrossMaxAtrFraction * atrPrice &&
+                close < emaCurrent && close < Bars.ClosePrices.Last(1);
+
+            bool buy = buyCross || approachingBuy;
+            bool sell = sellCross || approachingSell;
+            if (buy == sell)
                 return;
 
             TradeType direction = buy ? TradeType.Buy : TradeType.Sell;
-            if (!PassesOptionalH1Trend(direction) || !EnableTrading || _dayBlocked || LossLimitReached())
+            if (!EnableTrading || _dayBlocked || LossLimitReached() || !PassesOptionalH1Trend(direction))
                 return;
 
             if (ExitOnReverse)
@@ -145,10 +216,10 @@ namespace cAlgo.Robots
                 {
                     if (position.TradeType == direction)
                         continue;
-                    var closed = ClosePosition(position);
-                    if (!closed.IsSuccessful)
+                    var result = ClosePosition(position);
+                    if (!result.IsSuccessful)
                     {
-                        Print("Opposite-position close failed: {0}", closed.Error);
+                        Print("Opposite position close failed: {0}", result.Error);
                         return;
                     }
                 }
@@ -164,46 +235,47 @@ namespace cAlgo.Robots
             double spreadPips = Symbol.Spread / Symbol.PipSize;
             if (spreadPips > MaxSpreadPips)
             {
-                Print("Signal skipped: spread {0:F2} > {1:F2}", spreadPips, MaxSpreadPips);
+                Print("Signal skipped due to high spread: {0:F2} pips", spreadPips);
                 return;
             }
 
-            double atrPrice = _atr.Result.Last(0);
-            if (double.IsNaN(atrPrice) || double.IsInfinity(atrPrice) || atrPrice <= 0)
-                return;
-
+            // Protective ATR stop is NOT the "-25 to -30%" option premium threshold
+            // referenced in the video. For spot/CFDs, such a percent is not transferable.
             double stopPips = Math.Max(MinStopPips, (atrPrice / Symbol.PipSize) * AtrStopMultiplier);
-            double takeProfitPips = stopPips * RewardRiskRatio;
             if (double.IsNaN(stopPips) || double.IsInfinity(stopPips) || stopPips <= 0)
                 return;
+            double? takeProfitPips = UseFixedTakeProfit ? stopPips * RewardRiskRatio : (double?)null;
 
             double rawVolume = Symbol.VolumeForProportionalRisk(
                 ProportionalAmountType.Equity, RiskPercent, stopPips, RoundingMode.Down);
             if (double.IsNaN(rawVolume) || double.IsInfinity(rawVolume) || rawVolume <= 0)
                 return;
 
-            double volume = Symbol.NormalizeVolumeInUnits(Math.Min(rawVolume, Symbol.VolumeInUnitsMax), RoundingMode.Down);
+            double volume = Symbol.NormalizeVolumeInUnits(
+                Math.Min(rawVolume, Symbol.VolumeInUnitsMax), RoundingMode.Down);
             if (volume < Symbol.VolumeInUnitsMin)
             {
                 Print("Signal skipped: risk budget below broker minimum volume.");
                 return;
             }
 
-            double requiredMargin = Symbol.GetEstimatedMargin(direction, volume);
-            if (double.IsNaN(requiredMargin) || requiredMargin > Account.FreeMargin)
+            double margin = Symbol.GetEstimatedMargin(direction, volume);
+            if (double.IsNaN(margin) || double.IsInfinity(margin) || margin > Account.FreeMargin)
             {
                 Print("Signal skipped: insufficient estimated margin.");
                 return;
             }
 
-            var result = ExecuteMarketOrder(direction, SymbolName, volume, BotLabel, stopPips, takeProfitPips);
-            if (result.IsSuccessful)
+            var order = ExecuteMarketOrder(direction, SymbolName, volume, BotLabel, stopPips, takeProfitPips);
+            if (order.IsSuccessful)
             {
                 _lastEntryBar = current;
-                Print("Opened {0}: units={1}, SL={2:F2} pips TP={3:F2} pips", direction, volume, stopPips, takeProfitPips);
+                Print("Opened {0} ({1}), units={2}, SL={3:F2} pips, fixed TP enabled={4}",
+                    direction, buyCross || sellCross ? "confirmed cross" : "experimental near-cross",
+                    volume, stopPips, UseFixedTakeProfit);
             }
             else
-                Print("Order rejected: {0}", result.Error);
+                Print("Order rejected: {0}", order.Error);
         }
 
         private bool PassesOptionalH1Trend(TradeType direction)
@@ -220,11 +292,11 @@ namespace cAlgo.Robots
 
         private double CalculateSessionVwap(int barIndex)
         {
-            DateTime sessionDate = Bars.OpenTimes[barIndex].Date;
+            DateTime sessionDate = Bars.OpenTimes[barIndex].AddHours(-VwapResetUtcHour).Date;
             double priceTimesVolume = 0.0;
             double totalVolume = 0.0;
             int k = barIndex;
-            for (; k >= 0 && Bars.OpenTimes[k].Date == sessionDate; k--)
+            for (; k >= 0 && Bars.OpenTimes[k].AddHours(-VwapResetUtcHour).Date == sessionDate; k--)
             {
                 double vol = Bars.TickVolumes[k];
                 if (vol <= 0)
