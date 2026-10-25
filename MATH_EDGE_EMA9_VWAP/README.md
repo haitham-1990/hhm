@@ -1,23 +1,28 @@
-# MATH EDGE — EMA 9 + VWAP (cTrader)
+# MATH EDGE EMA9 + VWAP VIDEO V2
 
-This is an **original interpretation** of the public Instagram description "EMA 9 + VWAP, automated." It does **not** reproduce the unpublished ROBOQUANT strategy.
+**Based on the user's uploaded 82-second strategy reel, not a claim of proprietary strategy equivalence.**
 
-- Timeframe: intended for M5; supports other chart timeframes.
-- Buy: confirmed EMA9 cross above session VWAP, with candle close above VWAP.
-- Sell: reverse of buy.
-- Session VWAP: typical candle price weighted by **tick volume**, reset each UTC day.
-- SL: 1.5 ATR(14), minimum 8 pips.
-- TP: 1.5 × risk.
-- Risk: target 0.5% equity per trade; max 6 entries/day; 2% bot daily loss cutoff. Slippage and gaps can exceed risk limits.
-- Optional H1 EMA50 trend filter, off by default.
-- **Order placement disabled by default.** Switch `Enable automatic orders` on only after demo/backtesting.
+## What the reel actually displays
+- Main timeframe: **3 minutes**.
+- Indicators: VWAP and EMA9.
+- Entry: "right before or when the VWAP + EMA9 cross".
+- Technical exit: when a candle **closes through EMA9 after the cross**.
+- Alternative "-25% to -30%" loss: the reel does not specify its denominator; this may be an **options-premium** threshold, not acceptable as account risk. It has **NOT** been implemented for spot/CFDs.
+- No unambiguous fixed profit target shown.
+- Backtest / financial results in video are promotional, **not verified**.
 
-## Build
-Download the compiled `.algo` from this branch's GitHub Actions artifact under the job **Build MATH EDGE EMA9 VWAP**.
+## Implementation and differences
+- By default, entries wait for a **closed candle confirming the EMA9 / VWAP cross**. No future data.
+- `Allow near-cross entry (experimental)` is **off by default**. If enabled, it uses an **original approximation**: approaching line difference, small ATR-relative gap, price confirmation. The original video's timing specification is not precise enough to replicate exactly.
+- Exits when a fully closed candle crosses EMA9 against the position (buy: close BELOW EMA; sell: close ABOVE EMA).
+- Fixed take profit is **off** by default, allowing EMA9 exit to follow trend; optional R:R TP available if preferred.
+- Initial protective ATR-based SL is ALWAYS set, daily bot loss control, spread/margin checks, trade frequency limit.
+- Position risk defaults to **0.5% of equity**; this is a target, not a guarantee under slippage/gaps.
+- VWAP is **tick-volume** weighted in cTrader, not exchange true volume, and resets at configurable UTC hour (default 00:00). Choose session hour appropriate for instrument, e.g. US equities.
+- For the video timeframe, open a **3-minute cTrader chart**. Code runs on whatever chart timeframe is selected and warns if not M3.
+- **Orders disabled by default**: set `Enable automatic orders=true` on a demo account to test.
 
-Manual:
-```bash
-dotnet build MATH_EDGE_EMA9_VWAP/MATH_EDGE_EMA9_VWAP.csproj -c Release
-```
+## GitHub Actions
+Workflow `Build MATH EDGE EMA9 VWAP` builds a .NET 6 cTrader `.algo` and publishes the artifact named `MATH_EDGE_EMA9_VWAP_VIDEO_V2_algo`.
 
-The project uses the official `cTrader.Automate` NuGet package. No API key, AI service, or trading credentials are required by the bot. Trading has material capital-loss risk; compile success is not performance testing.
+**Safety:** This compiles as a trading algorithm; it is not a verified profitable system. Backtest and forward-test on a demo account before real capital.
