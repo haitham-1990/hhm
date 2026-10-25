@@ -1,0 +1,35 @@
+name: Build MATH EDGE EMA9 VWAP
+on:
+  push:
+    branches: [math-edge-ema9-vwap-20261026]
+    paths:
+      - 'MATH_EDGE_EMA9_VWAP/**'
+      - '.github/workflows/build-math-edge-ema9-vwap.yml'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Compile cTrader .algo
+        run: dotnet build MATH_EDGE_EMA9_VWAP/MATH_EDGE_EMA9_VWAP.csproj --configuration Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify and stage final binary
+        shell: bash
+        run: |
+          mkdir -p ready
+          algo=$(find MATH_EDGE_EMA9_VWAP/bin/Release -type f -name '*.algo' -print -quit)
+          test -n "$algo"
+          cp "$algo" ready/MATH_EDGE_EMA9_VWAP.algo
+          test -s ready/MATH_EDGE_EMA9_VWAP.algo
+          sha256sum ready/MATH_EDGE_EMA9_VWAP.algo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MATH_EDGE_EMA9_VWAP_algo
+          path: ready/MATH_EDGE_EMA9_VWAP.algo
+          if-no-files-found: error
