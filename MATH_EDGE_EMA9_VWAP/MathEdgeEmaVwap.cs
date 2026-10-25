@@ -44,10 +44,19 @@ namespace cAlgo.Robots
         [Parameter("Daily bot loss stop (%)", DefaultValue = 2.0, MinValue = 0.1, MaxValue = 10, Group = "03 - Risk")]
         public double DailyLossLimitPercent { get; set; }
 
+        [Parameter("Max open bot positions (all markets)", DefaultValue = 3, MinValue = 1, MaxValue = 20, Group = "03 - Risk")]
+        public int MaxTotalBotPositions { get; set; }
+
+        [Parameter("Portfolio daily bot loss stop (%)", DefaultValue = 1.5, MinValue = 0.2, MaxValue = 10, Group = "03 - Risk")]
+        public double PortfolioDailyLossPercent { get; set; }
+
+        [Parameter("Max portfolio entries / UTC day", DefaultValue = 12, MinValue = 1, MaxValue = 100, Group = "03 - Risk")]
+        public int MaxTotalEntriesPerDay { get; set; }
+
         [Parameter("Maximum entries / UTC day", DefaultValue = 6, MinValue = 1, MaxValue = 30, Group = "03 - Risk")]
         public int MaxEntriesPerDay { get; set; }
 
-        [Parameter("Maximum spread (pips)", DefaultValue = 3.0, MinValue = 0.1, Group = "03 - Risk")]
+        [Parameter("Absolute spread cap pips (0=auto)", DefaultValue = 0.0, MinValue = 0.0, Group = "03 - Risk")]
         public double MaxSpreadPips { get; set; }
 
         [Parameter("ATR period", DefaultValue = 14, MinValue = 2, Group = "04 - Exits")]
@@ -71,7 +80,7 @@ namespace cAlgo.Robots
         [Parameter("Auto market profile", DefaultValue = true, Group = "05 - Multi-market")]
         public bool AutoMarketProfile { get; set; }
 
-        [Parameter("Spread / ATR maximum", DefaultValue = 0.12, MinValue = 0.01, MaxValue = 0.5, Group = "05 - Multi-market")]
+        [Parameter("Spread / ATR maximum", DefaultValue = 0.30, MinValue = 0.01, MaxValue = 0.5, Group = "05 - Multi-market")]
         public double MaxSpreadAtrFraction { get; set; }
 
         [Parameter("Maximum ATR stop multiplier", DefaultValue = 3.0, MinValue = 1, MaxValue = 10, Group = "05 - Multi-market")]
@@ -87,6 +96,7 @@ namespace cAlgo.Robots
         private ExponentialMovingAverage _h1TrendEma;
         private DateTime _day;
         private double _realizedToday;
+        private double _portfolioRealizedToday;
         private bool _dayBlocked;
         private int _lastEntryBar = -1000000;
 
@@ -113,6 +123,7 @@ namespace cAlgo.Robots
             ResetDayIfNeeded();
             Print("MATH EDGE EMA/VWAP: {0}, timeframe={1}, enabled={2}", SymbolName, TimeFrame, EnableTrading);
             Print("VWAP uses tick volume and resets at {0}:00 UTC.", VwapResetUtcHour);
+            Print("Portfolio risk cap shared by label {0}: max {1} simultaneous positions, {2}% UTC-day bot drawdown.", BotLabel, MaxTotalBotPositions, PortfolioDailyLossPercent);
             Print("Exit: confirmed candle close across EMA {0}; ATR stop always protects trades.", EmaPeriod);
             if (TimeFrame != TimeFrame.Minute3)
                 Print("NOTICE: video uses M3; current chart timeframe is {0}.", TimeFrame);
@@ -162,9 +173,7 @@ namespace cAlgo.Robots
             {
                 foreach (var position in Positions.FindAll(BotLabel, SymbolName))
                 {
-                    bool exitByEma = position.TradeType == TradeType.Buy
-                        ? close < emaCurrent
-                        : close > emaCurrent;
+                    bool exitByEma = MathEdgeRiskMath.ShouldExitOnEmaClose(position.TradeType == TradeType.Buy, close, emaCurrent);
                     if (!exitByEma)
                         continue;
 
@@ -184,8 +193,8 @@ namespace cAlgo.Robots
                 return;
 
             // Only compare two VWAP values from the same anchored session.
-            DateTime currentSession = Bars.OpenTimes[current].AddHours(-VwapResetUtcHour).Date;
-            DateTime previousSession = Bars.OpenTimes[previous].AddHours(-VwapResetUtcHour).Date;
+            DateTime currentSession = MathEdgeRiskMath.VwapSessionDate(Bars.OpenTimes[current], VwapResetUtcHour);
+            DateTime previousSession = MathEdgeRiskMath.VwapSessionDate(Bars.OpenTimes[previous], VwapResetUtcHour);
             if (currentSession != previousSession)
                 return;
 
@@ -199,8 +208,8 @@ namespace cAlgo.Robots
                 return;
 
             // Video-confirmed signal: the EMA9 and VWAP cross.
-            bool buyCross = emaPrevious <= vwapPrevious && emaCurrent > vwapCurrent && close > emaCurrent;
-            bool sellCross = emaPrevious >= vwapPrevious && emaCurrent < vwapCurrent && close < emaCurrent;
+            bool buyCross = MathEdgeRiskMath.ConfirmedBuyCross(emaPrevious, vwapPrevious, emaCurrent, vwapCurrent, close);
+            bool sellCross = MathEdgeRiskMath.ConfirmedSellCross(emaPrevious, vwapPrevious, emaCurrent, vwapCurrent, close);
 
             // "Right before the cross" is not defined precisely in the reel.
             // This optional approach is an EXPLICIT original approximation, OFF by default.
@@ -241,19 +250,19 @@ namespace cAlgo.Robots
 
             if (Positions.FindAll(BotLabel, SymbolName).Length > 0)
                 return;
-            if (CountEntriesToday() >= MaxEntriesPerDay)
+            if (CountEntriesToday() >= MaxEntriesPerDay || CountPortfolioEntriesToday() >= MaxTotalEntriesPerDay)
                 return;
+            if (Positions.FindAll(BotLabel).Length >= MaxTotalBotPositions)
+            {
+                Print("Portfolio position cap reached. New entry blocked.");
+                return;
+            }
             if (current - _lastEntryBar < CooldownBars)
                 return;
 
             double spreadPips = Symbol.Spread / Symbol.PipSize;
             double atrPips = atrPrice / Symbol.PipSize;
-            if (spreadPips > atrPips * MaxSpreadAtrFraction)
-            {
-                Print("Signal skipped: spread is too large relative to ATR.");
-                return;
-            }
-            if (spreadPips > _profileSpreadPips)
+            if (!MathEdgeRiskMath.SpreadAcceptable(spreadPips, atrPips, MaxSpreadAtrFraction, _profileSpreadPips))
             {
                 Print("Signal skipped due to high spread: {0:F2} pips", spreadPips);
                 return;
@@ -261,7 +270,7 @@ namespace cAlgo.Robots
 
             // Protective ATR stop is NOT the "-25 to -30%" option premium threshold
             // referenced in the video. For spot/CFDs, such a percent is not transferable.
-            double stopPips = Math.Max(_profileMinStopPips, Math.Min(atrPips * AtrStopMultiplier, atrPips * MaxAtrStopMultiplier));
+            double stopPips = Math.Max(_profileMinStopPips, atrPips * Math.Min(AtrStopMultiplier, MaxAtrStopMultiplier));
             if (double.IsNaN(stopPips) || double.IsInfinity(stopPips) || stopPips <= 0)
                 return;
             double? takeProfitPips = UseFixedTakeProfit ? stopPips * RewardRiskRatio : (double?)null;
@@ -300,47 +309,21 @@ namespace cAlgo.Robots
 
         private void ConfigureMarketProfile()
         {
-            _profileSpreadPips = MaxSpreadPips;
-            _profileRiskPercent = RiskPercent;
+            MathEdgeRiskMath.MarketCategory category = MathEdgeRiskMath.Classify(SymbolName);
+            _profileSpreadPips = MathEdgeRiskMath.ProfileSpreadCapPips(category, MaxSpreadPips);
+            _profileRiskPercent = AutoMarketProfile
+                ? MathEdgeRiskMath.ProfileRiskPercent(category, RiskPercent)
+                : RiskPercent;
             _profileMinStopPips = MinStopPips;
-            _profileDailyLossLimit = DailyLossLimitPercent;
-            if (!AutoMarketProfile)
-                return;
+            _profileDailyLossLimit = AutoMarketProfile
+                ? MathEdgeRiskMath.ProfileDailyLossPercent(category, DailyLossLimitPercent)
+                : DailyLossLimitPercent;
 
-            string symbol = SymbolName.ToUpperInvariant();
-            // Conservative starting presets, NOT broker-specific optimisations.
-            // Relative spread/ATR filter applies to all symbols as a second check.
-            if (symbol.Contains("XAU") || symbol.Contains("GOLD"))
-            {
-                _profileSpreadPips = Math.Min(MaxSpreadPips, 35);
-                _profileRiskPercent = Math.Min(RiskPercent, 0.25);
-                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 1.0);
-            }
-            else if (symbol.Contains("XAG") || symbol.Contains("SILVER"))
-            {
-                _profileSpreadPips = Math.Min(MaxSpreadPips, 35);
-                _profileRiskPercent = Math.Min(RiskPercent, 0.25);
-                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 1.0);
-            }
-            else if (symbol.Contains("BTC") || symbol.Contains("ETH") || symbol.Contains("CRYPTO"))
-            {
-                _profileSpreadPips = MaxSpreadPips;
-                _profileRiskPercent = Math.Min(RiskPercent, 0.15);
-                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 0.75);
-            }
-            else if (symbol.Contains("US30") || symbol.Contains("NAS") || symbol.Contains("USTEC") ||
-                     symbol.Contains("US500") || symbol.Contains("SPX") || symbol.Contains("GER40"))
-            {
-                _profileRiskPercent = Math.Min(RiskPercent, 0.25);
-                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 1.0);
-            }
-            else
-            {
-                _profileRiskPercent = Math.Min(RiskPercent, 0.35);
-                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 1.5);
-            }
-            Print("Market profile {0}: risk {1}%, daily cap {2}%, spread cap {3} pips; relative spread/ATR cap {4}",
-                SymbolName, _profileRiskPercent, _profileDailyLossLimit, _profileSpreadPips, MaxSpreadAtrFraction);
+            // Forex additionally uses a 3-pip absolute spread cap unless overridden.
+            // Other markets use spread/ATR; broker conventions make fixed pip values unreliable.
+            Print("Market {0} ({1}): risk {2}%, daily symbol loss {3}%, absolute spread cap {4}, spread/ATR max {5}",
+                SymbolName, category, _profileRiskPercent, _profileDailyLossLimit,
+                _profileSpreadPips, MaxSpreadAtrFraction);
         }
 
         private bool PassesOptionalH1Trend(TradeType direction)
@@ -357,11 +340,11 @@ namespace cAlgo.Robots
 
         private double CalculateSessionVwap(int barIndex)
         {
-            DateTime sessionDate = Bars.OpenTimes[barIndex].AddHours(-VwapResetUtcHour).Date;
+            DateTime sessionDate = MathEdgeRiskMath.VwapSessionDate(Bars.OpenTimes[barIndex], VwapResetUtcHour);
             double priceTimesVolume = 0.0;
             double totalVolume = 0.0;
             int k = barIndex;
-            for (; k >= 0 && Bars.OpenTimes[k].AddHours(-VwapResetUtcHour).Date == sessionDate; k--)
+            for (; k >= 0 && MathEdgeRiskMath.VwapSessionDate(Bars.OpenTimes[k], VwapResetUtcHour) == sessionDate; k--)
             {
                 double vol = Bars.TickVolumes[k];
                 if (vol <= 0)
@@ -387,11 +370,18 @@ namespace cAlgo.Robots
 
         private void RefreshRealizedProfit()
         {
-            double realized = 0;
-            foreach (var trade in History.FindAll(BotLabel, SymbolName))
-                if (trade.ClosingTime.Date == _day)
-                    realized += trade.NetProfit;
-            _realizedToday = realized;
+            double symbolRealized = 0;
+            double portfolioRealized = 0;
+            foreach (var trade in History.FindAll(BotLabel))
+            {
+                if (trade.ClosingTime.Date != _day)
+                    continue;
+                portfolioRealized += trade.NetProfit;
+                if (trade.SymbolName == SymbolName)
+                    symbolRealized += trade.NetProfit;
+            }
+            _realizedToday = symbolRealized;
+            _portfolioRealizedToday = portfolioRealized;
         }
 
         private int CountEntriesToday()
@@ -406,15 +396,38 @@ namespace cAlgo.Robots
             return ids.Count;
         }
 
+        private int CountPortfolioEntriesToday()
+        {
+            var ids = new HashSet<int>();
+            foreach (var trade in History.FindAll(BotLabel))
+                if (trade.EntryTime.Date == _day)
+                    ids.Add(trade.PositionId);
+            foreach (var position in Positions.FindAll(BotLabel))
+                if (position.EntryTime.Date == _day)
+                    ids.Add(position.Id);
+            return ids.Count;
+        }
+
         private bool LossLimitReached()
         {
             if (_dayBlocked)
                 return true;
-            double botPnl = _realizedToday;
+
+            double symbolOpenPnl = 0;
             foreach (var position in Positions.FindAll(BotLabel, SymbolName))
-                botPnl += position.NetProfit;
-            double dailyBudget = Math.Max(Account.Balance, 1.0) * _profileDailyLossLimit / 100.0;
-            return botPnl <= -dailyBudget;
+                symbolOpenPnl += position.NetProfit;
+
+            double portfolioOpenPnl = 0;
+            foreach (var position in Positions.FindAll(BotLabel))
+                portfolioOpenPnl += position.NetProfit;
+
+            // Global circuit breaker uses all markets sharing the same label,
+            // regardless of which chart each instance is attached to.
+            double baseline = Math.Max(Account.Balance, 1.0);
+            return MathEdgeRiskMath.DailyLossReached(
+                       _realizedToday, symbolOpenPnl, baseline, _profileDailyLossLimit) ||
+                   MathEdgeRiskMath.DailyLossReached(
+                       _portfolioRealizedToday, portfolioOpenPnl, baseline, PortfolioDailyLossPercent);
         }
 
         private void CloseOwnPositions()
@@ -429,7 +442,7 @@ namespace cAlgo.Robots
 
         private void OnBotPositionClosed(PositionClosedEventArgs args)
         {
-            if (args.Position.Label != BotLabel || args.Position.SymbolName != SymbolName)
+            if (args.Position.Label != BotLabel)
                 return;
             ResetDayIfNeeded();
             RefreshRealizedProfit();
