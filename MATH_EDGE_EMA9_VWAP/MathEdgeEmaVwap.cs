@@ -68,6 +68,19 @@ namespace cAlgo.Robots
         [Parameter("Minimum bars between entries", DefaultValue = 2, MinValue = 0, MaxValue = 100, Group = "04 - Exits")]
         public int CooldownBars { get; set; }
 
+        [Parameter("Auto market profile", DefaultValue = true, Group = "05 - Multi-market")]
+        public bool AutoMarketProfile { get; set; }
+
+        [Parameter("Spread / ATR maximum", DefaultValue = 0.12, MinValue = 0.01, MaxValue = 0.5, Group = "05 - Multi-market")]
+        public double MaxSpreadAtrFraction { get; set; }
+
+        [Parameter("Maximum ATR stop multiplier", DefaultValue = 3.0, MinValue = 1, MaxValue = 10, Group = "05 - Multi-market")]
+        public double MaxAtrStopMultiplier { get; set; }
+
+        private double _profileSpreadPips;
+        private double _profileRiskPercent;
+        private double _profileMinStopPips;
+        private double _profileDailyLossLimit;
         private ExponentialMovingAverage _ema;
         private AverageTrueRange _atr;
         private Bars _h1Bars;
@@ -86,6 +99,7 @@ namespace cAlgo.Robots
                 return;
             }
 
+            ConfigureMarketProfile();
             _ema = Indicators.ExponentialMovingAverage(Bars.ClosePrices, EmaPeriod);
             _atr = Indicators.AverageTrueRange(AtrPeriod, MovingAverageType.Exponential);
 
@@ -232,8 +246,8 @@ namespace cAlgo.Robots
             if (current - _lastEntryBar < CooldownBars)
                 return;
 
-            double spreadPips = Symbol.Spread / Symbol.PipSize;
-            if (spreadPips > MaxSpreadPips)
+            double spreadPips = Symbol.Spread / Symbol.PipSize;\n            double atrPips = atrPrice / Symbol.PipSize;\n            if (spreadPips > atrPips * MaxSpreadAtrFraction)\n            {\n                Print("Signal skipped: spread is too large relative to ATR.");\n                return;\n            }
+            if (spreadPips > _profileSpreadPips)
             {
                 Print("Signal skipped due to high spread: {0:F2} pips", spreadPips);
                 return;
@@ -241,13 +255,13 @@ namespace cAlgo.Robots
 
             // Protective ATR stop is NOT the "-25 to -30%" option premium threshold
             // referenced in the video. For spot/CFDs, such a percent is not transferable.
-            double stopPips = Math.Max(MinStopPips, (atrPrice / Symbol.PipSize) * AtrStopMultiplier);
+            double stopPips = Math.Max(_profileMinStopPips, Math.Min(atrPips * AtrStopMultiplier, atrPips * MaxAtrStopMultiplier));
             if (double.IsNaN(stopPips) || double.IsInfinity(stopPips) || stopPips <= 0)
                 return;
             double? takeProfitPips = UseFixedTakeProfit ? stopPips * RewardRiskRatio : (double?)null;
 
             double rawVolume = Symbol.VolumeForProportionalRisk(
-                ProportionalAmountType.Equity, RiskPercent, stopPips, RoundingMode.Down);
+                ProportionalAmountType.Equity, _profileRiskPercent, stopPips, RoundingMode.Down);
             if (double.IsNaN(rawVolume) || double.IsInfinity(rawVolume) || rawVolume <= 0)
                 return;
 
@@ -276,6 +290,51 @@ namespace cAlgo.Robots
             }
             else
                 Print("Order rejected: {0}", order.Error);
+        }
+
+        private void ConfigureMarketProfile()
+        {
+            _profileSpreadPips = MaxSpreadPips;
+            _profileRiskPercent = RiskPercent;
+            _profileMinStopPips = MinStopPips;
+            _profileDailyLossLimit = DailyLossLimitPercent;
+            if (!AutoMarketProfile)
+                return;
+
+            string symbol = SymbolName.ToUpperInvariant();
+            // Conservative starting presets, NOT broker-specific optimisations.
+            // Relative spread/ATR filter applies to all symbols as a second check.
+            if (symbol.Contains("XAU") || symbol.Contains("GOLD"))
+            {
+                _profileSpreadPips = Math.Min(MaxSpreadPips, 35);
+                _profileRiskPercent = Math.Min(RiskPercent, 0.25);
+                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 1.0);
+            }
+            else if (symbol.Contains("XAG") || symbol.Contains("SILVER"))
+            {
+                _profileSpreadPips = Math.Min(MaxSpreadPips, 35);
+                _profileRiskPercent = Math.Min(RiskPercent, 0.25);
+                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 1.0);
+            }
+            else if (symbol.Contains("BTC") || symbol.Contains("ETH") || symbol.Contains("CRYPTO"))
+            {
+                _profileSpreadPips = MaxSpreadPips;
+                _profileRiskPercent = Math.Min(RiskPercent, 0.15);
+                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 0.75);
+            }
+            else if (symbol.Contains("US30") || symbol.Contains("NAS") || symbol.Contains("USTEC") ||
+                     symbol.Contains("US500") || symbol.Contains("SPX") || symbol.Contains("GER40"))
+            {
+                _profileRiskPercent = Math.Min(RiskPercent, 0.25);
+                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 1.0);
+            }
+            else
+            {
+                _profileRiskPercent = Math.Min(RiskPercent, 0.35);
+                _profileDailyLossLimit = Math.Min(DailyLossLimitPercent, 1.5);
+            }
+            Print("Market profile {0}: risk {1}%, daily cap {2}%, spread cap {3} pips; relative spread/ATR cap {4}",
+                SymbolName, _profileRiskPercent, _profileDailyLossLimit, _profileSpreadPips, MaxSpreadAtrFraction);
         }
 
         private bool PassesOptionalH1Trend(TradeType direction)
@@ -348,7 +407,7 @@ namespace cAlgo.Robots
             double botPnl = _realizedToday;
             foreach (var position in Positions.FindAll(BotLabel, SymbolName))
                 botPnl += position.NetProfit;
-            double dailyBudget = Math.Max(Account.Balance, 1.0) * DailyLossLimitPercent / 100.0;
+            double dailyBudget = Math.Max(Account.Balance, 1.0) * _profileDailyLossLimit / 100.0;
             return botPnl <= -dailyBudget;
         }
 
