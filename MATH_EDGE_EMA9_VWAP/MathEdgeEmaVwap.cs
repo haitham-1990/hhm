@@ -246,7 +246,13 @@ namespace cAlgo.Robots
             if (current - _lastEntryBar < CooldownBars)
                 return;
 
-            double spreadPips = Symbol.Spread / Symbol.PipSize;\n            double atrPips = atrPrice / Symbol.PipSize;\n            if (spreadPips > atrPips * MaxSpreadAtrFraction)\n            {\n                Print("Signal skipped: spread is too large relative to ATR.");\n                return;\n            }
+            double spreadPips = Symbol.Spread / Symbol.PipSize;
+            double atrPips = atrPrice / Symbol.PipSize;
+            if (spreadPips > atrPips * MaxSpreadAtrFraction)
+            {
+                Print("Signal skipped: spread is too large relative to ATR.");
+                return;
+            }
             if (spreadPips > _profileSpreadPips)
             {
                 Print("Signal skipped due to high spread: {0:F2} pips", spreadPips);
