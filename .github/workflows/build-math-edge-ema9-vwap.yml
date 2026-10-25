@@ -1,7 +1,7 @@
 name: Build MATH EDGE EMA9 VWAP
 on:
   push:
-    branches: [math-edge-ema9-vwap-20261026, math-edge-ema9-vwap-video-v2-20261026]
+    branches: [math-edge-ema9-vwap-20261026, math-edge-ema9-vwap-video-v2-20261026, math-edge-multi-market-v3-20261026]
     paths:
       - 'MATH_EDGE_EMA9_VWAP/**'
       - '.github/workflows/build-math-edge-ema9-vwap.yml'
@@ -25,11 +25,11 @@ jobs:
           mkdir -p ready
           algo=$(find MATH_EDGE_EMA9_VWAP/bin/Release -type f -name '*.algo' -print -quit)
           test -n "$algo"
-          cp "$algo" ready/MATH_EDGE_EMA9_VWAP_VIDEO_V2.algo
-          test -s ready/MATH_EDGE_EMA9_VWAP_VIDEO_V2.algo
-          sha256sum ready/MATH_EDGE_EMA9_VWAP_VIDEO_V2.algo
+          cp "$algo" ready/MATH_EDGE_MULTI_MARKET_V3.algo
+          test -s ready/MATH_EDGE_MULTI_MARKET_V3.algo
+          sha256sum ready/MATH_EDGE_MULTI_MARKET_V3.algo
       - uses: actions/upload-artifact@v4
         with:
-          name: MATH_EDGE_EMA9_VWAP_VIDEO_V2_algo
-          path: ready/MATH_EDGE_EMA9_VWAP_VIDEO_V2.algo
+          name: MATH_EDGE_MULTI_MARKET_V3_algo
+          path: ready/MATH_EDGE_MULTI_MARKET_V3.algo
           if-no-files-found: error
