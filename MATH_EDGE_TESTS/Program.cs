@@ -58,4 +58,31 @@ Check(DailyLossReached(-70, -85, 10000, 1.5), "aggregated losses reach portfolio
 Check(!DailyLossReached(-70, -75, 10000, 1.5), "loss below stop does not block");
 Check(DailyLossReached(-150, 0, 10000, 1.5), "realized only triggers loss stop");
 
+// Regression: real-world small-equity gold case (~$277 equity, minimum one ounce).
+// 0.25% nominal risk is only ~0.69 USD, BEFORE 15% risk reserve.
+// A broker's 1-ounce minimum could risk multiple dollars => must reject.
+double smallAccountBudget = CashRiskAllowance(277.34, 0.25, 100.0, 0.85);
+Check(smallAccountBudget > 0.58 && smallAccountBudget < 0.60,
+    "small-account 0.25% risk budget with reserve");
+Check(!EstimatedLossWithinBudget(3.31, smallAccountBudget),
+    "broker 1 oz minimum must be blocked if it risks $3.31");
+Check(!EstimatedLossWithinBudget(1.10, smallAccountBudget),
+    "even $1.10 minimum is too large for small-account target");
+Check(EstimatedLossWithinBudget(0.42, smallAccountBudget),
+    "sufficiently small trade can pass the risk ceiling");
+Check(!EstimatedLossWithinBudget(double.NaN, smallAccountBudget),
+    "unavailable estimated loss must block the order");
+Check(!EstimatedLossWithinBudget(0.42, 0),
+    "exhausted cash budget must block all new orders");
+Check(RemainingDailyCash(277.34, 1.0, -6.18) == 0,
+    "daily loss already exceeded blocks further trading");
+Check(RemainingDailyCash(1000, 1.5, -10) == 5,
+    "remaining portfolio allowance reflects existing losses");
+Check(CashRiskAllowance(1000, 0.25, 1, 0.85) == 0.85,
+    "smaller remaining daily allowance overrides per-trade budget");
+Check(CashRiskAllowance(1000, 0.25, 5, 0.85) == 2.125,
+    "per-trade allowance dominates when daily remaining is large");
+Check(CashRiskAllowance(1000, 0.25, 5, 1.5) == 0,
+    "invalid utilization ratio fails closed");
+
 Console.WriteLine($"ALL {passed} checks passed");
