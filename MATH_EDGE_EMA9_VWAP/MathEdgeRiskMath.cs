@@ -109,6 +109,37 @@ namespace cAlgo.Robots
             return lastEma >= lastVwap && currentEma < currentVwap && currentClose < currentEma;
         }
 
+        // Do not allow broker minimum-volume rounding to silently exceed the cash risk cap.
+        // Cash reserve accounts conservatively for spread, fees and imperfect estimates.
+        public static double CashRiskAllowance(double equity, double perTradePercent,
+            double cashRemainingByDailyRules, double utilisationFraction)
+        {
+            if (!IsFinitePositive(equity) || !IsFinitePositive(perTradePercent) ||
+                !IsFinitePositive(utilisationFraction) || utilisationFraction > 1 ||
+                !IsFinitePositive(cashRemainingByDailyRules))
+                return 0.0;
+
+            double tradeBudget = equity * perTradePercent / 100.0 * utilisationFraction;
+            return Math.Max(0, Math.Min(tradeBudget, cashRemainingByDailyRules * utilisationFraction));
+        }
+
+        public static double RemainingDailyCash(double balanceReference,
+            double maxLossPercent, double realizedPlusOpenProfit)
+        {
+            if (!IsFinitePositive(balanceReference) || !IsFinitePositive(maxLossPercent) ||
+                double.IsNaN(realizedPlusOpenProfit) || double.IsInfinity(realizedPlusOpenProfit))
+                return 0.0;
+
+            return Math.Max(0.0,
+                balanceReference * maxLossPercent / 100.0 + Math.Min(realizedPlusOpenProfit, 0.0));
+        }
+
+        public static bool EstimatedLossWithinBudget(double estimatedLossCash, double cashBudget)
+        {
+            return IsFinitePositive(estimatedLossCash) && IsFinitePositive(cashBudget) &&
+                   estimatedLossCash <= cashBudget + 0.00000001;
+        }
+
         public static bool DailyLossReached(double realized, double openPnl,
             double startingBalanceEstimate, double lossLimitPercent)
         {
