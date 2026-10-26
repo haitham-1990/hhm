@@ -41,6 +41,12 @@ namespace cAlgo.Robots
         [Parameter("Risk % of equity / trade", DefaultValue = 0.5, MinValue = 0.01, MaxValue = 3, Group = "03 - Risk")]
         public double RiskPercent { get; set; }
 
+        [Parameter("Risk budget utilisation (0.85 = 85%)", DefaultValue = 0.85, MinValue = 0.50, MaxValue = 0.95, Group = "03 - Risk")]
+        public double RiskBudgetUtilisation { get; set; }
+
+        [Parameter("Extra ATR slippage buffer fraction", DefaultValue = 0.05, MinValue = 0.0, MaxValue = 0.50, Group = "03 - Risk")]
+        public double SlippageAtrBufferFraction { get; set; }
+
         [Parameter("Daily bot loss stop (%)", DefaultValue = 2.0, MinValue = 0.1, MaxValue = 10, Group = "03 - Risk")]
         public double DailyLossLimitPercent { get; set; }
 
@@ -125,6 +131,8 @@ namespace cAlgo.Robots
             Print("VWAP uses tick volume and resets at {0}:00 UTC.", VwapResetUtcHour);
             Print("Portfolio risk cap shared by label {0}: max {1} simultaneous positions, {2}% UTC-day bot drawdown.", BotLabel, MaxTotalBotPositions, PortfolioDailyLossPercent);
             Print("Exit: confirmed candle close across EMA {0}; ATR stop always protects trades.", EmaPeriod);
+            Print("V5 HARD RISK GUARD: minimum volume is blocked if expected monetary loss exceeds budget.");
+            Print("V5 HARD RISK GUARD: {0:P0} risk utilisation plus spread/ATR execution buffer.", RiskBudgetUtilisation);
             if (TimeFrame != TimeFrame.Minute3)
                 Print("NOTICE: video uses M3; current chart timeframe is {0}.", TimeFrame);
             if (!EnableTrading)
@@ -275,19 +283,72 @@ namespace cAlgo.Robots
                 return;
             double? takeProfitPips = UseFixedTakeProfit ? stopPips * RewardRiskRatio : (double?)null;
 
-            double rawVolume = Symbol.VolumeForProportionalRisk(
-                ProportionalAmountType.Equity, _profileRiskPercent, stopPips, RoundingMode.Down);
-            if (double.IsNaN(rawVolume) || double.IsInfinity(rawVolume) || rawVolume <= 0)
+            // HARD RISK CAP: a broker may only support a minimum volume (e.g. 1 oz
+            // of gold) that is far larger than the intended cash risk on a small
+            // account. Never allow volume rounding to bypass the cash budget.
+            // Effective risk pips is deliberately greater than the nominal SL
+            // to reserve for spread and some adverse execution. Gaps can still
+            // exceed this estimate; there are no guaranteed risk ceilings.
+            double riskDistancePips = stopPips + spreadPips + atrPips * SlippageAtrBufferFraction;
+            if (!MathEdgeRiskMath.IsFinitePositive(riskDistancePips))
                 return;
 
-            double volume = Symbol.NormalizeVolumeInUnits(
-                Math.Min(rawVolume, Symbol.VolumeInUnitsMax), RoundingMode.Down);
-            if (volume < Symbol.VolumeInUnitsMin)
+            double budgetCash = GetAvailableTradeRiskCash();
+            if (!MathEdgeRiskMath.IsFinitePositive(budgetCash))
             {
-                Print("Signal skipped: risk budget below broker minimum volume.");
+                Print("V5 SKIP {0}: no cash risk budget remaining today.", SymbolName);
                 return;
             }
 
+            double minimumVolume = Symbol.VolumeInUnitsMin;
+            double minimumCashRisk = Symbol.AmountRisked(minimumVolume, riskDistancePips);
+            if (!MathEdgeRiskMath.EstimatedLossWithinBudget(minimumCashRisk, budgetCash))
+            {
+                Print("V5 SKIP {0}: broker minimum {1} units costs estimated {2:F2} {3}, budget {4:F2}. No forced minimum order.",
+                    SymbolName, minimumVolume, minimumCashRisk, Account.Asset.Name, budgetCash);
+                return;
+            }
+
+            double rawVolume = Symbol.VolumeForProportionalRisk(
+                ProportionalAmountType.Equity, _profileRiskPercent, riskDistancePips, RoundingMode.Down);
+            if (!MathEdgeRiskMath.IsFinitePositive(rawVolume))
+            {
+                Print("V5 SKIP: invalid risk-proportional volume.");
+                return;
+            }
+
+            double volume = Symbol.NormalizeVolumeInUnits(
+                Math.Min(rawVolume, Symbol.VolumeInUnitsMax), RoundingMode.Down);
+            if (volume < minimumVolume)
+            {
+                Print("V5 SKIP {0}: calculated {1} units under broker minimum {2}.",
+                    SymbolName, volume, minimumVolume);
+                return;
+            }
+
+            double cashRisk = Symbol.AmountRisked(volume, riskDistancePips);
+            if (!MathEdgeRiskMath.EstimatedLossWithinBudget(cashRisk, budgetCash))
+            {
+                // Recalculate with a lower volume rather than clamping upward.
+                if (!MathEdgeRiskMath.IsFinitePositive(cashRisk))
+                    return;
+                double lowerTarget = volume * budgetCash / cashRisk * 0.995;
+                volume = Symbol.NormalizeVolumeInUnits(lowerTarget, RoundingMode.Down);
+                if (volume < minimumVolume)
+                {
+                    Print("V5 SKIP: safe volume would fall below broker minimum.");
+                    return;
+                }
+                cashRisk = Symbol.AmountRisked(volume, riskDistancePips);
+                if (!MathEdgeRiskMath.EstimatedLossWithinBudget(cashRisk, budgetCash))
+                {
+                    Print("V5 SKIP: requested order risk {0:F2} exceeds available {1:F2}.", cashRisk, budgetCash);
+                    return;
+                }
+            }
+
+            Print("V5 PRE-ORDER {0}: volume {1}, stop {2:F1}p, risk estimate {3:F2} {4}, allowed {5:F2}.",
+                SymbolName, volume, stopPips, cashRisk, Account.Asset.Name, budgetCash);
             double margin = Symbol.GetEstimatedMargin(direction, volume);
             if (double.IsNaN(margin) || double.IsInfinity(margin) || margin > Account.FreeMargin)
             {
@@ -428,6 +489,33 @@ namespace cAlgo.Robots
                        _realizedToday, symbolOpenPnl, baseline, _profileDailyLossLimit) ||
                    MathEdgeRiskMath.DailyLossReached(
                        _portfolioRealizedToday, portfolioOpenPnl, baseline, PortfolioDailyLossPercent);
+        }
+
+        private double GetAvailableTradeRiskCash()
+        {
+            // Cross-market limits cover all instances sharing BotLabel.
+            // Reuse the same pessimistic baseline used to enforce the daily stop.
+            double reference = Math.Min(Account.Equity, Account.Balance);
+            if (!MathEdgeRiskMath.IsFinitePositive(reference))
+                return 0;
+
+            double symbolPnl = _realizedToday;
+            foreach (var position in Positions.FindAll(BotLabel, SymbolName))
+                symbolPnl += position.NetProfit;
+
+            double portfolioPnl = _portfolioRealizedToday;
+            foreach (var position in Positions.FindAll(BotLabel))
+                portfolioPnl += position.NetProfit;
+
+            double symbolRemaining = MathEdgeRiskMath.RemainingDailyCash(
+                reference, _profileDailyLossLimit, symbolPnl);
+            double portfolioRemaining = MathEdgeRiskMath.RemainingDailyCash(
+                reference, PortfolioDailyLossPercent, portfolioPnl);
+
+            return MathEdgeRiskMath.CashRiskAllowance(
+                Account.Equity, _profileRiskPercent,
+                Math.Min(symbolRemaining, portfolioRemaining),
+                RiskBudgetUtilisation);
         }
 
         private void CloseOwnPositions()
