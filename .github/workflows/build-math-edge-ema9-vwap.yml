@@ -1,7 +1,7 @@
 name: Build MATH EDGE EMA9 VWAP
 on:
   push:
-    branches: [math-edge-ema9-vwap-20261026, math-edge-ema9-vwap-video-v2-20261026, math-edge-multi-market-v3-20261026, math-edge-multi-market-v4-20261026]
+    branches: [math-edge-ema9-vwap-20261026, math-edge-ema9-vwap-video-v2-20261026, math-edge-multi-market-v3-20261026, math-edge-multi-market-v4-20261026, math-edge-multi-market-v5-risk-guard-20261026]
     paths:
       - 'MATH_EDGE_EMA9_VWAP/**'
       - 'MATH_EDGE_TESTS/**'
@@ -28,11 +28,11 @@ jobs:
           mkdir -p ready
           algo=$(find MATH_EDGE_EMA9_VWAP/bin/Release -type f -name '*.algo' -print -quit)
           test -n "$algo"
-          cp "$algo" ready/MATH_EDGE_MULTI_MARKET_V4.algo
-          test -s ready/MATH_EDGE_MULTI_MARKET_V4.algo
-          sha256sum ready/MATH_EDGE_MULTI_MARKET_V4.algo
+          cp "$algo" ready/MATH_EDGE_MULTI_MARKET_V5_SAFE.algo
+          test -s ready/MATH_EDGE_MULTI_MARKET_V5_SAFE.algo
+          sha256sum ready/MATH_EDGE_MULTI_MARKET_V5_SAFE.algo
       - uses: actions/upload-artifact@v4
         with:
-          name: MATH_EDGE_MULTI_MARKET_V4_algo
-          path: ready/MATH_EDGE_MULTI_MARKET_V4.algo
+          name: MATH_EDGE_MULTI_MARKET_V5_SAFE_algo
+          path: ready/MATH_EDGE_MULTI_MARKET_V5_SAFE.algo
           if-no-files-found: error
