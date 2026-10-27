@@ -41,6 +41,12 @@ namespace cAlgo.Robots
         [Parameter("Risk % of equity / trade", DefaultValue = 0.5, MinValue = 0.01, MaxValue = 3, Group = "03 - Risk")]
         public double RiskPercent { get; set; }
 
+        [Parameter("Show reason for no trades", DefaultValue = true, Group = "00 - Diagnostics")]
+        public bool ShowTradeDiagnostics { get; set; }
+
+        [Parameter("Diagnostic interval minutes", DefaultValue = 15, MinValue = 5, MaxValue = 120, Group = "00 - Diagnostics")]
+        public int DiagnosticIntervalMinutes { get; set; }
+
         [Parameter("Risk budget utilisation (0.85 = 85%)", DefaultValue = 0.85, MinValue = 0.50, MaxValue = 0.95, Group = "03 - Risk")]
         public double RiskBudgetUtilisation { get; set; }
 
@@ -127,6 +133,9 @@ namespace cAlgo.Robots
 
             Positions.Closed += OnBotPositionClosed;
             ResetDayIfNeeded();
+            if (ShowTradeDiagnostics)
+                Timer.Start(TimeSpan.FromMinutes(DiagnosticIntervalMinutes));
+
             Print("MATH EDGE EMA/VWAP: {0}, timeframe={1}, enabled={2}", SymbolName, TimeFrame, EnableTrading);
             Print("VWAP uses tick volume and resets at {0}:00 UTC.", VwapResetUtcHour);
             Print("Portfolio risk cap shared by label {0}: max {1} simultaneous positions, {2}% UTC-day bot drawdown.", BotLabel, MaxTotalBotPositions, PortfolioDailyLossPercent);
@@ -137,6 +146,12 @@ namespace cAlgo.Robots
                 Print("NOTICE: video uses M3; current chart timeframe is {0}.", TimeFrame);
             if (!EnableTrading)
                 Print("SAFETY MODE: automatic orders are disabled.");
+            ReportEntryReadiness("START");
+        }
+
+        protected override void OnTimer()
+        {
+            ReportEntryReadiness("PERIODIC");
         }
 
         protected override void OnStop()
@@ -209,7 +224,11 @@ namespace cAlgo.Robots
             double vwapCurrent = CalculateSessionVwap(current);
             double vwapPrevious = CalculateSessionVwap(previous);
             if (double.IsNaN(vwapCurrent) || double.IsNaN(vwapPrevious))
+            {
+                if (ShowTradeDiagnostics && current % 20 == 0)
+                    Print("V6 NO ENTRY: session VWAP unavailable; load more M3 price history covering session start.");
                 return;
+            }
 
             double atrPrice = _atr.Result.Last(0);
             if (double.IsNaN(atrPrice) || double.IsInfinity(atrPrice) || atrPrice <= 0)
@@ -235,11 +254,23 @@ namespace cAlgo.Robots
             bool buy = buyCross || approachingBuy;
             bool sell = sellCross || approachingSell;
             if (buy == sell)
+            {
+                if (ShowTradeDiagnostics && current % 20 == 0)
+                    Print("V6 WAIT: no confirmed EMA9/VWAP cross on latest completed {0} bar; EMA={1:F3}, VWAP={2:F3}, Close={3:F3}.",
+                        TimeFrame, emaCurrent, vwapCurrent, close);
                 return;
+            }
 
             TradeType direction = buy ? TradeType.Buy : TradeType.Sell;
+            if (ShowTradeDiagnostics)
+                Print("V6 SIGNAL: {0} {1} on completed candle (cross={2}, early={3}).",
+                    SymbolName, direction, buyCross || sellCross, approachingBuy || approachingSell);
             if (!EnableTrading || _dayBlocked || LossLimitReached() || !PassesOptionalH1Trend(direction))
+            {
+                if (ShowTradeDiagnostics)
+                    ReportEntryReadiness("SIGNAL BLOCKED");
                 return;
+            }
 
             if (ExitOnReverse)
             {
@@ -489,6 +520,80 @@ namespace cAlgo.Robots
                        _realizedToday, symbolOpenPnl, baseline, _profileDailyLossLimit) ||
                    MathEdgeRiskMath.DailyLossReached(
                        _portfolioRealizedToday, portfolioOpenPnl, baseline, PortfolioDailyLossPercent);
+        }
+
+        private void ReportEntryReadiness(string reason)
+        {
+            if (!ShowTradeDiagnostics)
+                return;
+
+            ResetDayIfNeeded();
+            double equity = Account.Equity;
+            double budget = GetAvailableTradeRiskCash();
+
+            Print("V6 STATUS [{0}] UTC={1:yyyy-MM-dd HH:mm}, symbol={2}, equity={3:F2} {4}, risk={5:F2}%, cashBudget={6:F2}, brokerMinUnits={7}, ordersEnabled={8}, blockedToday={9}.",
+                reason, Server.Time, SymbolName, equity, Account.Asset.Name,
+                _profileRiskPercent, budget, Symbol.VolumeInUnitsMin, EnableTrading,
+                _dayBlocked || LossLimitReached());
+
+            if (!EnableTrading)
+            {
+                Print("V6 NO TRADES: 'Enable automatic orders' is false. Changing the cBot setting is required.");
+                return;
+            }
+            if (_dayBlocked || LossLimitReached())
+            {
+                Print("V6 NO TRADES: daily realized/open losses for bot label '{0}' exceeded a symbol or portfolio loss threshold. Trading will not resume until the next UTC day if losses do not continue.",
+                    BotLabel);
+                return;
+            }
+            if (Bars.Count < Math.Max(EmaPeriod, AtrPeriod) + 5)
+            {
+                Print("V6 NO TRADES: only {0} chart bars loaded; insufficient EMA/ATR history.", Bars.Count);
+                return;
+            }
+
+            double atrPrice = _atr.Result.Last(1); // latest completed bar, diagnostics only
+            if (!MathEdgeRiskMath.IsFinitePositive(atrPrice) || !MathEdgeRiskMath.IsFinitePositive(Symbol.PipSize))
+            {
+                Print("V6 NO TRADES: ATR or PipSize unavailable; check price stream.");
+                return;
+            }
+
+            double atrPips = atrPrice / Symbol.PipSize;
+            double spreadPips = Symbol.Spread / Symbol.PipSize;
+            double stopPips = Math.Max(_profileMinStopPips, atrPips * Math.Min(AtrStopMultiplier, MaxAtrStopMultiplier));
+            double riskDistancePips = stopPips + spreadPips + atrPips * SlippageAtrBufferFraction;
+            double minCashRisk = Symbol.AmountRisked(Symbol.VolumeInUnitsMin, riskDistancePips);
+
+            Print("V6 MINIMUM-COST CHECK: {0}: broker minimum={1} units; stop={2:F1} pips; spread={3:F1} pips; estimated min-volume cash risk={4:F2} {5}; allowed cash risk={6:F2}.",
+                SymbolName, Symbol.VolumeInUnitsMin, stopPips, spreadPips, minCashRisk,
+                Account.Asset.Name, budget);
+
+            if (!MathEdgeRiskMath.EstimatedLossWithinBudget(minCashRisk, budget))
+            {
+                Print("V6 NO TRADES: smallest {0} order exceeds this account's cash risk limit. A different smaller-contract instrument, broker minimum, or larger account is required; NEVER force volume upward.",
+                    SymbolName);
+                return;
+            }
+
+            if (!MathEdgeRiskMath.SpreadAcceptable(spreadPips, atrPips, MaxSpreadAtrFraction, _profileSpreadPips))
+            {
+                Print("V6 NO TRADES: spread filter rejects current conditions ({0:F1} spread pips, {1:F1} ATR pips).",
+                    spreadPips, atrPips);
+                return;
+            }
+
+            if (CountEntriesToday() >= MaxEntriesPerDay ||
+                CountPortfolioEntriesToday() >= MaxTotalEntriesPerDay ||
+                Positions.FindAll(BotLabel).Length >= MaxTotalBotPositions)
+            {
+                Print("V6 NO TRADES: daily order-count / concurrent-position ceiling has been reached.");
+                return;
+            }
+
+            // Passing these gates is not a signal; do not force entry.
+            Print("V6 READY: risk and spread filters currently pass; awaiting confirmed EMA9/VWAP signal on {0}.", TimeFrame);
         }
 
         private double GetAvailableTradeRiskCash()
