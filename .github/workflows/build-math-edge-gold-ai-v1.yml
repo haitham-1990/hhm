@@ -17,20 +17,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup .NET 8
+      - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Build cTrader Automate project
+      - name: Build cTrader Automate project (.NET 6 target)
         run: dotnet build MATH_EDGE_GOLD_AI_V1/MATH_EDGE_GOLD_AI_V1.csproj -c Release -p:IncludeSource=True -p:AlgoPublish=False
-      - name: Verify cTrader ALGO file
+      - name: Name and inspect ALGO package
         shell: bash
         run: |
-          find MATH_EDGE_GOLD_AI_V1 -type f -name '*.algo' -print
-          test -n "$(find MATH_EDGE_GOLD_AI_V1 -type f -name '*.algo' -print -quit)"
+          set -euo pipefail
+          output="$(find MATH_EDGE_GOLD_AI_V1 -type f -name '*.algo' -print -quit)"
+          test -n "$output"
+          cp "$output" MATH_EDGE_GOLD_AI_V1.algo
+          python3 - <<'PY'
+          from pathlib import Path
+          import zlib, json
+          data = Path('MATH_EDGE_GOLD_AI_V1.algo').read_bytes()
+          assert data[:4] == b'algo', 'Invalid cTrader ALGO header'
+          pos = data.find(b'\x1f\x8b', 4)
+          assert pos > 4, 'No compressed metadata payload'
+          inflater = zlib.decompressobj(wbits=31)
+          meta = json.loads(inflater.decompress(data[pos:]).decode('utf-8'))
+          assert meta.get('TargetFramework') == 'net6.0'
+          assert any(t.get('TypeName') == 'cAlgo.Robots.MathEdgeGoldAiV1' for t in meta.get('Types', [])), 'Unexpected cBot type'
+          print('Verified compiled cTrader ALGO:', len(data), 'bytes, bot=MathEdgeGoldAiV1')
+          PY
       - name: Upload compiled ALGO
         uses: actions/upload-artifact@v4
         with:
           name: MATH_EDGE_GOLD_AI_V1_ALGO
-          path: MATH_EDGE_GOLD_AI_V1/**/*.algo
+          path: MATH_EDGE_GOLD_AI_V1.algo
           if-no-files-found: error
