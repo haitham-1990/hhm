@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>MATH_EDGE_GOLD_AI_V1</AssemblyName>
+    <AlgoName>MATH_EDGE_GOLD_AI_V1</AlgoName>
+    <AlgoBuild>True</AlgoBuild>
+    <AlgoPublish>False</AlgoPublish>
+    <IncludeSource>True</IncludeSource>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="cTrader.Automate" Version="1.0.21" />
+  </ItemGroup>
+</Project>

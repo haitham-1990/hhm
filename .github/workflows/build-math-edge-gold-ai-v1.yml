@@ -1,0 +1,36 @@
+name: Build MATH EDGE GOLD AI V1 ALGO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'MATH_EDGE_GOLD_AI_V1/**'
+      - '.github/workflows/build-math-edge-gold-ai-v1.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build cTrader Automate project
+        run: dotnet build MATH_EDGE_GOLD_AI_V1/MATH_EDGE_GOLD_AI_V1.csproj -c Release -p:IncludeSource=True -p:AlgoPublish=False
+      - name: Verify cTrader ALGO file
+        shell: bash
+        run: |
+          find MATH_EDGE_GOLD_AI_V1 -type f -name '*.algo' -print
+          test -n "$(find MATH_EDGE_GOLD_AI_V1 -type f -name '*.algo' -print -quit)"
+      - name: Upload compiled ALGO
+        uses: actions/upload-artifact@v4
+        with:
+          name: MATH_EDGE_GOLD_AI_V1_ALGO
+          path: MATH_EDGE_GOLD_AI_V1/**/*.algo
+          if-no-files-found: error
